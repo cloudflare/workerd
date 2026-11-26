@@ -611,6 +611,14 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
 
+int64_t SqliteDatabase::setMaxMemoryPerProcessBytes(int64_t bytes) {
+  KJ_REQUIRE(bytes >= 0, "negative limit", bytes);
+  sqlite3_int64 prior = sqlite3_hard_heap_limit64(bytes);
+  KJ_REQUIRE(prior >= 0, "SQLite could not be initialized");
+  sqlite3_soft_heap_limit64(SOFT_HEAP_LIMIT_BYTES);
+  return prior;
+}
+
 SqliteDatabase::SqliteDatabase(const Vfs& vfs,
     kj::Path path,
     kj::Maybe<kj::WriteMode> maybeMode,
@@ -1534,7 +1542,7 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // mechanism to prevent SQLite from consuming too much per-process memory. The primary mechanism
   // for limiting SQLite memory consumption is the metering done in the sqlite-metering module.
   static bool doOnce KJ_UNUSED = [hardHeapLimit = sqliteMaxMemoryPerProcessBytes]() {
-    sqlite3_soft_heap_limit64(128u << 20);
+    sqlite3_soft_heap_limit64(SOFT_HEAP_LIMIT_BYTES);
     sqlite3_hard_heap_limit64(hardHeapLimit);
     return false;
   }();

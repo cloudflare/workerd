@@ -77,6 +77,10 @@ class SqliteDatabase {
   // Allow 34 bytes of padding for V8 serialization overhead beyond the 8 MiB row limit.
   static constexpr int MAX_ROW_LENGTH = 8 * 1024 * 1024 + 34;
 
+  // SQLite's soft heap limit for the whole process, under which it frees cache. The first
+  // SqliteDatabase to open sets it, and setMaxMemoryPerProcessBytes() sets it again.
+  static constexpr int64_t SOFT_HEAP_LIMIT_BYTES = 128 << 20;
+
   class Vfs;
   class Query;
   class Statement;
@@ -120,6 +124,14 @@ class SqliteDatabase {
     uint64_t rowsWritten;
     uint64_t statementCount;
   };
+
+  // Sets SQLite's hard heap limit for the whole process, 0 for none, and returns the one it
+  // replaces. Unlike `sqliteMaxMemoryPerProcessBytes`, which only the first SqliteDatabase that a
+  // process opens applies, it applies at once, and the latest call wins. It also sets the soft heap
+  // limit again, which SQLite lowers to a lower hard limit, so that removing or raising the hard
+  // limit raises the soft one back. It initializes SQLite, so a custom allocator must already be
+  // installed.
+  static int64_t setMaxMemoryPerProcessBytes(int64_t bytes);
 
   SqliteDatabase(const Vfs& vfs,
       kj::Path path,

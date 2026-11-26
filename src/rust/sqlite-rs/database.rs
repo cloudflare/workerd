@@ -26,6 +26,64 @@ pub enum OpenMode {
     CreateWithParents,
 }
 
+/// How [`OpenOptions::open`] opens a database.
+///
+/// The options are the mode and what else workerd's `SqliteDatabase` takes when it is opened.
+/// [`OpenOptions::new`] sets only the mode, which opens the database as [`Database::open`] does.
+#[derive(Clone, Debug)]
+pub struct OpenOptions {
+    mode: OpenMode,
+    max_memory_bytes: Option<usize>,
+    error_context: Option<String>,
+}
+
+impl OpenOptions {
+    /// Options that open the database in `mode`, with no memory limit and no error context.
+    #[must_use]
+    pub const fn new(mode: OpenMode) -> Self {
+        Self {
+            mode,
+            max_memory_bytes: None,
+            error_context: None,
+        }
+    }
+
+    /// The most memory that SQLite may allocate for this database at once; an allocation past
+    /// it fails, and so does the call that made it, with `SQLITE_NOMEM`. Only the metering
+    /// allocator (`installSqliteCustomAllocator()`) counts allocations against a database, so
+    /// without it the limit does nothing.
+    #[must_use]
+    pub const fn max_memory_bytes(mut self, bytes: usize) -> Self {
+        self.max_memory_bytes = Some(bytes);
+        self
+    }
+
+    /// Text that identifies the database in its errors, such as `"id = 1234"`, appended to the
+    /// description of each error after the database is open as `"; <context>"`.
+    #[must_use]
+    pub fn error_context(mut self, context: impl Into<String>) -> Self {
+        self.error_context = Some(context.into());
+        self
+    }
+
+    /// Opens the database at `path`, relative to the VFS's directory.
+    pub fn open(&self, vfs: &Vfs, path: &str) -> Result<Database> {
+        let db = bridge::database_open(
+            vfs.get(),
+            path,
+            self.mode.into(),
+            self.max_memory_bytes.unwrap_or(usize::MAX),
+        )?;
+        if let Some(context) = &self.error_context {
+            bridge::database_set_error_context(&db, context);
+        }
+        Ok(Database(Rc::new(Inner {
+            db,
+            vfs: vfs.clone(),
+        })))
+    }
+}
+
 impl From<OpenMode> for bridge::OpenMode {
     fn from(mode: OpenMode) -> Self {
         match mode {
@@ -96,12 +154,10 @@ struct Inner {
 }
 
 impl Database {
-    /// Opens the database at `path`, relative to the VFS's directory.
+    /// Opens the database at `path`, relative to the VFS's directory, in `mode`. To set more
+    /// than the mode, use [`OpenOptions`].
     pub fn open(vfs: &Vfs, path: &str, mode: OpenMode) -> Result<Self> {
-        Ok(Self(Rc::new(Inner {
-            db: bridge::database_open(vfs.get(), path, mode.into())?,
-            vfs: vfs.clone(),
-        })))
+        OpenOptions::new(mode).open(vfs, path)
     }
 
     /// The VFS the database was opened through.

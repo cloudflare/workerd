@@ -18,6 +18,9 @@
 //! stored side by side in any order, and the connection is closed after the last of them. [`Rows`]
 //! borrow what they run on. None of them is `Send`.
 //!
+//! [`set_max_memory_per_process_bytes`] limits SQLite's memory in the whole process, and
+//! [`OpenOptions`] that of one database.
+//!
 //! # Dropping
 //!
 //! Dropping [`Rows`], a [`Statement`], the last handle of a [`Database`] or the last handle of a
@@ -31,17 +34,21 @@
 
 mod database;
 mod ffi;
+mod process;
 mod vfs;
 
 pub use database::Database;
 pub use database::OpenMode;
+pub use database::OpenOptions;
 pub use database::Param;
 pub use database::Rows;
 pub use database::Statement;
 /// workerd's C++ `SqliteDatabase::Vfs`, for another bridge to name (`type SqliteVfs =
 /// sqlite_rs::SqliteVfs;`) when C++ hands one to Rust; see [`Vfs::from_kj`].
 pub use ffi::bridge::SqliteVfs;
+pub use process::set_max_memory_per_process_bytes;
 pub use vfs::Vfs;
+pub use vfs::VfsOptions;
 
 /// The error of every fallible call: the C++ exception, with its type, description and details.
 pub type Result<T> = std::result::Result<T, cxx::KjError>;

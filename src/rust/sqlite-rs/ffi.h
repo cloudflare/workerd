@@ -32,6 +32,7 @@ namespace workerd::rust::sqlite_rs {
 
 // Defined by the generated bridge header, which includes this one.
 enum class OpenMode : uint8_t;
+struct VfsSettings;
 
 using SqliteVfs = SqliteDatabase::Vfs;
 using Statement = SqliteDatabase::Statement;
@@ -62,7 +63,8 @@ class Bindings {
 
 class Database {
  public:
-  Database(const SqliteVfs& vfs, kj::Path path, kj::Maybe<kj::WriteMode> mode);
+  Database(
+      const SqliteVfs& vfs, kj::Path path, kj::Maybe<kj::WriteMode> mode, size_t maxMemoryBytes);
   KJ_DISALLOW_COPY_AND_MOVE(Database);
 
   SqliteDatabase& get() const {
@@ -101,11 +103,18 @@ class Query {
 };
 
 // VFS
-kj::Own<SqliteVfs> vfs_new_in_memory();
-kj::Own<SqliteVfs> vfs_new_on_disk(::rust::Str path);
+VfsSettings vfs_default_settings();
+kj::Own<SqliteVfs> vfs_new_in_memory(VfsSettings settings);
+kj::Own<SqliteVfs> vfs_new_on_disk(::rust::Str path, VfsSettings settings);
+
+// Process
+// Sets SQLite's hard heap limit, 0 for none, and returns the one it replaces.
+int64_t set_max_memory_per_process_bytes(int64_t bytes);
 
 // Database
-kj::Own<Database> database_open(const SqliteVfs& vfs, ::rust::Str path, OpenMode mode);
+kj::Own<Database> database_open(
+    const SqliteVfs& vfs, ::rust::Str path, OpenMode mode, size_t maxMemoryBytes);
+void database_set_error_context(const Database& db, ::rust::Str context);
 kj::Own<Query> database_run(const Database& db, ::rust::Str sql, kj::Own<Bindings> bindings);
 kj::Own<Statement> database_prepare(const Database& db, ::rust::Str sql);
 

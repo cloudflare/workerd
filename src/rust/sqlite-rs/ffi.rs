@@ -29,6 +29,13 @@ pub mod bridge {
         CreateWithParents,
     }
 
+    /// The options of [`crate::VfsOptions`]: `SqliteDatabase::VfsOptions`'s fields.
+    #[derive(Clone, Copy, Debug)]
+    struct VfsSettings {
+        device_characteristics: i32,
+        sync: bool,
+    }
+
     unsafe extern "C++" {
         include!("workerd/rust/sqlite-rs/ffi.h");
 
@@ -40,11 +47,21 @@ pub mod bridge {
         type Bindings;
 
         // VFS
-        fn vfs_new_in_memory() -> Result<KjOwn<SqliteVfs>>;
-        fn vfs_new_on_disk(path: &str) -> Result<KjOwn<SqliteVfs>>;
+        fn vfs_default_settings() -> VfsSettings;
+        fn vfs_new_in_memory(settings: VfsSettings) -> Result<KjOwn<SqliteVfs>>;
+        fn vfs_new_on_disk(path: &str, settings: VfsSettings) -> Result<KjOwn<SqliteVfs>>;
+
+        // Process
+        fn set_max_memory_per_process_bytes(bytes: i64) -> Result<i64>;
 
         // Database
-        fn database_open(vfs: &SqliteVfs, path: &str, mode: OpenMode) -> Result<KjOwn<Database>>;
+        fn database_open(
+            vfs: &SqliteVfs,
+            path: &str,
+            mode: OpenMode,
+            max_memory_bytes: usize,
+        ) -> Result<KjOwn<Database>>;
+        fn database_set_error_context(db: &Database, context: &str);
         fn database_run(
             db: &Database,
             sql: &str,

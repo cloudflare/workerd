@@ -457,6 +457,67 @@ fn errors() {
 }
 
 #[test]
+fn max_memory_bytes_limits_the_database() {
+    const BLOB: &str = "SELECT length(randomblob(4000000));";
+    checked(|| {
+        let vfs = Vfs::in_memory().unwrap();
+        let limited = OpenOptions::new(OpenMode::Create)
+            .max_memory_bytes(1 << 20)
+            .open(&vfs, "limited.sqlite")
+            .unwrap();
+        let error = limited.run(BLOB, &[]).err().unwrap();
+        assert!(error.description().contains("out of memory"), "{error:?}");
+        // Only the allocation over the limit failed.
+        assert_eq!(limited.run("SELECT 1;", &[]).unwrap().i64(0).unwrap(), 1);
+
+        let unlimited = Database::open(&vfs, "unlimited.sqlite", OpenMode::Create).unwrap();
+        assert_eq!(unlimited.run(BLOB, &[]).unwrap().i64(0).unwrap(), 4_000_000);
+    });
+}
+
+#[test]
+fn out_of_memory_reading_a_value_is_an_error() {
+    checked(|| {
+        let vfs = Vfs::in_memory().unwrap();
+        let db = OpenOptions::new(OpenMode::Create)
+            .max_memory_bytes(1 << 20)
+            .open(&vfs, "limited.sqlite")
+            .unwrap();
+        // A zeroblob() takes no memory until it is read, which then allocates all of it. Its size
+        // comes from a table, as SQLite would copy the value of a constant expression.
+        db.run(
+            "CREATE TABLE sizes (size INTEGER); INSERT INTO sizes VALUES (2097152);",
+            &[],
+        )
+        .unwrap();
+        let rows = db
+            .run("SELECT zeroblob(size), zeroblob(size) FROM sizes;", &[])
+            .unwrap();
+        for error in [rows.blob(0).err().unwrap(), rows.text(1).err().unwrap()] {
+            assert!(error.description().contains("out of memory"), "{error:?}");
+        }
+    });
+}
+
+#[test]
+fn error_context_is_appended_to_errors() {
+    checked(|| {
+        let vfs = Vfs::in_memory().unwrap();
+        let db = OpenOptions::new(OpenMode::Create)
+            .error_context("id = 1234")
+            .open(&vfs, "db.sqlite")
+            .unwrap();
+        let error = db.run("SELECT * FROM missing;", &[]).err().unwrap();
+        assert!(error.description().contains("no such table"), "{error:?}");
+        assert!(error.description().ends_with("; id = 1234"), "{error:?}");
+
+        let plain = Database::open(&vfs, "plain.sqlite", OpenMode::Create).unwrap();
+        let error = plain.run("SELECT * FROM missing;", &[]).err().unwrap();
+        assert!(!error.description().contains("id = 1234"), "{error:?}");
+    });
+}
+
+#[test]
 fn text_with_an_embedded_nul() {
     checked(|| {
         let db = open_memory();

@@ -16,8 +16,12 @@ namespace {
 // and an empty `kj::Array` has none.
 constexpr kj::byte EMPTY_BLOB[1] = {0};
 
-kj::Own<SqliteVfs> newVfs(kj::Own<const kj::Directory> directory) {
-  return kj::heap<SqliteVfs>(*directory).attach(kj::mv(directory));
+kj::Own<SqliteVfs> newVfs(kj::Own<const kj::Directory> directory, VfsSettings settings) {
+  SqliteVfs::Options options{
+    .deviceCharacteristics = settings.device_characteristics,
+    .sync = settings.sync,
+  };
+  return kj::heap<SqliteVfs>(*directory, options).attach(kj::mv(directory));
 }
 
 kj::Maybe<kj::WriteMode> toWriteMode(OpenMode mode) {
@@ -89,8 +93,12 @@ void Bindings::addBlob(::rust::Slice<const uint8_t> value) {
   }
 }
 
-Database::Database(const SqliteVfs& vfs, kj::Path path, kj::Maybe<kj::WriteMode> mode)
-    : db(vfs, kj::mv(path), mode) {}
+Database::Database(
+    const SqliteVfs& vfs, kj::Path path, kj::Maybe<kj::WriteMode> mode, size_t maxMemoryBytes)
+    // SQLite reads a per-process limit of `kj::maxValue` as -1, which leaves its hard heap limit
+    // as it is, so the first database to open sets only the soft limit.
+    // `set_max_memory_per_process_bytes()` sets the hard one.
+    : db(vfs, kj::mv(path), mode, maxMemoryBytes, kj::maxValue) {}
 
 Query::Query(SqliteDatabase& db, kj::StringPtr sql, kj::Own<Bindings> bindingsParam)
     : bindings(kj::mv(bindingsParam)),
@@ -102,18 +110,32 @@ Query::Query(Statement& statement, kj::Own<Bindings> bindingsParam)
     : bindings(kj::mv(bindingsParam)),
       query(statement.run(bindings->asPtr())) {}
 
-kj::Own<SqliteVfs> vfs_new_in_memory() {
-  return newVfs(kj::newInMemoryDirectory(kj::systemPreciseCalendarClock()));
+VfsSettings vfs_default_settings() {
+  SqliteVfs::Options options;
+  return {.device_characteristics = options.deviceCharacteristics, .sync = options.sync};
 }
 
-kj::Own<SqliteVfs> vfs_new_on_disk(::rust::Str path) {
+kj::Own<SqliteVfs> vfs_new_in_memory(VfsSettings settings) {
+  return newVfs(kj::newInMemoryDirectory(kj::systemPreciseCalendarClock()), settings);
+}
+
+kj::Own<SqliteVfs> vfs_new_on_disk(::rust::Str path, VfsSettings settings) {
   auto filesystem = kj::newDiskFilesystem();
   auto directoryPath = filesystem->getCurrentPath().evalNative(kj::str(path));
-  return newVfs(filesystem->getRoot().openSubdir(directoryPath, kj::WriteMode::MODIFY));
+  return newVfs(filesystem->getRoot().openSubdir(directoryPath, kj::WriteMode::MODIFY), settings);
 }
 
-kj::Own<Database> database_open(const SqliteVfs& vfs, ::rust::Str path, OpenMode mode) {
-  return kj::heap<Database>(vfs, databasePath(path), toWriteMode(mode));
+int64_t set_max_memory_per_process_bytes(int64_t bytes) {
+  return SqliteDatabase::setMaxMemoryPerProcessBytes(bytes);
+}
+
+kj::Own<Database> database_open(
+    const SqliteVfs& vfs, ::rust::Str path, OpenMode mode, size_t maxMemoryBytes) {
+  return kj::heap<Database>(vfs, databasePath(path), toWriteMode(mode), maxMemoryBytes);
+}
+
+void database_set_error_context(const Database& db, ::rust::Str context) {
+  db.get().setErrorContext(kj::str(context));
 }
 
 kj::Own<Query> database_run(const Database& db, ::rust::Str sql, kj::Own<Bindings> bindings) {

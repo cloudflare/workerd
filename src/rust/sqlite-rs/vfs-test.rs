@@ -134,3 +134,57 @@ fn vfs_open_exception_during_a_step_is_sqlite_cantopen() {
         }
     });
 }
+
+// SQLITE_IOCAP_IMMUTABLE: the files never change, so SQLite opens them read-only.
+const IMMUTABLE: i32 = 0x2000;
+
+#[test]
+fn device_characteristics_reach_sqlite_in_memory() {
+    checked(|| {
+        let immutable =
+            Vfs::in_memory_with(VfsOptions::new().device_characteristics(IMMUTABLE)).unwrap();
+        let db = Database::open(&immutable, "db.sqlite", OpenMode::Create).unwrap();
+        let error = db.run("CREATE TABLE t (v TEXT);", &[]).err().unwrap();
+        assert!(error.description().contains("readonly"), "{error:?}");
+
+        let db = Database::open(&Vfs::in_memory().unwrap(), "db.sqlite", OpenMode::Create).unwrap();
+        db.run("CREATE TABLE t (v TEXT);", &[]).unwrap();
+    });
+}
+
+// On Windows, `SqliteDatabase` opens a database on disk through SQLite's own VFS, which reports
+// its own device characteristics.
+#[cfg(not(windows))]
+#[test]
+fn device_characteristics_reach_sqlite_on_disk() {
+    checked(|| {
+        let dir = temp_dir("immutable");
+        let path = dir.to_str().unwrap();
+        write_row(&Vfs::on_disk(path).unwrap(), "db.sqlite");
+
+        let immutable =
+            Vfs::on_disk_with(path, VfsOptions::new().device_characteristics(IMMUTABLE)).unwrap();
+        assert_eq!(read_row(&immutable, "db.sqlite"), "persisted");
+        let db = Database::open(&immutable, "db.sqlite", OpenMode::ReadWrite).unwrap();
+        let error = db.run("INSERT INTO t VALUES ('more');", &[]).err().unwrap();
+        assert!(error.description().contains("readonly"), "{error:?}");
+    });
+}
+
+#[test]
+fn vfs_without_sync_persists_across_reopening() {
+    checked(|| {
+        let dir = temp_dir("without-sync");
+        let path = dir.to_str().unwrap();
+        let options = VfsOptions::new().without_sync();
+        write_row(&Vfs::on_disk_with(path, options).unwrap(), "db.sqlite");
+        assert_eq!(
+            read_row(&Vfs::on_disk_with(path, options).unwrap(), "db.sqlite"),
+            "persisted"
+        );
+
+        let vfs = Vfs::in_memory_with(options).unwrap();
+        write_row(&vfs, "db.sqlite");
+        assert_eq!(read_row(&vfs, "db.sqlite"), "persisted");
+    });
+}
