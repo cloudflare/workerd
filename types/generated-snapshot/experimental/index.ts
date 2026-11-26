@@ -1263,6 +1263,15 @@ export declare abstract class Crypto {
   randomUUID(): string;
   DigestStream: typeof DigestStream;
 }
+export interface SubtleCryptoCShakeParams extends SubtleCryptoHashAlgorithm {
+  outputLength: number;
+  functionName?: ArrayBuffer | ArrayBufferView;
+  customization?: ArrayBuffer | ArrayBufferView;
+}
+export interface SubtleCryptoTurboShakeParams extends SubtleCryptoHashAlgorithm {
+  outputLength: number;
+  domainSeparation?: number;
+}
 /**
  * The **`SubtleCrypto`** interface of the Web Crypto API provides a number of low-level cryptographic functions.
  * Available only in secure contexts.
@@ -1317,7 +1326,11 @@ export declare abstract class SubtleCrypto {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/digest)
    */
   digest(
-    algorithm: string | SubtleCryptoHashAlgorithm,
+    algorithm:
+      | string
+      | SubtleCryptoHashAlgorithm
+      | SubtleCryptoCShakeParams
+      | SubtleCryptoTurboShakeParams,
     data: ArrayBuffer | ArrayBufferView,
   ): Promise<ArrayBuffer>;
   /**
@@ -1403,6 +1416,8 @@ export declare abstract class SubtleCrypto {
       | SubtleCryptoImportKeyAlgorithm
       | SubtleCryptoDeriveKeyAlgorithm
       | SubtleCryptoHashAlgorithm
+      | SubtleCryptoCShakeParams
+      | SubtleCryptoTurboShakeParams
       | SubtleCryptoEncryptAlgorithm
       | SubtleCryptoSignAlgorithm,
     length?: number | null,
@@ -1415,6 +1430,8 @@ export declare abstract class SubtleCrypto {
       | SubtleCryptoImportKeyAlgorithm
       | SubtleCryptoDeriveKeyAlgorithm
       | SubtleCryptoHashAlgorithm
+      | SubtleCryptoCShakeParams
+      | SubtleCryptoTurboShakeParams
       | SubtleCryptoEncryptAlgorithm
       | SubtleCryptoSignAlgorithm,
     additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
@@ -4453,9 +4470,27 @@ export interface TracingSpanLink {
 export declare abstract class Span {
   get isTraced(): boolean;
   spanContext(): TracingSpanContext;
-  setAttribute(key: string, value: boolean | number | string): this;
+  setAttribute(
+    key: string,
+    value:
+      | boolean
+      | number
+      | string
+      | Array<boolean | null | undefined>
+      | Array<number | null | undefined>
+      | Array<string | null | undefined>,
+  ): this;
   setAttributes(
-    attributes: Record<string, boolean | number | string | undefined>,
+    attributes: Record<
+      string,
+      | boolean
+      | number
+      | string
+      | Array<boolean | null | undefined>
+      | Array<number | null | undefined>
+      | Array<string | null | undefined>
+      | undefined
+    >,
   ): this;
   recordException(
     exception:
@@ -18722,11 +18757,11 @@ export declare namespace TailStream {
     readonly name: string;
     readonly value:
       | string
-      | string[]
+      | (string | null)[]
       | boolean
-      | boolean[]
+      | (boolean | null)[]
       | number
-      | number[]
+      | (number | null)[]
       | bigint
       | bigint[];
   }

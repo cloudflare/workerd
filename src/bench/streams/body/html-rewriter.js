@@ -6,7 +6,7 @@
 // handlers, an element handler, and a text handler, over a runtime-produced
 // body and over a JavaScript stream.
 
-import { chunkedValueStream, expectEqual, sizeLabel } from 'helpers';
+import { chunkedValueStream, expectEqual, scaled, sizeLabel } from 'helpers';
 
 // About `size` bytes of markup, made of repeated items, each with a link and
 // a paragraph. Returns the encoded document with its number of links and
@@ -85,7 +85,7 @@ async function rewrite(handler, body, expected) {
 
 export const htmlRewriter = {
   bench(b) {
-    for (const size of [4096, 65536]) {
+    for (const size of [4096, 65536].map((size) => scaled(b, size))) {
       const document = documentOf(size);
       for (const [name, handler] of Object.entries(HANDLERS)) {
         const expected = handler.expected(document);
@@ -94,11 +94,18 @@ export const htmlRewriter = {
         );
       }
     }
-    const document = documentOf(65536);
+    const size = scaled(b, 65536);
+    const document = documentOf(size);
     const handler = HANDLERS['element handler'];
     const expected = handler.expected(document);
-    b.run('element handler, 64 KiB document from a value stream', () =>
-      rewrite(handler, chunkedValueStream(document.bytes, 4096), expected)
+    b.run(
+      `element handler, ${sizeLabel(size)} document from a value stream`,
+      () =>
+        rewrite(
+          handler,
+          chunkedValueStream(document.bytes, scaled(b, 4096)),
+          expected
+        )
     );
   },
 };

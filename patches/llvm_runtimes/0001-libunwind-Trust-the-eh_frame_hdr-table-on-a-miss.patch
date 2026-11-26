@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Lapid <dan.lapid@gmail.com>
+Date: Thu, 26 Nov 2026 00:00:00 +0000
+Subject: [PATCH] [libunwind] Trust the .eh_frame_hdr table on a miss
+
+When the binary search of .eh_frame_hdr finds no FDE for a PC,
+libunwind scans all of .eh_frame for one, and it does so again on
+every such lookup, since a miss isn't cached. The linker lists every
+FDE in the table, so the scan can only confirm the miss. In a binary
+with a few hundred thousand FDEs it takes milliseconds, and it runs
+whenever a stack walk reaches code without CFI, such as a JIT's or
+hand-written assembly. libgcc's unwinder trusts the table and stops.
+
+Skip the scan when the header has a table; keep it for headers that
+have none.
+
+---
+diff --git a/libunwind/src/UnwindCursor.hpp b/libunwind/src/UnwindCursor.hpp
+--- a/libunwind/src/UnwindCursor.hpp
++++ b/libunwind/src/UnwindCursor.hpp
+@@ -1807,6 +1807,7 @@
+   typename CFI_Parser<A>::CIE_Info cieInfo;
+   bool foundFDE = false;
+   bool foundInCache = false;
++  bool searchedIndexTable = false;
+   // If compact encoding table gave offset into dwarf section, go directly there
+   if (fdeSectionOffsetHint != 0) {
+     foundFDE = CFI_Parser<A>::template findFDE<R>(
+@@ -1818,6 +1819,21 @@
+     foundFDE = EHHeaderParser<A>::template findFDE<R>(
+         _addressSpace, pc, sects.dwarf_index_section,
+         (uint32_t)sects.dwarf_index_section_length, &fdeInfo, &cieInfo);
++    if (!foundFDE) {
++      // The linker lists every FDE of .eh_frame in the .eh_frame_hdr table, so
++      // a PC the table does not cover has no FDE, as for code that was
++      // assembled without CFI. Scanning all of .eh_frame would only confirm
++      // that, and on every lookup, since misses are not cached. libgcc's
++      // unwinder trusts the table the same way.
++      typename EHHeaderParser<A>::EHHeaderInfo hdrInfo;
++      searchedIndexTable =
++          EHHeaderParser<A>::decodeEHHdr(
++              _addressSpace, sects.dwarf_index_section,
++              sects.dwarf_index_section +
++                  (uint32_t)sects.dwarf_index_section_length,
++              hdrInfo) &&
++          hdrInfo.fde_count != 0;
++    }
+   }
+ #endif
+   if (!foundFDE) {
+@@ -1831,7 +1847,7 @@
+       foundInCache = foundFDE;
+     }
+   }
+-  if (!foundFDE) {
++  if (!foundFDE && !searchedIndexTable) {
+     // Still not found, do full scan of __eh_frame section.
+     foundFDE = CFI_Parser<A>::template findFDE<R>(
+         _addressSpace, pc, sects.dwarf_section, sects.dwarf_section_length, 0,

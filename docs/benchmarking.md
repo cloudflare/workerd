@@ -125,7 +125,7 @@ handler it ran, unless given `--no-startup`. It starts copies of the Worker in n
 cold start does, and destroys each one after it starts. One untimed start goes first, then each
 start is a sample. Starts continue until there are 50 samples, or there are at least 5 and their
 `startup:total` times add up to the sampling budget (1s), so a slow Worker doesn't take minutes.
-Under `--quick` there is no untimed start and at most 5 samples.
+Under `--quick` there is no untimed start and at most 2 samples.
 
 The report has a startup group for each service, shown as `<service> (startup)`, whose cases are
 the phases of starting:

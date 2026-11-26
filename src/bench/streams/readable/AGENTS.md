@@ -3,6 +3,10 @@
 `ReadableStream` with the default controller, under both implementations.
 Suite rules: `src/bench/streams/AGENTS.md`.
 
+Under `--quick`, the `from`, `asyncIteration` and `tee` cases read a
+sixteenth as many chunks (`scaled()` in `helpers.js`), so that the
+`@smoke` tests stay fast in sanitizer and debug builds.
+
 ## Module map
 
 | Module | Group | Cases |

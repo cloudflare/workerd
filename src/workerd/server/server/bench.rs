@@ -341,7 +341,7 @@ fn to_words<A: capnp::message::Allocator>(message: &capnp::message::Builder<A>) 
 fn read_words(
     words: &[u64],
 ) -> capnp::Result<capnp::message::Reader<capnp::serialize::OwnedSegments>> {
-    let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_ne_bytes()).collect();
+    let bytes = bench_core::words_to_bytes(words);
     let options = *ReaderOptions::new().traversal_limit_in_words(None);
     capnp::serialize::read_message(bytes.as_slice(), options)
 }

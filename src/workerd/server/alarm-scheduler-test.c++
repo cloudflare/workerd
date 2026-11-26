@@ -8,12 +8,13 @@
 #include <kj/test.h>
 #include <kj/timer.h>
 
+#include <cmath>
+
 namespace workerd::server {
 namespace {
 
-// A getActor callback that must never be invoked. These tests only exercise startup migration and
-// persistence; no alarm is ever allowed to fire (the timer is never advanced), so getActor should
-// not be called.
+// A getActor callback that must never be invoked, for a scheduler whose alarms the test never lets
+// fire: it does not advance the timer to their time while the scheduler exists.
 AlarmScheduler::GetActorFn failingGetActor() {
   return [](const ActorKey&) -> kj::Own<WorkerInterface> {
     KJ_FAIL_ASSERT("getActor should not be called in this test");
@@ -326,6 +327,679 @@ KJ_TEST("AlarmScheduler preserves an alarm queued while abandonment is pending")
 
   AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
   KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
+}
+
+// The tests below pin the scheduler's state machine: retries and their backoff, alarms set or
+// deleted while a handler runs or a retry waits, and storage.
+
+using AlarmResult = WorkerInterface::AlarmResult;
+
+AlarmResult succeeded() {
+  return {.retry = false, .outcome = EventOutcome::OK};
+}
+
+AlarmResult failedCounted() {
+  return {.retry = true, .retryCountsAgainstLimit = true, .outcome = EventOutcome::EXCEPTION};
+}
+
+AlarmResult failedUncounted() {
+  return {.retry = true, .retryCountsAgainstLimit = false, .outcome = EventOutcome::EXCEPTION};
+}
+
+struct AlarmRun {
+  kj::String actorId;
+  kj::Date scheduledTime;
+  uint32_t retryCount;
+};
+
+// What the actors of a test do when the scheduler runs or abandons their alarms. runAlarm() calls
+// take the next step in order; once the steps run out, every run succeeds.
+struct ScriptedActors {
+  kj::Vector<kj::Function<kj::Promise<AlarmResult>()>> steps;
+  size_t nextStep = 0;
+  kj::Vector<AlarmRun> runs;
+  kj::Vector<kj::Date> abandons;
+  bool failAbandon = false;
+
+  void then(AlarmResult result) {
+    steps.add(
+        [result = kj::mv(result)]() mutable -> kj::Promise<AlarmResult> { return kj::mv(result); });
+  }
+
+  void thenThrow() {
+    steps.add(
+        []() -> kj::Promise<AlarmResult> { return KJ_EXCEPTION(FAILED, "test actor failed"); });
+  }
+
+  // A run that finishes when the test fulfills the returned fulfiller.
+  kj::Own<kj::PromiseFulfiller<AlarmResult>> thenHang() {
+    auto paf = kj::newPromiseAndFulfiller<AlarmResult>();
+    steps.add([promise = kj::mv(paf.promise)]() mutable { return kj::mv(promise); });
+    return kj::mv(paf.fulfiller);
+  }
+};
+
+class ScriptedWorkerInterface final: public WorkerInterface {
+ public:
+  ScriptedWorkerInterface(ScriptedActors& actors, kj::String actorId)
+      : actors(actors),
+        actorId(kj::mv(actorId)) {}
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    actors.runs.add(AlarmRun{kj::str(actorId), scheduledTime, retryCount});
+    if (actors.nextStep < actors.steps.size()) {
+      return actors.steps[actors.nextStep++]();
+    }
+    return succeeded();
+  }
+
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    actors.abandons.add(scheduledTime);
+    if (actors.failAbandon) {
+      return KJ_EXCEPTION(FAILED, "test actor failed to abandon its alarm");
+    }
+    return kj::Maybe<kj::Date>(kj::none);
+  }
+
+  kj::Promise<void> request(kj::HttpMethod,
+      kj::StringPtr,
+      const kj::HttpHeaders&,
+      kj::AsyncInputStream&,
+      kj::HttpService::Response&) override {
+    KJ_UNIMPLEMENTED("ScriptedWorkerInterface::request not used");
+  }
+  kj::Promise<void> connect(kj::StringPtr,
+      const kj::HttpHeaders&,
+      kj::AsyncIoStream&,
+      ConnectResponse&,
+      kj::HttpConnectSettings) override {
+    KJ_UNIMPLEMENTED("ScriptedWorkerInterface::connect not used");
+  }
+  kj::Promise<void> prewarm(kj::StringPtr) override {
+    KJ_UNIMPLEMENTED("ScriptedWorkerInterface::prewarm not used");
+  }
+  kj::Promise<ScheduledResult> runScheduled(kj::Date, kj::StringPtr) override {
+    KJ_UNIMPLEMENTED("ScriptedWorkerInterface::runScheduled not used");
+  }
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent>) override {
+    KJ_UNIMPLEMENTED("ScriptedWorkerInterface::customEvent not used");
+  }
+
+ private:
+  ScriptedActors& actors;
+  kj::String actorId;
+};
+
+kj::TimePoint toTimePoint(kj::Date date) {
+  return kj::origin<kj::TimePoint>() + (date - kj::UNIX_EPOCH);
+}
+
+// A scheduler over in-memory storage, with a clock and a timer that only the test moves. The timer
+// reads the same as the clock (the Unix epoch is its origin) unless a test moves them apart.
+struct SchedulerFixture {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope{loop};
+  AdjustableClock clock;
+  kj::TimerImpl timer{kj::origin<kj::TimePoint>()};
+  kj::Own<const kj::Directory> dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs{*dir};
+  kj::Path path = kj::Path({"alarms"});
+  ScriptedActors actors;
+  kj::Own<AlarmScheduler> scheduler;
+
+  ActorKey actor = ActorKey("actor"_kj, kj::none);
+  kj::Date t0 = kj::UNIX_EPOCH + 1 * kj::HOURS;
+
+  SchedulerFixture() {
+    open();
+  }
+
+  // Replaces the scheduler with a new one that loads its alarms from storage.
+  AlarmScheduler& open() {
+    scheduler = nullptr;
+    scheduler = kj::heap<AlarmScheduler>(
+        clock, timer, vfs, path.clone(), [this](const ActorKey& key) -> kj::Own<WorkerInterface> {
+      return kj::heap<ScriptedWorkerInterface>(actors, kj::str(key.actorId));
+    });
+    return *scheduler;
+  }
+
+  // Moves the clock and the timer to `time` and runs whatever becomes ready. TimerImpl fires a
+  // timer only in advanceTo(), so this repeats it for timers that tasks arm for a time already
+  // reached.
+  void advanceTo(kj::Date time) {
+    clock.setTime(time);
+    for (uint i = 0; i < 10; i++) {
+      timer.advanceTo(toTimePoint(time));
+      waitScope.poll();
+    }
+  }
+
+  // Expects the next run `delay` after `from`, within the retry jitter (up to
+  // `RETRY_JITTER_FACTOR` of the delay, added), and returns the time the test moved to, which the
+  // next backoff starts from.
+  kj::Date expectRetry(kj::Date from, kj::Duration delay) {
+    auto before = actors.runs.size();
+    advanceTo(from + delay - 1 * kj::MILLISECONDS);
+    KJ_EXPECT(actors.runs.size() == before, "retried before its backoff", delay);
+    // The scheduler's own bound: whole milliseconds, rounded down.
+    double delayMs = delay / kj::MILLISECONDS;
+    auto maxJitter =
+        static_cast<int64_t>(std::floor(AlarmScheduler::RETRY_JITTER_FACTOR * delayMs)) *
+        kj::MILLISECONDS;
+    auto latest = from + delay + maxJitter;
+    advanceTo(latest);
+    KJ_EXPECT(actors.runs.size() == before + 1, "not retried within its backoff", delay);
+    return latest;
+  }
+
+  AlarmRun& lastRun() {
+    KJ_ASSERT(actors.runs.size() > 0);
+    return actors.runs.back();
+  }
+};
+
+KJ_TEST("AlarmScheduler reports whether setAlarm() and deleteAlarm() changed storage") {
+  SchedulerFixture f;
+  KJ_EXPECT(!f.scheduler->deleteAlarm(f.actor));
+  KJ_EXPECT(f.scheduler->setAlarm(f.actor, f.t0));
+  KJ_EXPECT(f.scheduler->setAlarm(f.actor, f.t0 + 1 * kj::HOURS));
+  KJ_EXPECT(f.scheduler->deleteAlarm(f.actor));
+  KJ_EXPECT(!f.scheduler->deleteAlarm(f.actor));
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler runs a successful alarm once and deletes it") {
+  SchedulerFixture f;
+  f.scheduler->setAlarm(f.actor, f.t0);
+
+  f.advanceTo(f.t0 - 1 * kj::MILLISECONDS);
+  KJ_EXPECT(f.actors.runs.size() == 0);
+
+  f.advanceTo(f.t0);
+  KJ_ASSERT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.lastRun().actorId == "actor"_kj);
+  KJ_EXPECT(f.lastRun().scheduledTime == f.t0);
+  KJ_EXPECT(f.lastRun().retryCount == 0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+
+  f.advanceTo(f.t0 + 1 * kj::DAYS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.open().getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler runs an alarm that came due while it was not running at startup") {
+  SchedulerFixture f;
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.scheduler = nullptr;
+
+  // An alarm waits on the timer for its time less the clock's, so one already due runs without
+  // the timer moving: the timer stays at its origin, an hour before the alarm.
+  f.clock.setTime(f.t0 + 1 * kj::HOURS);
+  f.open();
+  for (uint i = 0; i < 10; i++) {
+    f.timer.advanceTo(f.timer.now());
+    f.waitScope.poll();
+  }
+  KJ_ASSERT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.lastRun().scheduledTime == f.t0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler waits for the clock when the timer fires before the scheduled time") {
+  SchedulerFixture f;
+  f.scheduler->setAlarm(f.actor, f.t0);
+
+  // The timer reaches the scheduled time while the clock is 5 seconds behind it: the scheduler
+  // waits another 5 seconds on the timer.
+  f.clock.setTime(f.t0 - 5 * kj::SECONDS);
+  for (uint i = 0; i < 10; i++) {
+    f.timer.advanceTo(toTimePoint(f.t0));
+    f.waitScope.poll();
+  }
+  KJ_EXPECT(f.actors.runs.size() == 0);
+
+  f.clock.setTime(f.t0);
+  f.timer.advanceTo(toTimePoint(f.t0 + 5 * kj::SECONDS - 1 * kj::MILLISECONDS));
+  f.waitScope.poll();
+  KJ_EXPECT(f.actors.runs.size() == 0);
+
+  f.timer.advanceTo(toTimePoint(f.t0 + 5 * kj::SECONDS));
+  f.waitScope.poll();
+  KJ_EXPECT(f.actors.runs.size() == 1);
+}
+
+KJ_TEST("AlarmScheduler reschedules a waiting alarm when it is set again") {
+  SchedulerFixture f;
+
+  // Later.
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.scheduler->setAlarm(f.actor, f.t0 + 1 * kj::HOURS);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == f.t0 + 1 * kj::HOURS);
+  f.advanceTo(f.t0);
+  KJ_EXPECT(f.actors.runs.size() == 0);
+  f.advanceTo(f.t0 + 1 * kj::HOURS);
+  KJ_ASSERT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.lastRun().scheduledTime == f.t0 + 1 * kj::HOURS);
+
+  // Earlier.
+  auto t1 = f.t0 + 2 * kj::HOURS;
+  f.scheduler->setAlarm(f.actor, t1 + 1 * kj::HOURS);
+  f.scheduler->setAlarm(f.actor, t1);
+  f.advanceTo(t1);
+  KJ_ASSERT(f.actors.runs.size() == 2);
+  KJ_EXPECT(f.lastRun().scheduledTime == t1);
+  f.advanceTo(t1 + 2 * kj::HOURS);
+  KJ_EXPECT(f.actors.runs.size() == 2);
+}
+
+KJ_TEST("AlarmScheduler never runs a waiting alarm that was deleted") {
+  SchedulerFixture f;
+  f.scheduler->setAlarm(f.actor, f.t0);
+  KJ_EXPECT(f.scheduler->deleteAlarm(f.actor));
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+  f.advanceTo(f.t0 + 1 * kj::DAYS);
+  KJ_EXPECT(f.actors.runs.size() == 0);
+  KJ_EXPECT(f.open().getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler retries counted failures with exponential backoff, then abandons") {
+  SchedulerFixture f;
+  constexpr uint MAX_TRIES = AlarmScheduler::RETRY_MAX_TRIES;
+  for (uint i = 0; i <= MAX_TRIES; i++) {
+    f.actors.then(failedCounted());
+  }
+  f.scheduler->setAlarm(f.actor, f.t0);
+
+  f.advanceTo(f.t0);
+  KJ_ASSERT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.lastRun().retryCount == 0);
+
+  // Retries 2, 4, 8, 16, 32 and 64 seconds apart, each told how many counted retries came before.
+  auto now = f.t0;
+  for (uint i = 0; i < MAX_TRIES; i++) {
+    now = f.expectRetry(now, (AlarmScheduler::RETRY_START_SECONDS << i) * kj::SECONDS);
+    KJ_EXPECT(f.lastRun().scheduledTime == f.t0);
+    KJ_EXPECT(f.lastRun().retryCount == i + 1);
+  }
+
+  // The seventh failure exhausts the retries: the actor is told, and the alarm is gone.
+  KJ_ASSERT(f.actors.abandons.size() == 1);
+  KJ_EXPECT(f.actors.abandons[0] == f.t0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+  f.advanceTo(now + 1 * kj::DAYS);
+  KJ_EXPECT(f.actors.runs.size() == MAX_TRIES + 1);
+  KJ_EXPECT(f.open().getAlarm(f.actor) == kj::none);
+}
+
+// Once the counted retries are used up, any failure that asks for a retry abandons the alarm, even
+// one that would not count against the limit.
+void expectAbandonedAtLimitBy(kj::FunctionParam<void(ScriptedActors&)> addLastFailure) {
+  SchedulerFixture f;
+  constexpr uint MAX_TRIES = AlarmScheduler::RETRY_MAX_TRIES;
+  for (uint i = 0; i < MAX_TRIES; i++) {
+    f.actors.then(failedCounted());
+  }
+  addLastFailure(f.actors);
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+
+  auto now = f.t0;
+  for (uint i = 0; i < MAX_TRIES; i++) {
+    now = f.expectRetry(now, (AlarmScheduler::RETRY_START_SECONDS << i) * kj::SECONDS);
+    KJ_EXPECT(f.lastRun().retryCount == i + 1);
+  }
+
+  KJ_EXPECT(f.actors.abandons.size() == 1);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+  f.advanceTo(now + 1 * kj::DAYS);
+  KJ_EXPECT(f.actors.runs.size() == MAX_TRIES + 1);
+  KJ_EXPECT(f.open().getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler abandons an uncounted failure once the counted retries are used up") {
+  expectAbandonedAtLimitBy([](ScriptedActors& actors) { actors.then(failedUncounted()); });
+}
+
+KJ_TEST("AlarmScheduler abandons a run that threw once the counted retries are used up") {
+  expectAbandonedAtLimitBy([](ScriptedActors& actors) { actors.thenThrow(); });
+}
+
+KJ_TEST("AlarmScheduler retries uncounted failures without limit, backing off up to 1024 seconds") {
+  SchedulerFixture f;
+  constexpr uint RETRIES = 12;
+  for (uint i = 0; i < RETRIES; i++) {
+    f.actors.then(failedUncounted());
+  }
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+
+  auto now = f.t0;
+  for (uint i = 0; i < RETRIES; i++) {
+    auto shift = kj::min(i, static_cast<uint>(AlarmScheduler::RETRY_BACKOFF_MAX));
+    now = f.expectRetry(now, (AlarmScheduler::RETRY_START_SECONDS << shift) * kj::SECONDS);
+    KJ_EXPECT(f.lastRun().retryCount == 0);
+  }
+
+  // The last run succeeded.
+  KJ_EXPECT(f.actors.abandons.size() == 0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler retries an alarm whose run threw, without counting it") {
+  SchedulerFixture f;
+  f.actors.thenThrow();
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  KJ_ASSERT(f.actors.runs.size() == 1);
+
+  f.expectRetry(f.t0, AlarmScheduler::RETRY_START_SECONDS * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().retryCount == 0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler resets the backoff when a counted failure follows uncounted ones") {
+  SchedulerFixture f;
+  f.actors.then(failedUncounted());
+  f.actors.then(failedUncounted());
+  f.actors.then(failedCounted());
+  f.actors.then(failedCounted());
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+
+  auto now = f.expectRetry(f.t0, 2 * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().retryCount == 0);
+  now = f.expectRetry(now, 4 * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().retryCount == 0);
+  // The first counted failure starts the backoff over.
+  now = f.expectRetry(now, 2 * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().retryCount == 1);
+  now = f.expectRetry(now, 4 * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().retryCount == 2);
+
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler resets the backoff on every switch from uncounted to counted failures") {
+  SchedulerFixture f;
+  f.actors.then(failedCounted());
+  f.actors.then(failedUncounted());
+  f.actors.then(failedCounted());
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+
+  auto now = f.expectRetry(f.t0, 2 * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().retryCount == 1);
+  // An uncounted failure after a counted one continues the backoff.
+  now = f.expectRetry(now, 4 * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().retryCount == 1);
+  // The next counted failure starts it over.
+  now = f.expectRetry(now, 2 * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().retryCount == 2);
+
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler deletes, without abandoning, a failed run that asks for no retry") {
+  SchedulerFixture f;
+  f.actors.then(AlarmResult{.retry = false, .outcome = EventOutcome::EXCEPTION});
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.actors.abandons.size() == 0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+
+  f.advanceTo(f.t0 + 1 * kj::DAYS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.open().getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler runs an alarm queued for the same time again after the handler") {
+  SchedulerFixture f;
+  auto run = f.actors.thenHang();
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  f.scheduler->setAlarm(f.actor, f.t0);
+
+  run->fulfill(succeeded());
+  f.advanceTo(f.t0);
+  KJ_ASSERT(f.actors.runs.size() == 2);
+  KJ_EXPECT(f.actors.runs[0].scheduledTime == f.t0);
+  KJ_EXPECT(f.actors.runs[1].scheduledTime == f.t0);
+  KJ_EXPECT(f.actors.runs[1].retryCount == 0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler does not retry a run that asks for a retry but succeeded") {
+  SchedulerFixture f;
+  f.actors.then(
+      AlarmResult{.retry = true, .retryCountsAgainstLimit = true, .outcome = EventOutcome::OK});
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+  f.advanceTo(f.t0 + 1 * kj::DAYS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.open().getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler queues an alarm set while the handler runs, even for the same time") {
+  SchedulerFixture f;
+  auto run = f.actors.thenHang();
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  KJ_ASSERT(f.actors.runs.size() == 1);
+
+  // A running alarm is not reported; only one queued behind it is, and a later set replaces it.
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+  f.scheduler->setAlarm(f.actor, f.t0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == f.t0);
+  f.scheduler->setAlarm(f.actor, f.t0 + 1 * kj::HOURS);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == f.t0 + 1 * kj::HOURS);
+
+  run->fulfill(succeeded());
+  f.advanceTo(f.t0);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == f.t0 + 1 * kj::HOURS);
+
+  f.advanceTo(f.t0 + 1 * kj::HOURS);
+  KJ_ASSERT(f.actors.runs.size() == 2);
+  KJ_EXPECT(f.lastRun().scheduledTime == f.t0 + 1 * kj::HOURS);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler runs a queued alarm instead of retrying the failed one") {
+  SchedulerFixture f;
+  auto run = f.actors.thenHang();
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  f.scheduler->setAlarm(f.actor, f.t0 + 1 * kj::MINUTES);
+
+  run->fulfill(failedCounted());
+  f.advanceTo(f.t0 + 3 * kj::SECONDS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == f.t0 + 1 * kj::MINUTES);
+
+  f.advanceTo(f.t0 + 1 * kj::MINUTES);
+  KJ_ASSERT(f.actors.runs.size() == 2);
+  KJ_EXPECT(f.lastRun().scheduledTime == f.t0 + 1 * kj::MINUTES);
+  KJ_EXPECT(f.lastRun().retryCount == 0);
+}
+
+KJ_TEST("AlarmScheduler runs a queued alarm for the same time instead of retrying the failed one") {
+  SchedulerFixture f;
+  auto run = f.actors.thenHang();
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  f.scheduler->setAlarm(f.actor, f.t0);
+
+  run->fulfill(failedCounted());
+  f.advanceTo(f.t0);
+  KJ_ASSERT(f.actors.runs.size() == 2);
+  KJ_EXPECT(f.lastRun().scheduledTime == f.t0);
+  KJ_EXPECT(f.lastRun().retryCount == 0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler deletes only the queued alarm while the handler runs") {
+  SchedulerFixture f;
+  auto run = f.actors.thenHang();
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  f.scheduler->setAlarm(f.actor, f.t0 + 1 * kj::HOURS);
+
+  KJ_EXPECT(f.scheduler->deleteAlarm(f.actor));
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+
+  run->fulfill(succeeded());
+  f.advanceTo(f.t0 + 2 * kj::HOURS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.open().getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler still retries an alarm deleted while its handler ran") {
+  SchedulerFixture f;
+  auto run = f.actors.thenHang();
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+
+  // The running alarm stays in memory, though its row is gone.
+  KJ_EXPECT(f.scheduler->deleteAlarm(f.actor));
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+
+  run->fulfill(failedCounted());
+  f.advanceTo(f.t0);
+  // Waiting to retry, the alarm is reported again.
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == f.t0);
+
+  f.expectRetry(f.t0, 2 * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().scheduledTime == f.t0);
+  KJ_EXPECT(f.lastRun().retryCount == 1);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+  KJ_EXPECT(f.open().getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler cancels a retry when the alarm is deleted during the backoff") {
+  SchedulerFixture f;
+  f.actors.then(failedCounted());
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == f.t0);
+
+  KJ_EXPECT(f.scheduler->deleteAlarm(f.actor));
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+  f.advanceTo(f.t0 + 1 * kj::HOURS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+}
+
+KJ_TEST("AlarmScheduler queues an alarm set during the backoff behind the retry") {
+  SchedulerFixture f;
+  f.actors.then(failedCounted());
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+
+  // During the backoff the retrying alarm is reported, not the one queued behind it, although the
+  // queued time is what storage holds.
+  auto queued = f.t0 + 10 * kj::MINUTES;
+  f.scheduler->setAlarm(f.actor, queued);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == f.t0);
+
+  f.expectRetry(f.t0, 2 * kj::SECONDS);
+  KJ_EXPECT(f.lastRun().scheduledTime == f.t0);
+  KJ_EXPECT(f.lastRun().retryCount == 1);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == queued);
+
+  f.advanceTo(queued - 1 * kj::MILLISECONDS);
+  KJ_EXPECT(f.actors.runs.size() == 2);
+  f.advanceTo(queued);
+  KJ_ASSERT(f.actors.runs.size() == 3);
+  KJ_EXPECT(f.lastRun().scheduledTime == queued);
+  KJ_EXPECT(f.lastRun().retryCount == 0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+// Deleting an alarm during its backoff, with another queued behind it, deletes the stored row and
+// cancels the retry, but schedules the queued alarm in memory only.
+KJ_TEST("AlarmScheduler runs the queued alarm when one is deleted during its backoff") {
+  SchedulerFixture f;
+  f.actors.then(failedCounted());
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  auto queued = f.t0 + 10 * kj::MINUTES;
+  f.scheduler->setAlarm(f.actor, queued);
+
+  KJ_EXPECT(f.scheduler->deleteAlarm(f.actor));
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == queued);
+
+  // No retry.
+  f.advanceTo(f.t0 + 3 * kj::SECONDS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+
+  f.advanceTo(queued - 1 * kj::MILLISECONDS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  f.advanceTo(queued);
+  KJ_ASSERT(f.actors.runs.size() == 2);
+  KJ_EXPECT(f.lastRun().scheduledTime == queued);
+  KJ_EXPECT(f.lastRun().retryCount == 0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler does not store the queued alarm when one is deleted during its backoff") {
+  SchedulerFixture f;
+  f.actors.then(failedCounted());
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  auto queued = f.t0 + 10 * kj::MINUTES;
+  f.scheduler->setAlarm(f.actor, queued);
+  KJ_EXPECT(f.scheduler->deleteAlarm(f.actor));
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == queued);
+
+  // A restart before the queued alarm's time loses it.
+  KJ_EXPECT(f.open().getAlarm(f.actor) == kj::none);
+  f.advanceTo(queued + 1 * kj::HOURS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+}
+
+KJ_TEST("AlarmScheduler keeps an alarm whose abandonment failed, but runs it only after restart") {
+  SchedulerFixture f;
+  f.actors.then(AlarmResult{.retry = false, .outcome = EventOutcome::ABORTED});
+  f.actors.failAbandon = true;
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.advanceTo(f.t0);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.actors.abandons.size() == 1);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == f.t0);
+
+  f.advanceTo(f.t0 + 1 * kj::DAYS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  KJ_EXPECT(f.actors.abandons.size() == 1);
+
+  f.open();
+  f.advanceTo(f.t0 + 1 * kj::DAYS);
+  KJ_ASSERT(f.actors.runs.size() == 2);
+  KJ_EXPECT(f.lastRun().scheduledTime == f.t0);
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler deleteAll() cancels running and waiting alarms and empties storage") {
+  SchedulerFixture f;
+  auto run = f.actors.thenHang();
+  auto other = ActorKey("other"_kj, kj::none);
+  f.scheduler->setAlarm(f.actor, f.t0);
+  f.scheduler->setAlarm(other, f.t0 + 1 * kj::HOURS);
+  f.advanceTo(f.t0);
+  KJ_ASSERT(f.actors.runs.size() == 1);
+  KJ_EXPECT(run->isWaiting());
+
+  f.scheduler->deleteAll();
+  KJ_EXPECT(!run->isWaiting());
+  KJ_EXPECT(f.scheduler->getAlarm(f.actor) == kj::none);
+  KJ_EXPECT(f.scheduler->getAlarm(other) == kj::none);
+
+  f.advanceTo(f.t0 + 1 * kj::DAYS);
+  KJ_EXPECT(f.actors.runs.size() == 1);
+  auto& reopened = f.open();
+  KJ_EXPECT(reopened.getAlarm(f.actor) == kj::none);
+  KJ_EXPECT(reopened.getAlarm(other) == kj::none);
 }
 
 }  // namespace

@@ -6,11 +6,25 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { env, platform } from 'node:process';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
 import assert from 'node:assert';
 
 assert(env.WORKERD_BINARY !== undefined, 'Set WORKERD_BINARY.');
 assert(env.REPL_CONFIG !== undefined, 'Set REPL_CONFIG.');
+
+// Each case starts workerd, which takes about two seconds under TSan, so Bazel runs the cases in
+// shards (`shard_count`): a shard runs every SHARDS-th case declared, starting at its SHARD-th.
+const SHARDS = Number(env.TEST_TOTAL_SHARDS ?? 1);
+const SHARD = Number(env.TEST_SHARD_INDEX ?? 0);
+if (env.TEST_SHARD_STATUS_FILE !== undefined) {
+  await writeFile(env.TEST_SHARD_STATUS_FILE, '');
+}
+let declared = 0;
+function test(...args) {
+  if (declared++ % SHARDS === SHARD) {
+    nodeTest(...args);
+  }
+}
 
 // A build can make the compile caches for another binary's V8 flags
 // (//build/config:compile_cache_v8_flags), and workerd then logs this warning as it starts. It

@@ -199,6 +199,9 @@ wpt_test(
         "transformstream_enable_standard_constructor",
     ],
     config = "encoding-test.ts",
+    # The shards divide the test files. Unsharded, the suite took 25 s under TSan, and 50-80 s on a
+    # slow executor.
+    shard_count = 4,
     wpt_directory = "@wpt//:encoding@module",
 )
 
@@ -216,13 +219,17 @@ wpt_test(
 
 wpt_test(
     name = "WebCryptoAPI",
-    size = "enormous",
+    size = "large",
     compat_flags = [
         "disable_fast_jsg_struct",
         "webcrypto_modern_algorithms",
     ],
     config = "WebCryptoAPI-test.ts",
     include_tentative = True,
+    # Generating RSA keys makes up most of the run time, so the shards divide the variants of
+    # generateKey/successes_RSA-*. With 8 shards, a shard took 20 s under TSan, and 40-60 s on a
+    # slow executor.
+    shard_count = 16,
     target_compatible_with = select({
         # Too slow on Windows
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -269,6 +276,9 @@ wpt_test(
         "text_decoder_cjk_decoder",
     ],
     config = "encoding-test-ts.ts",
+    # The shards divide the test files. Unsharded, the suite took 25 s under TSan, and 50-80 s on a
+    # slow executor.
+    shard_count = 4,
     wpt_directory = "@wpt//:encoding@module",
 )
 

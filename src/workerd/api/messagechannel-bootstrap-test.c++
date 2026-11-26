@@ -115,5 +115,35 @@ KJ_TEST("MessagePort loaded after EventTarget.prototype is replaced still extend
   });
 }
 
+KJ_TEST("MessagePort loads after Object.prototype gains the fields of a property descriptor") {
+  runWith(ExposeGlobals::YES, [](jsg::Lock& js) {
+    // A descriptor that inherits from Object.prototype would be invalid here, and a module
+    // that loads on first use must not call the global Object.defineProperty() either.
+    KJ_EXPECT(eval(js, R"js(
+      const { defineProperty } = Object;
+      const fields = ['get', 'set', 'value', 'writable', 'enumerable', 'configurable'];
+      for (const field of fields) {
+        defineProperty(Object.prototype, field, {
+          __proto__: null,
+          value: undefined,
+          writable: true,
+          configurable: true,
+        });
+      }
+      Object.defineProperty = () => {
+        throw new Error('the global Object.defineProperty() was called');
+      };
+      try {
+        typeof MessagePort
+      } finally {
+        Object.defineProperty = defineProperty;
+        for (const field of fields) delete Object.prototype[field];
+      }
+    )js"_kj)
+                  .strictEquals(js.str("function"_kj)));
+    KJ_EXPECT(isLoaded(js));
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

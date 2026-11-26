@@ -102,6 +102,7 @@ pub struct Run {
     end: usize,
     results: Vec<CaseResult>,
     case: Option<CaseRun>,
+    /// The case filter, or none when it selects every case.
     filter: Option<GlobFilter>,
     overhead: Option<Overhead>,
 }
@@ -343,14 +344,11 @@ fn start_cases(lock: &mut jsg::Lock<'_>, this: &jsg::Rc<BenchController>) -> jsg
             },
         );
     }
-    {
-        let mut run = controller.run.borrow_mut();
-        let filter: &[u8] = match controller.case_filter.as_slice() {
-            b"" => b"*",
-            filter => filter,
-        };
-        run.filter = Some(GlobFilter::new(filter));
-    }
+    // `*` matches every name, so it is not run: matching walks the whole name a byte at a time.
+    controller.run.borrow_mut().filter = match controller.case_filter.as_slice() {
+        b"" | b"*" => None,
+        filter => Some(GlobFilter::new(filter)),
+    };
 
     if let Some(overhead) = MEASURED_OVERHEAD.get() {
         controller.run.borrow_mut().overhead = Some(overhead);
@@ -867,9 +865,8 @@ fn settle_group(
     this: &jsg::Rc<BenchController>,
     group: &GroupResult,
 ) -> jsg::Result<()> {
-    let words = bench_core::encode_group(group)
+    let bytes = bench_core::encode_group(group)
         .map_err(|err| jsg::Error::new_internal_error(err.to_string()))?;
-    let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_ne_bytes()).collect();
     let buffer = v8::ArrayBuffer::new(lock, &bytes);
     settle(lock, this, Ok(buffer.into()))
 }
