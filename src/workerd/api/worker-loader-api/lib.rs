@@ -25,6 +25,7 @@ pub use dicts::WorkerCode;
 use frankenvalue::Frankenvalue;
 use io_context::IoContext;
 use jsg::FromJS;
+use jsg::PromiseValue;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
@@ -284,8 +285,11 @@ fn code_callback<'s>(
             ));
         };
         // `getCode()` may resolve its promise from another request: the source is made only in
-        // this `IoContext`, as C++ `awaitJs(js, promise, func)` ensures.
-        context.await_js_promise_local(lock, code, move |lock, context, code| {
+        // this `IoContext`, as C++ `awaitJs(js, promise, func)` ensures. The typed promise has
+        // already converted its value to `WorkerCode` in a reaction of its own, as in C++, so
+        // this reaction only takes it.
+        context.await_js_local(lock, code.into_raw_promise(), move |lock, context, raw| {
+            let code = <WorkerCode as PromiseValue>::from_raw(lock, raw)?;
             to_source(lock, context, state, code)
         })
     })?;
