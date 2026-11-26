@@ -1535,27 +1535,6 @@ CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
   return flags.asReader();
 }
 
-// The global outbound of a dynamic worker whose source gave it none: every request fails.
-class NullGlobalOutboundChannel final: public IoChannelFactory::SubrequestChannel {
- public:
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    JSG_FAIL_REQUIRE(Error,
-        "This worker is not permitted to access the internet via global functions like fetch(). "
-        "It must use capabilities (such as bindings in 'env') to talk to the outside world.");
-  }
-
-  // The null outbound is hard to reach: nothing normally refers to it, but a `Fetcher` for the
-  // `next` outbound pulled off an incoming `Request` points at it. Transfer is refused because
-  // nothing needs it; were it allowed, `startRequest()`'s error would mislead once transferred.
-  void requireAllowsTransfer() override {
-    JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
-  }
-  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-      IoChannelFactory::ChannelTokenUsage usage) override {
-    JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
-  }
-};
-
 // `channel` as the server stores it: the Rust object of a channel the server made, unwrapped, or
 // else the C++ channel itself, which `subrequest_channel_into_kj()` hands back unchanged.
 ::rust::Box<SubrequestChannel> subrequestChannelFromKj(
@@ -1570,15 +1549,13 @@ class NullGlobalOutboundChannel final: public IoChannelFactory::SubrequestChanne
 }
 
 // Hands a dynamic worker's channels from its fetched source to the server's table for it: the
-// global outbound (a null one when the source gave none), then the capabilities in `env`, each
-// rewritten into the channel number the server gave it.
-void indexDynamicChannels(DynamicWorkerSource& source, DynamicChannels& channels) {
-  kj::Rc<IoChannelFactory::SubrequestChannel> globalOutbound =
-      kj::mv(source.globalOutbound).orDefault([]() -> kj::Rc<IoChannelFactory::SubrequestChannel> {
-    return kj::rc<NullGlobalOutboundChannel>();
-  });
+// global outbound, if the source gave one, then the capabilities in `env`, each rewritten into
+// the channel number the server gave it.
+void indexDynamicChannels(DynamicWorkerSource& source, ChannelTable& channels) {
+  KJ_IF_SOME(globalOutbound, source.globalOutbound) {
+    channels.set_global_outbound(subrequestChannelFromKj(kj::mv(globalOutbound)));
+  }
   source.globalOutbound = kj::none;
-  channels.set_global_outbound(subrequestChannelFromKj(kj::mv(globalOutbound)));
 
   source.env.rewriteCaps([&](kj::Own<Frankenvalue::CapTableEntry> entry) {
     KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*entry)) {
@@ -1661,12 +1638,12 @@ bool supportsStartupSnapshot(kj::StringPtr name,
 
 // `factory_new_worker()`, which records the timing of each phase in the worker's
 // `startupTiming`. The isolate gets an inspector, and is registered with it, only if `registrar` is
-// given. A dynamic worker's channels go into `dynamicChannels`, which a dynamic worker must have.
+// given. A dynamic worker's channels go into `channels`.
 kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFactory,
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource,
-    kj::Maybe<DynamicChannels&> dynamicChannels,
+    ChannelTable& channels,
     kj::Maybe<InspectorServiceIsolateRegistrar&> registrar) {
   auto& factory = constFactory.getImpl();
   auto name = kj::str(spec.name);
@@ -1702,7 +1679,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
       dynamic.tails = nullptr;
       dynamic.streamingTails = nullptr;
     }
-    indexDynamicChannels(dynamic, KJ_ASSERT_NONNULL(dynamicChannels));
+    indexDynamicChannels(dynamic, channels);
     featureFlags = dynamic.compatibilityFlags;
     source = kj::mv(dynamic.source);
     compileBindings = [&env = dynamic.env](
@@ -1940,13 +1917,12 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource,
-    DynamicChannels& dynamicChannels) {
+    ChannelTable& channels) {
   auto registrar = factory.getImpl().inspectorRegistrar.map(
       [](kj::Own<InspectorServiceIsolateRegistrar>& r) -> InspectorServiceIsolateRegistrar& {
     return *r;
   });
-  return compileWorker(
-      factory, spec, configService, kj::mv(dynamicSource), dynamicChannels, registrar);
+  return compileWorker(factory, spec, configService, kj::mv(dynamicSource), channels, registrar);
 }
 
 // The copy has no inspector, even when the inspector is enabled. It couldn't be registered: it
@@ -1954,8 +1930,10 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
 // nothing can connect to would only add to the time measured.
 kj::Promise<WorkerStartupTiming> factory_start_throwaway_worker(
     const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService) {
+  // The copy is a config worker, which adds no channels, and is never linked.
+  auto scratch = channel_table_new();
   auto compiled =
-      co_await compileWorker(factory, spec, configService, kj::none, kj::none, kj::none);
+      co_await compileWorker(factory, spec, configService, kj::none, *scratch, kj::none);
   auto& impl = compiled->getImpl();
   // `worker_set_ctx_exports()` would drop the handle under the lock; nothing calls it for a copy.
   impl.getWorker().runInLockScope(Worker::Lock::TakeSynchronously(kj::none),

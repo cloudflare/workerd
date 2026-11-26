@@ -180,17 +180,24 @@ pub enum ActorClassChannel {
     Cxx(io_channels::ActorClassChannel),
 }
 
-/// A dynamic worker's channels from its source, numbered as its `env` refers to them.
+/// A worker's channel tables as they are filled, each channel numbered as it is added.
 ///
-/// `indexDynamicChannels()` (worker-factory.c++) adds them as it rewrites the capabilities in
-/// the `env` into channel numbers. The worker's `ctx.exports` is numbered after them. Empty for a
-/// config worker, whose bindings the server resolves itself.
+/// Compiling a worker gets one. For a dynamic worker, the factory adds the channels its source
+/// supplies as it rewrites the capabilities in its `env` into channel numbers
+/// (`indexDynamicChannels()` in worker-factory.c++). The server then adds the worker's own: a
+/// config worker's global outbound and bindings, and every worker's `ctx.exports`.
 #[derive(Default)]
-pub struct DynamicChannels {
-    /// The source's global outbound, or a channel that refuses every request when it gave none,
-    /// so that the worker may not reach the internet.
-    pub global_outbound: Option<SubrequestChannel>,
+pub struct ChannelTable {
+    /// What both special channels ("next" and "null") reach.
+    global_outbound: Option<SubrequestChannel>,
     /// Numbered after the global outbound's `SPECIAL_SUBREQUEST_CHANNEL_COUNT` slots.
+    subrequest: Vec<SubrequestChannel>,
+    actor_class: Vec<ActorClassChannel>,
+    rpc: Vec<io_channels::RpcChannel>,
+}
+
+/// A linked worker's channel tables, indexed by channel number.
+pub struct Tables {
     pub subrequest: Vec<SubrequestChannel>,
     pub actor_class: Vec<ActorClassChannel>,
     pub rpc: Vec<io_channels::RpcChannel>,
@@ -361,26 +368,53 @@ pub fn actor_class_channel_from_cxx(
     ))
 }
 
-#[expect(
-    clippy::boxed_local,
-    reason = "cxx passes a Rust type by value in a Box"
-)]
-impl DynamicChannels {
-    pub(crate) fn set_global_outbound(&mut self, channel: Box<SubrequestChannel>) {
+/// A new, empty [`ChannelTable`], for C++ to compile a worker that nothing links.
+#[must_use]
+pub fn channel_table_new() -> Box<ChannelTable> {
+    Box::default()
+}
+
+#[expect(clippy::boxed_local, reason = "cxx passes a Rust type in a Box")]
+impl ChannelTable {
+    /// Sets the channel both special channels reach, replacing any set before.
+    pub fn set_global_outbound(&mut self, channel: Box<SubrequestChannel>) {
         self.global_outbound = Some(*channel);
     }
-    /// Adds a channel of the `env`, returning its number.
-    pub(crate) fn add_subrequest(&mut self, channel: Box<SubrequestChannel>) -> u32 {
+    /// Adds a subrequest channel, returning its number.
+    pub fn add_subrequest(&mut self, channel: Box<SubrequestChannel>) -> u32 {
         self.subrequest.push(*channel);
         len_u32(&self.subrequest) - 1 + SPECIAL_SUBREQUEST_CHANNEL_COUNT
     }
-    pub(crate) fn add_actor_class(&mut self, channel: Box<ActorClassChannel>) -> u32 {
+    pub fn add_actor_class(&mut self, channel: Box<ActorClassChannel>) -> u32 {
         self.actor_class.push(*channel);
         len_u32(&self.actor_class) - 1
     }
-    pub(crate) fn add_rpc(&mut self, channel: KjRc<ffi::CxxRpcChannel>) -> u32 {
+    pub fn add_rpc(&mut self, channel: KjRc<ffi::CxxRpcChannel>) -> u32 {
         self.rpc.push(io_channels::RpcChannel::from_kj(channel));
         len_u32(&self.rpc) - 1
+    }
+}
+
+impl ChannelTable {
+    /// How many subrequest channels there are past the special ones.
+    pub fn subrequest_len(&self) -> u32 {
+        len_u32(&self.subrequest)
+    }
+    pub fn actor_class_len(&self) -> u32 {
+        len_u32(&self.actor_class)
+    }
+    /// The tables of the channels added, numbered as they were added.
+    pub fn finish(self) -> Result<Tables> {
+        let global = self
+            .global_outbound
+            .ok_or_else(|| kj::failed!("the channel table has no global outbound"))?;
+        let mut subrequest = vec![global; SPECIAL_SUBREQUEST_CHANNEL_COUNT as usize];
+        subrequest.extend(self.subrequest);
+        Ok(Tables {
+            subrequest,
+            actor_class: self.actor_class,
+            rpc: self.rpc,
+        })
     }
 }
 
@@ -414,3 +448,7 @@ impl WorkerInterfaceList {
             .ok_or_else(|| kj::failed!("tail worker {index} already taken"))
     }
 }
+
+#[cfg(test)]
+#[path = "channels-test.rs"]
+mod tests;
