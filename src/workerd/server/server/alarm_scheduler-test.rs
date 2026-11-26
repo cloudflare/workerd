@@ -309,8 +309,8 @@ impl AlarmEnv for TestEnv {
     }
 }
 
-/// Storage as the server keeps alarms: one row per actor, keeping a stored name when an alarm is
-/// set without one.
+/// The storage that `AlarmStore` (`alarm_store.rs`) is: one row per actor, keeping a stored name
+/// when an alarm is set without one.
 #[derive(Default)]
 struct MemoryStorage {
     rows: RefCell<HashMap<String, (SystemTime, Option<String>)>>,

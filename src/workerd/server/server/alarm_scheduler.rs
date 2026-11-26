@@ -61,7 +61,7 @@ pub struct StoredAlarm {
     pub scheduled_time: SystemTime,
 }
 
-/// Where the scheduler keeps its alarms.
+/// Where the scheduler keeps its alarms: `AlarmStore` (`alarm_store.rs`) in the server.
 pub trait AlarmStorage {
     fn load(&self) -> Result<Vec<StoredAlarm>>;
     /// Stores `actor`'s alarm at `scheduled_time`. The stored name changes only when `actor`

@@ -27,6 +27,9 @@ wd_rust_crate(
     proc_macro_deps = [
         "@crates_vendor//async-trait",
     ],
+    test_compile_data = [
+        "testdata/c++-alarm-scheduler.sqlite",
+    ],
     # The tests link C++ that reaches kj::setupAsyncIo(), the binary's tokio-backed one.
     test_deps = [
         "//src/workerd/util:setup-async-io",
@@ -38,6 +41,7 @@ wd_rust_crate(
         "//src/rust/cxx/kj-rs-io",
         "//src/rust/cxx/kj-rs-tokio",
         "//src/rust/kj",
+        "//src/rust/sqlite-rs",
         "//src/rust/worker",
         "//src/workerd/api/bench-core",
         "//src/workerd/io:bench_capnp_rust",
