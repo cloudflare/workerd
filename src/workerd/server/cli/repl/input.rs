@@ -22,7 +22,18 @@
 use std::mem;
 use std::ops::Range;
 
-use super::bridge::ffi::ReplCandidate;
+/// One way to compile an input: the input itself, or the input wrapped in an async function so
+/// that it can `await`, or in parentheses so that a leading `{` starts an object literal. The
+/// session evaluates the first of an input's candidates that compiles (environment.rs).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Candidate {
+    pub source: String,
+    /// The completion value is a promise to await, and render what it settles to.
+    pub awaited: bool,
+    /// The input is in parentheses it doesn't have, so a syntax error compiling it isn't the
+    /// input's own: if no candidate compiles, another's error is reported.
+    pub parenthesized: bool,
+}
 
 /// What the last token of code was, as far as that decides how the next is read: whether a `/`
 /// starts a regular expression or divides, and whether a `{` opens a block or an object literal.
@@ -447,32 +458,32 @@ fn is_word_byte(byte: u8) -> bool {
 /// See [`rewrite_declarations`] for what the wrappings do to declarations; an input whose last
 /// statement is one of those declarations has only the second wrapping, so that it prints
 /// `undefined`, as a declaration does. The session passes over the input as it is when it uses
-/// `await` as a name, as `await (x)` does in a script (`ReplEnvironment::compile`).
+/// `await` as a name, as `await (x)` does in a script (`environment::compile`).
 ///
 /// An input that starts with `{` and doesn't end with `;` is first tried in parentheses, so that
 /// `{ a: 1 }` is an object literal rather than a block, as in Node's REPL. Without them it is a
 /// block, as one that the parentheses don't compile, such as `{ let x = 1; x }`, still is.
-pub fn candidates(input: &str) -> Vec<ReplCandidate> {
+pub fn candidates(input: &str) -> Vec<Candidate> {
     let awaits = input.contains("await");
     let mut candidates = Vec::new();
     if input.trim_start().starts_with('{') && !input.trim_end().ends_with(';') {
         // The line break keeps a line comment that ends the input from swallowing the parenthesis.
         let parenthesized = format!("({input}\n)");
         let returning = awaits.then(|| returning_last_statement(&parenthesized));
-        candidates.push(ReplCandidate {
+        candidates.push(Candidate {
             source: parenthesized,
             awaited: false,
             parenthesized: true,
         });
         if let Some(source) = returning {
-            candidates.push(ReplCandidate {
+            candidates.push(Candidate {
                 source,
                 awaited: true,
                 parenthesized: true,
             });
         }
     }
-    candidates.push(ReplCandidate {
+    candidates.push(Candidate {
         source: input.to_owned(),
         awaited: false,
         parenthesized: false,
@@ -484,14 +495,14 @@ pub fn candidates(input: &str) -> Vec<ReplCandidate> {
             ends_with_declaration,
         } = rewrite_declarations(input);
         if !ends_with_declaration {
-            candidates.push(ReplCandidate {
+            candidates.push(Candidate {
                 source: format!("{declarations}{}", returning_last_statement(&rewritten)),
                 awaited: true,
                 parenthesized: false,
             });
         }
         // The line break keeps a line comment that ends the input from swallowing the wrapping.
-        candidates.push(ReplCandidate {
+        candidates.push(Candidate {
             source: format!("{declarations}(async () => {{{rewritten}\n}})()"),
             awaited: true,
             parenthesized: false,
@@ -505,15 +516,15 @@ pub fn candidates(input: &str) -> Vec<ReplCandidate> {
 /// an input's wrappings, this one leaves the script as it is: no later input needs its
 /// declarations, and returning the value of its last statement would turn a function declared
 /// there into an expression, which declares nothing.
-pub fn script_candidates(script: &str) -> Vec<ReplCandidate> {
-    let mut candidates = vec![ReplCandidate {
+pub fn script_candidates(script: &str) -> Vec<Candidate> {
+    let mut candidates = vec![Candidate {
         source: script.to_owned(),
         awaited: false,
         parenthesized: false,
     }];
     if script.contains("await") {
         // The line break keeps a line comment that ends the script from swallowing the wrapping.
-        candidates.push(ReplCandidate {
+        candidates.push(Candidate {
             source: format!("(async () => {{{script}\n}})()"),
             awaited: true,
             parenthesized: false,

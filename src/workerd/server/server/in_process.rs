@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! The server run inside another program's event loop: `server-test.c++`, and each config
-//! `workerd repl` loads (`repl/repl-server.c++`).
+//! `workerd repl` loads (`cli/repl/server.rs`).
 //!
 //! The host builds the worker factory itself (its V8, timer, network and filesystem) and reaches
 //! the server through the `loopback:` registry: the config's addresses are loopback names, and the

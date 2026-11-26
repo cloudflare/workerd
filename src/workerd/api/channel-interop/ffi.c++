@@ -71,6 +71,12 @@ bool subrequest_channel_require_allows_transfer(
       [&](jsg::Lock&) { const_cast<SubrequestChannel&>(channel).requireAllowsTransfer(); });
 }
 
+kj::Promise<void> subrequest_channel_evict_for_test(
+    kj::Rc<SubrequestChannel> channel, IoChannelFactory::EvictWebSocketMode webSocketMode) {
+  auto promise = kj::evalNow([&]() { return channel->evictForTest(webSocketMode); });
+  return promise.attach(kj::mv(channel));
+}
+
 bool durable_object_class_channel(v8::Isolate* isolate,
     const DurableObjectClass& durableObjectClass,
     uint64_t ioContextId,

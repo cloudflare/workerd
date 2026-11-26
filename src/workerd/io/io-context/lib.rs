@@ -7,6 +7,11 @@
 //! `IoContext` (`src/workerd/io/io-context.h`) holds the state of the request that JavaScript is
 //! running on behalf of. This crate is a package of its own because `//src/workerd/io` depends on
 //! `jsg`.
+//!
+//! It also binds `IoContext::IncomingRequest` ([`IncomingRequest`]) for the host that opened one
+//! and holds it, outside any `IoContext`: [`incoming_request_delivered`],
+//! [`incoming_request_run`], [`incoming_request_register_pending_event`] and
+//! [`incoming_request_drain`].
 
 mod ffi;
 mod trace;
@@ -29,7 +34,12 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+pub use ffi::DeliveredLocation;
 use ffi::bridge;
+pub use ffi::bridge::EvictWebSocketMode;
+pub use ffi::bridge::IncomingRequest;
+pub use ffi::bridge::PendingEvent;
+pub use ffi::incoming_request_delivered;
 use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;
@@ -141,10 +151,10 @@ impl<'s> IoContext<'s> {
     /// is logged as an uncaught exception and recorded in the request's `waitUntil()` status. A
     /// panic in `callback` also terminates JavaScript execution, as in a `#[jsg_method]`.
     ///
-    /// `future` and its output are `Send` because the future's later polls run without the
-    /// isolate lock.
-    /// A `jsg::Rc` or `jsg::Weak` it holds can only be dropped, since every other use takes a
-    /// [`jsg::Lock`], which the future doesn't have.
+    /// `future` and its output are `Send`, which C++ does not need: it polls and drops the future
+    /// only on this `IoContext`'s thread, and [`await_io_local`](Self::await_io_local) waits for
+    /// one that is only `'static`. A `jsg::Rc` or `jsg::Weak` it holds can only be dropped, since
+    /// every other use takes a [`jsg::Lock`], which the future doesn't have.
     ///
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.
@@ -154,8 +164,20 @@ impl<'s> IoContext<'s> {
         F: Future<Output = T> + Send + 'static,
         C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<()> + 'static,
     {
+        self.await_io_and_run_on_thread(future, callback)
+    }
+
+    /// [`await_io_and_run`](Self::await_io_and_run) for any `'static` future and output. Callers
+    /// bound what they accept; see [`await_io_local`](Self::await_io_local) for what this relies
+    /// on.
+    fn await_io_and_run_on_thread<T, F, C>(&self, future: F, callback: C) -> jsg::Result<()>
+    where
+        T: 'static,
+        F: Future<Output = T> + 'static,
+        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<()> + 'static,
+    {
         let future = ffi::IoFuture(Box::pin(async move {
-            let output: Box<dyn Any + Send> = Box::new(future.await);
+            let output: Box<dyn Any> = Box::new(future.await);
             output
         }));
         let callback = ffi::IoCallback(Box::new(move |lock, output| {
@@ -203,6 +225,22 @@ impl<'s> IoContext<'s> {
         F: Future<Output = T> + Send + 'static,
         C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<v8::Local<'t, v8::Value>> + 'static,
     {
+        self.await_io_on_thread(lock, future, callback)
+    }
+
+    /// [`await_io`](Self::await_io) for any `'static` future and output. Callers bound what they
+    /// accept; see [`await_io_local`](Self::await_io_local) for what this relies on.
+    fn await_io_on_thread<T, F, C>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        future: F,
+        callback: C,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>>
+    where
+        T: 'static,
+        F: Future<Output = T> + 'static,
+        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<v8::Local<'t, v8::Value>> + 'static,
+    {
         let resolver = v8::PromiseResolver::new(lock)?;
         let outcome = CallbackOutcome::default();
         let promise = resolver
@@ -212,7 +250,7 @@ impl<'s> IoContext<'s> {
         // `catch_poll_panic()` turns a panic while polling into an output, so that it rejects the
         // promise instead of failing the task, as kj-rs does for a panic in the future it polls.
         // kj-rs still logs a panic while dropping the future when the wait is cancelled.
-        self.await_io_and_run(catch_poll_panic(future), move |lock, output| {
+        self.await_io_and_run_on_thread(catch_poll_panic(future), move |lock, output| {
             let resolver = resolver.as_local(lock);
             let result = match output {
                 Ok(output) => {
@@ -236,6 +274,50 @@ impl<'s> IoContext<'s> {
             resolver.resolve(lock, undefined)
         })?;
         Ok(promise)
+    }
+
+    /// [`await_io`](Self::await_io) for a future, and an output, that need not be `Send`, only
+    /// `'static`: such as the future of a C++ `kj::Promise` that an `async` C++ function of a cxx
+    /// bridge returns, which belongs to the thread that made it. Waiting, `callback` and the
+    /// promise work as for `await_io`.
+    ///
+    /// Nothing moves to another thread. C++ polls and drops `future`, and runs `callback` with
+    /// its output, only on this `IoContext`'s thread, as it runs the `kj::Promise` that C++
+    /// `awaitIo()` waits for, so they may hold objects that belong to that thread. `future` is
+    /// polled and dropped without the isolate lock, as for `await_io`, and is `'static`, so it
+    /// can't hold a `v8::Local` of a lock; a `v8::Global` or `jsg::Rc` it holds can only be
+    /// dropped, which needs no lock. Lock-guarded state is
+    /// `Send` (`src/rust/jsg/README.md` §Safety rules, rule 5), so nothing that isn't is shared
+    /// with a thread that holds the lock; a C++ object whose destructor needs the lock reaches
+    /// Rust in a `jsg::LockGuarded`, never as a bare `KjOwn`.
+    ///
+    /// Staying on one thread is a property of the event loop, not of this function: a host may
+    /// move an event loop between OS threads, and `future`, its output or `callback` may hold
+    /// what is tied to the thread, such as an `Rc` with a clone outside them. Hosts whose event
+    /// loops are pinned to their threads wrap this once, safely (`//src/workerd/server/pinned-thread-io`).
+    ///
+    /// # Safety
+    /// The current event loop runs on this OS thread until `future`, its output and `callback`
+    /// have been dropped.
+    ///
+    /// # Errors
+    /// As for `await_io`.
+    #[expect(
+        unsafe_code,
+        reason = "awaits what may be tied to the OS thread; the caller promises the event loop stays on it"
+    )]
+    pub unsafe fn await_io_local<T, F, C>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        future: F,
+        callback: C,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>>
+    where
+        T: 'static,
+        F: Future<Output = T> + 'static,
+        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<v8::Local<'t, v8::Value>> + 'static,
+    {
+        self.await_io_on_thread(lock, future, callback)
     }
 
     /// [`await_io`](Self::await_io) for a future whose output converts to the promise's value:
@@ -613,7 +695,44 @@ impl<'s> IoContext<'s> {
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.
     pub fn add_span(&self, span: SpanBuilder) -> jsg::Result<IoOwnedSpan> {
-        Ok(IoOwnedSpan(self.add_object(ThreadBoundSpan(span))?))
+        Ok(IoOwnedSpan(self.add_thread_bound_object(span)?))
+    }
+
+    /// Gives this `IoContext` ownership of `value`, which belongs to its thread, as C++
+    /// `IoContext::addObject()` does for any object: the counterpart of
+    /// [`add_object`](Self::add_object) for a value that is not `Send`, such as an `Rc`, or a
+    /// `KjOwn` of a C++ I/O object. It is dropped when the `IoContext` is destroyed, or after the
+    /// returned handle is dropped, unless [`IoOwnedLocal::take`] has taken it, and always on the
+    /// `IoContext`'s thread.
+    ///
+    /// The handle is `Send` and `Sync`, so that a resource can hold it, and dropped anywhere, as
+    /// an [`IoOwned`] can: the value stays behind, for the `IoContext` to drop.
+    ///
+    /// Nothing traces the value, which can't be `Traced`, since that requires `Send`: a
+    /// `jsg::Rc` or `TracedGlobal` in it is a strong reference, held until the `IoContext`
+    /// drops it, as one that C++ `IoOwn` holds is.
+    ///
+    /// As for [`await_io_local`](Self::await_io_local), staying on the thread is a property of
+    /// the event loop, which pinned hosts state once (`//src/workerd/server/pinned-thread-io`).
+    ///
+    /// # Safety
+    /// The current event loop runs on this OS thread until the `IoContext` has dropped `value`.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    #[expect(
+        unsafe_code,
+        reason = "owns what may be tied to the OS thread; the caller promises the event loop stays on it"
+    )]
+    pub unsafe fn add_local_object<T: 'static>(&self, value: T) -> jsg::Result<IoOwnedLocal<T>> {
+        self.add_thread_bound_object(value)
+    }
+
+    /// [`add_local_object`](Self::add_local_object) for this crate's spans, which are C++ KJ
+    /// objects: they read no thread-local but the current event loop, so they may move with it to
+    /// another OS thread, and need no pinned loop.
+    fn add_thread_bound_object<T: 'static>(&self, value: T) -> jsg::Result<IoOwnedLocal<T>> {
+        Ok(IoOwnedLocal(self.add_object(ThreadBoundObject(value))?))
     }
 
     /// Has the request wait for `promise` after the response, as `ctx.waitUntil()` does through
@@ -698,7 +817,10 @@ impl<'s> IoContext<'s> {
     /// and the output reaches only the call's future, which is not `Send` either. The futures are
     /// polled and dropped without the isolate lock, and are `'static`, as `function` is, so they
     /// can't hold a `v8::Local` of a lock; a `v8::Global` or `jsg::Rc` they hold can only be
-    /// dropped, which needs no lock.
+    /// dropped, which needs no lock. Lock-guarded state is
+    /// `Send` (`src/rust/jsg/README.md` §Safety rules, rule 5), so nothing that isn't is shared
+    /// with a thread that holds the lock; a C++ object whose destructor needs the lock reaches
+    /// Rust in a `jsg::LockGuarded`, never as a bare `KjOwn`.
     ///
     /// # Example
     ///
@@ -1409,8 +1531,8 @@ fn reject_with_js_exception<'a>(
 /// - **Threads:** the value is shared with the `IoContext`, which drops it, unless it was taken,
 ///   on its own thread and without the isolate lock. The handle, held by a resource, may be
 ///   dropped wherever the resource is, such as by GC on another thread that has locked the
-///   isolate. So a mutex guards the value, which must be `Send`. A span, which is not, has
-///   [`IoOwnedSpan`].
+///   isolate. So a mutex guards the value, which must be `Send`. A value that is not has
+///   [`IoOwnedLocal`].
 pub struct IoOwned<T> {
     slot: Arc<Mutex<Option<T>>>,
     // The id of the IoContext that owns the value.
@@ -1487,12 +1609,9 @@ impl<D: jsg::Traced> jsg::Traced for InContext<D> {
     }
 }
 
-/// A span an `IoContext` owns, from [`IoContext::add_span`].
-///
-/// It is an [`IoOwned`] for a value that is not `Send`. Unlike the span, the handle is `Send` and
-/// `Sync`, since it reaches the span only on the `IoContext`'s thread.
+/// A span an `IoContext` owns, from [`IoContext::add_span`]: an [`IoOwnedLocal`] of the span.
 #[jsg_macros::jsg_traced]
-pub struct IoOwnedSpan(IoOwned<ThreadBoundSpan>);
+pub struct IoOwnedSpan(IoOwnedLocal<SpanBuilder>);
 
 impl IoOwnedSpan {
     /// Takes the span, or returns `None` if it was already taken, as [`IoOwned::take`] does.
@@ -1500,7 +1619,7 @@ impl IoOwnedSpan {
     /// # Errors
     /// As for [`IoOwned::take`].
     pub fn take(&self, lock: &mut jsg::Lock<'_>) -> jsg::Result<Option<SpanBuilder>> {
-        Ok(self.0.take(lock)?.map(|span| span.0))
+        self.0.take(lock)
     }
 
     /// Calls `f` with the span, in place, as [`IoOwned::with`] does.
@@ -1512,30 +1631,78 @@ impl IoOwnedSpan {
         lock: &mut jsg::Lock<'_>,
         f: impl FnOnce(&mut SpanBuilder) -> R,
     ) -> jsg::Result<Option<R>> {
-        self.0.with(lock, |span| f(&mut span.0))
+        self.0.with(lock, f)
     }
 }
 
-/// The span of an [`IoOwnedSpan`].
-struct ThreadBoundSpan(SpanBuilder);
+/// A value an `IoContext` owns that belongs to its thread, from
+/// [`IoContext::add_local_object`]: the counterpart of C++ `IoOwn<T>` for a value that is not
+/// `Send`.
+///
+/// It is an [`IoOwned`] whose handle is `Send` and `Sync` though the value isn't, since it reaches
+/// the value only on the `IoContext`'s thread: [`take`](Self::take) and [`with`](Self::with) work
+/// only while the `IoContext` is current, as they do for an `IoOwned`.
+pub struct IoOwnedLocal<T: 'static>(IoOwned<ThreadBoundObject<T>>);
+
+impl<T: 'static> IoOwnedLocal<T> {
+    /// Takes the value, or returns `None` if it was already taken, as [`IoOwned::take`] does.
+    ///
+    /// # Errors
+    /// As for [`IoOwned::take`].
+    pub fn take(&self, lock: &mut jsg::Lock<'_>) -> jsg::Result<Option<T>> {
+        Ok(self.0.take(lock)?.map(|value| value.0))
+    }
+
+    /// Calls `f` with the value, in place, as [`IoOwned::with`] does.
+    ///
+    /// # Errors
+    /// As for [`IoOwned::with`].
+    pub fn with<R>(
+        &self,
+        lock: &mut jsg::Lock<'_>,
+        f: impl FnOnce(&mut T) -> R,
+    ) -> jsg::Result<Option<R>> {
+        self.0.with(lock, |value| f(&mut value.0))
+    }
+}
+
+// The handle holds no JavaScript handles of its own, and the value is not traced; see
+// `IoContext::add_local_object`. Written out rather than with `jsg_traced_unchecked!`, which
+// would bound `T` by `Send`.
+impl<T: 'static> jsg::Traced for IoOwnedLocal<T> {
+    fn trace(&self, _visitor: &mut v8::GcVisitor) {}
+}
+
+impl<T: 'static> jsg::HoldsNoGcReferences for IoOwnedLocal<T> {}
+
+/// The value of an [`IoOwnedLocal`].
+struct ThreadBoundObject<T>(T);
 
 #[expect(
     unsafe_code,
-    reason = "a span that its IoContext owns is touched only on its thread; see the SAFETY comment"
+    reason = "a value that its IoContext owns through an IoOwnedLocal is touched only on its \
+              thread; see the SAFETY comment"
 )]
-// SAFETY: a span belongs to its request's thread, which is the only one that touches it here.
-// `add_span()` takes it on that thread, from code that holds it there, with the IoContext
-// current. `IoOwnedSpan` reaches it only through `IoOwned::take()` and `IoOwned::with()`, while
-// that IoContext is current, so on its thread, and `take()` hands out the `SpanBuilder`, which is
-// not `Send`. Otherwise the IoContext drops it, through the `SlotRef` it holds, on its thread:
-// when it is destroyed, or when it next runs after the handle's `IoOwn` is destroyed elsewhere,
-// which only queues the deletion (`DeleteQueue::scheduleDeletion()` in io-own.c++). The handle's
-// own reference to the slot may be dropped on another thread, but if it is the last one, that
-// `SlotRef` has emptied the slot, and dropping `None` touches no span.
-unsafe impl Send for ThreadBoundSpan {}
+// SAFETY: the value belongs to its IoContext's thread, which is the only one that touches it
+// here, and stays that thread while the value lives: `add_local_object()`'s caller promises it,
+// and the spans of `add_thread_bound_object()` are KJ objects, which move with their event loop. `add_local_object()` takes it on that thread, since it takes an `IoContext`, which is
+// neither `Send` nor `Sync` and exists only while that IoContext is current. `IoOwnedLocal`
+// reaches it only through `IoOwned::take()` and `IoOwned::with()`, while that IoContext is
+// current, so on its thread, and `take()` hands out the value, which is not `Send`. Otherwise the
+// IoContext drops it, through the `SlotRef` it holds, on its thread: when it is destroyed, or when
+// it next runs after the handle's `IoOwn` is destroyed elsewhere, which only queues the deletion
+// (`DeleteQueue::scheduleDeletion()` in io-own.c++). The handle's own reference to the slot may be
+// dropped on another thread, but if it is the last one, that `SlotRef` has emptied the slot, and
+// dropping `None` touches no value.
+unsafe impl<T> Send for ThreadBoundObject<T> {}
 
-// A span holds no JavaScript handles.
-jsg::jsg_traced_unchecked!(ThreadBoundSpan);
+// Nothing traces the value; see `IoContext::add_local_object`. Written out rather than with
+// `jsg_traced_unchecked!`, which would bound `T` by `Send`.
+impl<T> jsg::Traced for ThreadBoundObject<T> {
+    fn trace(&self, _visitor: &mut v8::GcVisitor) {}
+}
+
+impl<T> jsg::HoldsNoGcReferences for ThreadBoundObject<T> {}
 
 impl<T> Drop for SlotRef<T> {
     fn drop(&mut self) {
@@ -1602,6 +1769,88 @@ impl<T: 'static> ReentryCallback<T> {
             _output: PhantomData,
         }
     }
+}
+
+/// Runs `function` in the request's `IoContext`, through C++ `IoContext::run()`.
+///
+/// Returns a future for the output of the future that `function` returns. The host that opened
+/// the request uses it to run JavaScript there, from outside any `IoContext`.
+///
+/// `function` runs as the function of a [`ReentryCallback`] does, with the `IoContext` current,
+/// and its future is polled as that function's is, on the `IoContext`'s thread and without the
+/// isolate lock. The run starts now, as C++ `run()` does: it schedules the function to run once
+/// the isolate lock is free. Dropping the returned future cancels it, as dropping the C++ promise
+/// does.
+///
+/// The future fails with a [`cxx::KjException`] as a [`ReentryCallFuture`] does: with the error
+/// `run()` fails with at once, with the exception the `IoContext` is destroyed or aborted with
+/// while the run waits, or as [`IoContext::make_reentry_callback_weak`] says if `function` fails.
+#[must_use = "the run is cancelled if its future is dropped"]
+pub fn incoming_request_run<T, Fut, F>(
+    request: Pin<&mut IncomingRequest>,
+    function: F,
+) -> ReentryCallFuture<T>
+where
+    T: 'static,
+    Fut: Future<Output = Result<T, cxx::KjException>> + 'static,
+    F: for<'t> FnOnce(&mut jsg::Lock<'t>, &IoContext<'t>) -> jsg::Result<Fut> + 'static,
+{
+    let mut function = Some(function);
+    let function = ffi::ReentryFn(Box::new(move |lock| {
+        let Some(function) = function.take() else {
+            unreachable!("C++ runs the function of incoming_request_run() once")
+        };
+        let context = IoContext::current(lock)?;
+        let future = function(lock, &context)?;
+        let future: ffi::ReentryFuture = Box::pin(async move {
+            let output: Box<dyn Any> = Box::new(future.await?);
+            Ok(output)
+        });
+        Ok(future)
+    }));
+    let output = Rc::new(Cell::new(None));
+    let call = ffi::ReentryCall {
+        future: None,
+        output: Rc::clone(&output),
+    };
+    let wait: ReentryWait =
+        match bridge::incoming_request_run(request, Box::new(function), Box::new(call)) {
+            Ok(promise) => Box::pin(bridge::reentry_promise_wait(promise)),
+            Err(err) => Box::pin(std::future::ready(Err(err))),
+        };
+    ReentryCallFuture {
+        wait,
+        output,
+        _output: PhantomData,
+    }
+}
+
+/// `IoContext::registerPendingEvent()` of the request's `IoContext`.
+///
+/// Until the returned event is dropped, the `IoContext` counts it as waiting for something, so
+/// that it is not taken for hung when its thread has nothing else to do, as when a host waits for
+/// input to run in it.
+///
+/// # Errors
+/// Fails with what C++ throws.
+pub fn incoming_request_register_pending_event(
+    request: Pin<&mut IncomingRequest>,
+) -> Result<KjOwn<PendingEvent>, cxx::KjException> {
+    bridge::incoming_request_register_pending_event(request)
+}
+
+/// Ends the request: `IoContext::IncomingRequest::drain()`.
+///
+/// Then waits for the `waitUntil()` tasks it leaves, logging those that fail. Resolves to whether
+/// the `IoContext`'s `waitUntilStatus()` is `OK` afterwards, which it is not if a `waitUntil()`
+/// task rejected or a timer callback threw.
+///
+/// # Errors
+/// Fails with what C++ throws.
+pub async fn incoming_request_drain(
+    request: KjOwn<IncomingRequest>,
+) -> Result<bool, cxx::KjException> {
+    bridge::incoming_request_drain(request).await
 }
 
 /// What a [`ReentryCallFuture`] waits for: the C++ promise of the call.

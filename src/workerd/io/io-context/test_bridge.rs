@@ -48,6 +48,7 @@ fn to_io(err: &jsg::Error) -> std::io::Error {
 }
 
 #[cxx::bridge(namespace = "workerd::io_context::test")]
+#[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
 mod ffi {
     /// What the closure of the module `register_probe_module()` registers saw when it last ran.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,6 +177,23 @@ mod ffi {
         Panic,
     }
 
+    /// What the function that `start_host_run()` runs does.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum HostRunBehavior {
+        /// Records the current IoContext, then returns a future that yields to the event loop
+        /// once and completes with a value.
+        Succeed,
+        /// Returns a `TypeError`, as a JSG error.
+        Fail,
+    }
+
+    #[namespace = "workerd::io_context"]
+    unsafe extern "C++" {
+        include!("workerd/io/io-context/ffi.h");
+        type IncomingRequest = io_context::IncomingRequest;
+        type PendingEvent = io_context::PendingEvent;
+    }
+
     #[namespace = "workerd::api::channel_interop"]
     unsafe extern "C++" {
         include!("workerd/api/channel-interop/ffi.h");
@@ -284,6 +302,21 @@ mod ffi {
         fn channel_conversion_runs() -> u32;
         /// The id of the `IoContext` the conversion last got, or 0.
         fn channel_conversion_context() -> u64;
+
+        /// Delivers `request` from Rust, and returns the location it recorded, as
+        /// `"<file>:<line>:<column> in <function>"`.
+        fn deliver_from_rust(request: Pin<&mut IncomingRequest>) -> Result<String>;
+        /// A function that `incoming_request_run()` runs in `request`, as a host runs one.
+        type HostRun;
+        fn start_host_run(
+            request: Pin<&mut IncomingRequest>,
+            behavior: HostRunBehavior,
+        ) -> Box<HostRun>;
+        async fn host_run_wait(run: Box<HostRun>) -> Result<String>;
+        fn register_pending_event_from_rust(
+            request: Pin<&mut IncomingRequest>,
+        ) -> Result<KjOwn<PendingEvent>>;
+        async fn drain_from_rust(request: KjOwn<IncomingRequest>) -> Result<bool>;
 
     }
 }
@@ -1585,4 +1618,67 @@ mod execution_context {
         GATE.with(|cell| cell.borrow_mut().take())
             .is_some_and(|sender| sender.send(()).is_ok())
     }
+}
+
+fn deliver_from_rust(request: Pin<&mut ffi::IncomingRequest>) -> Result<String> {
+    let location = io_context::delivered_location!();
+    io_context::incoming_request_delivered(request, "test", location)
+        .map_err(|err| std::io::Error::other(err.what().to_owned()))?;
+    Ok(format!(
+        "{}:{}:{} in {}",
+        location.file.to_string_lossy(),
+        location.line,
+        location.column,
+        location.function.to_string_lossy()
+    ))
+}
+
+/// See `ffi::HostRun`.
+pub struct HostRun(io_context::ReentryCallFuture<String>);
+
+#[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
+fn start_host_run(
+    request: Pin<&mut ffi::IncomingRequest>,
+    behavior: ffi::HostRunBehavior,
+) -> Box<HostRun> {
+    Box::new(HostRun(io_context::incoming_request_run(
+        request,
+        move |_lock, _context| {
+            if behavior == ffi::HostRunBehavior::Fail {
+                return Err(jsg::Error::new_type_error("the run failed"));
+            }
+            ffi::record_await_context();
+            Ok(async {
+                // Waits for the event loop once, as a future of I/O does, without the lock.
+                let mut yielded = false;
+                std::future::poll_fn(|cx| {
+                    if yielded {
+                        std::task::Poll::Ready(())
+                    } else {
+                        yielded = true;
+                        cx.waker().wake_by_ref();
+                        std::task::Poll::Pending
+                    }
+                })
+                .await;
+                Ok("ran".to_owned())
+            })
+        },
+    )))
+}
+
+async fn host_run_wait(run: Box<HostRun>) -> std::result::Result<String, cxx::KjException> {
+    run.0.await
+}
+
+fn register_pending_event_from_rust(
+    request: Pin<&mut ffi::IncomingRequest>,
+) -> std::result::Result<kj_rs::KjOwn<ffi::PendingEvent>, cxx::KjException> {
+    io_context::incoming_request_register_pending_event(request)
+}
+
+async fn drain_from_rust(
+    request: kj_rs::KjOwn<ffi::IncomingRequest>,
+) -> std::result::Result<bool, cxx::KjException> {
+    io_context::incoming_request_drain(request).await
 }

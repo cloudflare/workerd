@@ -163,6 +163,46 @@ KJ_TEST("in a Durable Object, write_logfwdr() waits for the output gate") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+KJ_TEST("a request that Rust delivers records the Rust caller's location") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context);
+  auto delivered = deliver_from_rust(*request);
+  auto location = kj::heapString(delivered.data(), delivered.size());
+  KJ_EXPECT(location.contains("io-context/test_bridge.rs:"), location);
+  KJ_EXPECT(location.endsWith(" in io_context_test_bridge"), location);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a host runs a function in its request from outside it, and drains the request") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  KJ_EXPECT(!IoContext::hasCurrent());
+
+  awaitContextId = kj::none;
+  auto value = host_run_wait(start_host_run(*request, HostRunBehavior::Succeed))
+                   .wait(fixture.getWaitScope());
+  KJ_EXPECT(kj::str(kj::arrayPtr(value.data(), value.size())) == "ran");
+  // The function ran with the request's IoContext current.
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+
+  // An error the function returns fails the run, tunneled as a JSG error.
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
+    host_run_wait(start_host_run(*request, HostRunBehavior::Fail)).wait(fixture.getWaitScope());
+  })) {
+    KJ_EXPECT(e.getDescription() == "jsg.TypeError: the run failed", e);
+  } else {
+    KJ_FAIL_EXPECT("the run did not fail");
+  }
+
+  auto pending = register_pending_event_from_rust(*request);
+  { auto released = kj::mv(pending); }
+
+  // Nothing failed in the background.
+  KJ_EXPECT(drain_from_rust(kj::mv(request)).wait(fixture.getWaitScope()));
+}
+
 KJ_TEST("an IoContext id works only while its IoContext is current") {
   TestFixture fixture;
   auto first = fixture.newIncomingRequest();

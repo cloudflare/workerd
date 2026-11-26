@@ -235,7 +235,7 @@ fn keeps_other_declarations() {
 fn candidates_wrap_inputs_that_await() {
     assert_eq!(
         candidates("1 + 2"),
-        vec![ReplCandidate {
+        vec![Candidate {
             source: "1 + 2".to_owned(),
             awaited: false,
             parenthesized: false,

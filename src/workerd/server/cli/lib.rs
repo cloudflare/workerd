@@ -450,7 +450,7 @@ fn usage_error<T: CommandFactory>(message: impl Display) -> ! {
 }
 
 /// The release version, for `--version`; clap holds it for the process's life.
-fn release_version() -> &'static str {
+pub(crate) fn release_version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
     VERSION.get_or_init(|| String::from_utf8_lossy(ffi::release_version()).into_owned())
 }

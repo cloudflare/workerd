@@ -37,6 +37,12 @@ pub mod bridge {
         type CppRef = jsg_cpp::CppRef;
     }
 
+    #[namespace = "workerd::io_context"]
+    unsafe extern "C++" {
+        include!("workerd/io/io-context/ffi.h");
+        type EvictWebSocketMode = io_context::EvictWebSocketMode;
+    }
+
     #[namespace = "workerd::api"]
     unsafe extern "C++" {
         include!("workerd/api/channel-interop/ffi.h");
@@ -131,6 +137,10 @@ pub mod bridge {
             isolate: *mut Isolate,
             channel: &SubrequestChannel,
         ) -> bool;
+        async fn subrequest_channel_evict_for_test(
+            channel: KjRc<SubrequestChannel>,
+            web_socket_mode: EvictWebSocketMode,
+        ) -> Result<()>;
         unsafe fn durable_object_class_channel(
             isolate: *mut Isolate,
             durable_object_class: &DurableObjectClass,
@@ -289,6 +299,20 @@ impl<'s, C: Channel> ScopedChannel<'s, C> {
 
     fn into_inner(self) -> KjRc<C> {
         self.channel
+    }
+}
+
+impl ScopedChannel<'_, SubrequestChannel> {
+    /// C++ `evictForTest()`: evicts the Durable Object that the channel reaches, as the runtime
+    /// does when it goes idle, keeping its storage, and returns a future for when it is evicted,
+    /// which can be waited for with `IoContext::await_io_local()`. The future fails with what C++
+    /// throws, as it does for a channel that reaches no Durable Object, or one that is not
+    /// running.
+    pub fn evict_for_test(
+        &self,
+        web_socket_mode: io_context::EvictWebSocketMode,
+    ) -> impl Future<Output = Result<(), cxx::KjException>> + 'static + use<> {
+        bridge::subrequest_channel_evict_for_test(self.channel.clone(), web_socket_mode)
     }
 }
 

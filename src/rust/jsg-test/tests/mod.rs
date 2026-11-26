@@ -58,6 +58,7 @@ mod resource_properties;
 mod resource_template;
 mod resource_this;
 mod rest_arguments;
+mod script;
 mod serialization;
 mod set_prototype;
 mod signature_callback;

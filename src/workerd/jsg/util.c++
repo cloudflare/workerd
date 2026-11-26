@@ -60,6 +60,14 @@ bool getCaptureThrowsAsRejections(v8::Isolate* isolate) {
   return jsgIsolate.getCaptureThrowsAsRejections();
 }
 
+bool isEvalAllowed(v8::Isolate* isolate) {
+  return IsolateBase::from(isolate).evalAllowed;
+}
+
+void setAllowEval(v8::Isolate* isolate, bool allow) {
+  IsolateBase::from(isolate).setAllowEvalImpl(allow);
+}
+
 bool getShouldSetToStringTag(v8::Isolate* isolate) {
   auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
   return jsgIsolate.shouldSetToStringTag();

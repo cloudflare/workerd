@@ -593,29 +593,36 @@ Compiling the script in a class static block, where `await` can't be a name, tel
 of its own: the script as it is and, if it awaits, the script as the body of an async function,
 whose declarations stay its own.
 
-**The environment.** `ReplEnvironment` (`repl/repl-environment.h`) is a Worker that never receives
-an event, compiled on the REPL's isolate under the new module registry. One `IoContext` serves the
-whole session, so I/O objects created by one input stay usable in the next. The `workerd` global
-and the server handles are C++ JSG types (`repl/repl-api.h`), registered with the workerd API
-isolate but not part of the Workers API's types. A handle holds its server or environment through
-the `IoContext` (`IoOwn`), so that collecting it, though it may be the last to hold it, destroys
-no KJ I/O objects.
+**The environment.** An environment (`cli/repl/environment.rs`) is a Worker that never receives
+an event, `ReplWorker` (`repl/repl-worker.h`), which C++ compiles on an isolate of its own under
+the new module registry. Rust opens one request on it for the whole session and runs every input
+in that request's `IoContext`, so I/O objects created by one input stay usable in the next. The
+first input to run gives the global scope `workerd`, `_` and `_error`. The `workerd` global and the
+server and environment handles are Rust JSG resources (`cli/repl/api.rs`), which only the REPL's
+global scope reaches; they are not part of the Workers API's types. A handle holds its server or
+environment through the `IoContext` (`IoOwnedLocal`, by way of `pinned-thread-io/`, since the
+values are `Rc`s that rely on the event loop staying on its thread), so that collecting it, though
+it may be the last to hold it, destroys no KJ I/O objects. C++ renders results with
+`node-internal:internal_inspect` (`repl_inspect`).
 
-**Loaded configs.** `workerd.loadConfig()` reads the config as `workerd serve` does
-(`repl_load_config`, `cli/repl/session.rs`), then builds a `WorkerFactory` for it over the REPL's
-V8 and event loop and hands it to the Rust server's `InProcessServer` (`server/in_process.rs`).
-`InProcessServer::start()` serves the config in the background, its stream sockets on `loopback:`
-names. `ReplConfigServer` (`repl/repl-server.h`) is the handle the JavaScript API holds. A reload
-reads the config and builds the new `InProcessServer`, closes the old one, then starts the new.
-Before a load or a reload builds anything, it claims the Durable Object directories the config
-names in `ReplServerClaims`, which the REPL keeps for the whole session, so that a config another
-server's directories are in is refused before anything of it runs. The
-config loader (`ReplConfigLoader`) is an interface so that the C++ tests can serve configs given as
-text. Its watches are the CLI's file watcher (`cli/watch.rs`, as `serve --watch` uses it), which
-`repl_load_config` registers each file it reads with.
+**Loaded configs.** A loaded config's server is Rust: `ReplConfigServer` (`cli/repl/server.rs`),
+which the JavaScript API holds directly.
+`workerd.loadConfig()` reads the config as `workerd serve` does (`CliLoader`,
+`cli/repl/session.rs`), has C++ build a `WorkerFactory` for it on the process's state
+(`ProcessState`, `factory/per-process.h`, which the first session starts) and the REPL's event loop
+(`repl_new_factory`, through `newWorkerFactory`), and hands that to the Rust server's `InProcessServer`
+(`server/in_process.rs`). `InProcessServer::start()` serves the config in the background, its
+stream sockets on `loopback:` names. A reload reads the config and builds the new
+`InProcessServer`, closes the old one, then starts the new; reloads and closes run as tasks of the
+event loop, so they go on whether or not anything awaits them. Before a load or a reload builds
+anything, it claims the Durable Object directories and the UDP addresses the config names, in the
+claims that `ServerRegistry` keeps for the whole session, so that a config another server holds part
+of is refused before anything of it runs. The config loader (`Loader`) is a trait so that the tests
+can serve configs given as text. Its watches are the CLI's file watcher (`cli/watch.rs`, as
+`serve --watch` uses it), with which a watch's load registers each file it reads.
 
-**Other environments.** `workerd.environment()` constructs another `ReplEnvironment`, held by the
-one whose JavaScript asked for it and closed when that one drains. The candidates of what its
+**Other environments.** `workerd.environment()` starts another environment, held by the one whose
+JavaScript asked for it and closed when that one drains. The candidates of what its
 `eval()` is given come from the console's rules (`repl_candidates`, `cli/repl/input.rs`), and the
 input runs on the event loop, under that environment's isolate lock rather than the REPL's.
 
@@ -628,9 +635,10 @@ socket's channel is an HTTP client of the socket's `loopback:` name. Every chann
 request started on one is held through a revoker: closing the server revokes them all before the
 server shuts down, so that nothing the REPL's JavaScript still holds keeps the factory alive.
 
-**Tests.** `repl/repl-environment-test.c++` evaluates inputs and loads configs given as text,
-with watches the test fires; `repl/repl-api-test.c++` drops handles where JavaScript objects are
-destroyed; `tests/repl/repl-test.mjs` runs the `workerd` binary for what only
+**Tests.** `cli/repl/session-test.rs` drives a session as the console does, evaluating inputs and
+loading configs given as text, with watches the test fires and closes it can hold;
+`cli/repl/environment-test.rs` covers the compatibility flags the REPL adds;
+`tests/repl/repl-test.mjs` runs the `workerd` binary for what only
 the command line, the console and the file watcher do;
 `cli/repl/editor-test.rs`, `cli/repl/history-test.rs` and `cli/repl/input-test.rs` cover the line
 editor, the history file and the input heuristics; `server/in_process/host-test.rs` covers
