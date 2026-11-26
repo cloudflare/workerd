@@ -10,7 +10,8 @@
 //
 // There are several pseudo-globals available in this script:
 // - `globalThis`: the global object of the context being initialized.
-// - `compatFlags`: an object containing compatibility flags enabled for the context.
+// - `utils`: native helpers. `utils.getCompatFlags()` among them throws until
+//   main-post.ts runs (see the warning below).
 // - `autogates`: an object containing autogates enabled for the context.
 // - `require`: a function to load other per-isolate bootstrap scripts.
 // - `module`: the commonjs-style module object for this script, used for exporting values
@@ -32,10 +33,10 @@
 // gated on compat flag. The top-level scope is executed while building
 // the zygote snapshot. Depending on autogates here is fine, anything
 // that requires compat flag gating must be handled in main-post.ts.
-// It is ok for things here to capture compatFlags for lazy usage after
-// the bootstrap runs, so we haven't removed it entirely from this scope.
-// The same holds for the top level of every module main.ts loads, and for
-// a check whether a global exists that only a flag installs.
+// The same holds for the top level of every module main.ts loads.
+// utils.getCompatFlags() throws until main-post.ts runs, so code here may
+// call it only in a function that runs later. Checking whether a global
+// exists that only a flag installs depends on the flag just as much.
 
 const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 

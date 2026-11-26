@@ -28,15 +28,8 @@ declare const module: { exports: any };
 declare const exports: any;
 
 /**
- * Compatibility flags for the current worker configuration.
- * Scripts use these to conditionally install globals.
- */
-declare const compatFlags: {
-  readonly [key: string]: boolean;
-};
-
-/**
- * Autogate flags for the current process. Unlike compatFlags (per-worker),
+ * Autogate flags for the current process. Unlike compatibility flags
+ * (per-worker, from utils.getCompatFlags()),
  * autogates are process-wide and used for gradual rollout of risky changes.
  * Gate names use kebab-case (e.g., "v8-fast-api", "rust-backed-node-dns").
  */
@@ -276,6 +269,10 @@ declare const utils: {
   // any other object throws a TypeError, and an uncloneable value a
   // DataCloneError. Consumed by structured-clone.
   structuredClone(value: unknown, transfer: object[] | undefined): unknown;
+  // The compatibility flags enabled for the context, each set to true. Throws
+  // in the main phase (main.ts and what it loads as it runs), which must not
+  // depend on them; works from main-post.ts onwards.
+  getCompatFlags(): { readonly [key: string]: boolean };
 };
 
 // The I/O of a bootstrap API, bound to the request that created it

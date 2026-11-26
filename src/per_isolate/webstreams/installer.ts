@@ -135,7 +135,7 @@ function maybeInstallWebFileSystemStreams() {
 // pass-through (Content-Length integration). Gated by a separate
 // experimental flag that may never lose its experimental annotation.
 function maybeInstallDrainingReader() {
-  if (!compatFlags['expose_draining_reader']) return;
+  if (!utils.getCompatFlags()['expose_draining_reader']) return;
 
   const { ReadableStreamDrainingReader } = require('webstreams/streams');
   ObjectDefineProperties(globalThis, {

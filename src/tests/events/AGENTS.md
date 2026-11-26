@@ -33,8 +33,8 @@ While a suite covers both implementations:
   `@all-autogates` variants still enable every other autogate.
 - **Legacy cells run on both implementations.** Unlike the streams, these
   TypeScript implementations honor the same compat flags the C++ ones do
-  (they consult them through `compatFlags` in the bootstrap), so the
-  unflagged behaviors are asserted for each, in `<name>-cpp-legacy` and
+  (they consult them through `utils.getCompatFlags()` in the bootstrap), so
+  the unflagged behaviors are asserted for each, in `<name>-cpp-legacy` and
   `<name>-ts-legacy`.
 
 Retiring the gate collapses the suite to one set of cells, `<name>.wd-test`,

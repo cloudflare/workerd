@@ -38,7 +38,7 @@ const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 const { markUncloneable } = require('serialization') as SerializationHelpers;
 
-const kStandard = compatFlags['urlpattern_standard'] === true;
+const kStandard = utils.getCompatFlags()['urlpattern_standard'] === true;
 
 // The parser's members of utils: they compile a pattern, and process an
 // init input into the components matching compares.

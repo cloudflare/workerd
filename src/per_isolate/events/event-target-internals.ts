@@ -86,6 +86,8 @@ const {
 
 type ExceptionPolicy = 'report' | 'propagate';
 
+const compatFlags = utils.getCompatFlags();
+
 const kSpecCompliantDispatchExceptions =
   compatFlags['spec_compliant_dispatch_exceptions'] === true;
 

@@ -59,6 +59,8 @@ const { markAsRuntimeClass, setNameAndLength } =
 const { markUncloneable } = require('serialization') as SerializationHelpers;
 const { internalArray } = require('url/internal-array') as InternalArrayHelpers;
 
+const compatFlags = utils.getCompatFlags();
+
 // Only the selected backend is loaded.
 const backend = require(
   compatFlags['url_standard'] === true ? 'url/ada-backend' : 'url/kj-backend'

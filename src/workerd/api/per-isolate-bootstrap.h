@@ -53,14 +53,16 @@ class EmbedderBootstrap {
 };
 
 // Runs the main phase of the per-isolate bootstrap scripts from the compiled-in
-// PER_ISOLATE_BUNDLE. runPostSnapshotBootstrap() then runs the rest.
+// PER_ISOLATE_BUNDLE. runPostSnapshotBootstrap() then runs the rest. Nothing in the
+// main phase may depend on compatibility flags: utils.getCompatFlags() throws until
+// runPostSnapshotBootstrap() starts.
 //
 // Must be called within a V8 context scope, after JSG global setup is complete
 // but before any user code evaluation.
 //
 // On a context built from scratch this runs the bootstrap scripts: the entry
 // point script named "main" is loaded via a minimal synchronous require()
-// mechanism. The require() function and compatFlags object are passed to each
+// mechanism. The require() function and the utils object are passed to each
 // script as parameters of the function V8's CompileFunction wraps it in, not
 // via globalThis. Scripts can install properties on globalThis; those become
 // visible to user code.
@@ -72,7 +74,7 @@ class EmbedderBootstrap {
 // (jsg::SnapshotArtifact::bootstrapStateIndex), which V8 hands out once; the
 // isolate's `embedder` must then be the zygote's.
 //
-// The bootstrap state (require cache, compat flags) is heap-allocated and stored
+// The bootstrap state (the require() cache, the utils object) is heap-allocated and stored
 // in the context's BOOTSTRAP_STATE embedder data slot, so that require() remains
 // usable for lazy evaluation after runPerIsolateBootstrap() returns. The state
 // refers to `embedder` and `moduleSource`, which must outlive the context.
@@ -83,13 +85,13 @@ class EmbedderBootstrap {
 // Throws kj::Exception on failure (compilation errors, missing scripts, cycles).
 // This is fatal for isolate creation since these are runtime-owned scripts.
 void runPerIsolateBootstrap(jsg::Lock& js,
-    CompatibilityFlags::Reader flags,
     kj::Maybe<const EmbedderBootstrap&> embedder = kj::none,
     const jsg::ModuleSource* moduleSource = nullptr);
 
 // Runs the post-snapshot phase, on the context runPerIsolateBootstrap() set up: workerd's
 // "main-post" script, which installs what depends on compatibility flags, then the embedder's
-// entry point, if any. Then removes the WeakRef globals unless `flags` enables them.
+// entry point, if any. Then removes the WeakRef globals unless `flags` enables them. From its
+// start, utils.getCompatFlags() returns the flags `flags` enables.
 //
 // Must be called within a V8 context scope, before any user code evaluation.
 //
@@ -102,7 +104,7 @@ void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context);
 
 // Zygote only (preparing a startup snapshot): bundles the bootstrap's JS-held state
 // (require(), the embedder's require() if any, primordials, the
-// compatFlags/autogates/utils objects, the require() cache) into one object, pins
+// autogates/utils objects, the require() cache) into one object, pins
 // it into the snapshot and records the index in
 // jsg::SnapshotArtifact::bootstrapStateIndex, then releases the C++ bootstrap
 // state exactly as cleanupPerIsolateBootstrap() does.

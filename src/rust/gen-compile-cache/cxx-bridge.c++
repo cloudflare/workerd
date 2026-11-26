@@ -71,7 +71,6 @@ v8::ScriptCompiler::CachedData* compileAsFunction(jsg::Lock& js,
   auto source = v8::ScriptCompiler::Source(contentStr, origin, nullptr);
   static constexpr kj::StringPtr PSEUDO_GLOBAL_NAMES[] = {
     "require"_kj,
-    "compatFlags"_kj,
     "autogates"_kj,
     "module"_kj,
     "exports"_kj,

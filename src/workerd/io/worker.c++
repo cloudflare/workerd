@@ -162,8 +162,7 @@ const capnp::JsonCodec& getCdpJsonCodec() {
 void perIsolateBootstrap(const Worker::Api& api, jsg::Lock& lock, v8::Local<v8::Context> context) {
   TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
   JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
-    runPerIsolateBootstrap(
-        js, api.getFeatureFlags(), api.getEmbedderBootstrap(), api.getModuleSource());
+    runPerIsolateBootstrap(js, api.getEmbedderBootstrap(), api.getModuleSource());
   });
 }
 

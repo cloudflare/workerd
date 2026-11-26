@@ -369,7 +369,7 @@ class MessageChannel {
 // The rest makes the classes look as JSG's do.
 
 const kSpecCompliantPropertyAttributes =
-  compatFlags['spec_compliant_property_attributes'] === true;
+  utils.getCompatFlags()['spec_compliant_property_attributes'] === true;
 
 // JSG methods are enumerable, and their length counts no optional
 // parameters.

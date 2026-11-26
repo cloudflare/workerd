@@ -61,7 +61,7 @@ function markAsRuntimeClass(proto: object, name: string): void {
 // `proto`. It reads the flags, so it may run only in the post-snapshot
 // phase (main-post.ts) or in a module that loads after it.
 function removeToStringTagUnlessFlagged(proto: object): void {
-  if (compatFlags['set_tostring_tag'] !== true) {
+  if (utils.getCompatFlags()['set_tostring_tag'] !== true) {
     delete (proto as Record<symbol, unknown>)[SymbolToStringTag];
   }
 }

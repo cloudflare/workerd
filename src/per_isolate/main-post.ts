@@ -5,7 +5,8 @@
 //
 // There are several pseudo-globals available in this script:
 // - `globalThis`: the global object of the context being initialized.
-// - `compatFlags`: an object containing compatibility flags enabled for the context.
+// - `utils`: native helpers, among them `utils.getCompatFlags()`, which returns an object
+//   containing the compatibility flags enabled for the context.
 // - `autogates`: an object containing autogates enabled for the context.
 // - `require`: a function to load other per-isolate bootstrap scripts.
 // - `module`: the commonjs-style module object for this script, used for exporting values
@@ -19,6 +20,8 @@
 const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 
 const { defineLazyDataProperty } = utils;
+
+const compatFlags = utils.getCompatFlags();
 
 // The bootstrap classes carry Symbol.toStringTag whatever set_tostring_tag
 // says (see markAsRuntimeClass()). This takes it off those loaded here.

@@ -135,7 +135,10 @@ struct BootstrapState final: public jsg::BootstrapModules {
   // Functions found by tryGetBootstrapFunction(), by module specifier, then name.
   kj::HashMap<kj::String, kj::HashMap<kj::String, jsg::JsRef<jsg::JsFunction>>> functionCache;
   kj::HashSet<kj::String> loading;
-  jsg::JsRef<jsg::JsObject> compatFlagsObj;
+  // What utils.getCompatFlags() returns: { flagName: true } for each enabled compatibility flag.
+  // runPostSnapshotBootstrap() sets it before main-post runs. Until then the main phase is
+  // running, which must not depend on the flags, so getCompatFlags() throws.
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> compatFlagsObj;
   jsg::JsRef<jsg::JsObject> autogatesObj;
   jsg::JsRef<jsg::JsObject> utilsObj;
   // The require() injected into workerd's scripts, which resolves only workerd's scripts.
@@ -148,6 +151,25 @@ struct BootstrapState final: public jsg::BootstrapModules {
   // methods and constructors.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> primordials;
 };
+
+// Retrieve the BootstrapState from the given context's embedder data, if it has one. Only
+// runPerIsolateBootstrap() stores a jsg::BootstrapModules in the slot of a context it runs in,
+// since this downcasts what the slot holds; a test supplies modules of its own with
+// setBootstrapExportForTest().
+kj::Maybe<BootstrapState&> tryGetBootstrapState(v8::Local<v8::Context> context) {
+  KJ_IF_SOME(modules,
+      jsg::getAlignedPointerFromEmbedderData<jsg::BootstrapModules>(
+          context, jsg::ContextPointerSlot::BOOTSTRAP_STATE)) {
+    return kj::downcast<BootstrapState>(modules);
+  }
+  return kj::none;
+}
+
+// Retrieve the BootstrapState from the current context's embedder data.
+BootstrapState& getBootstrapState(jsg::Lock& js) {
+  return KJ_REQUIRE_NONNULL(
+      tryGetBootstrapState(js.v8Context()), "per-isolate bootstrap state not initialized");
+}
 
 #define VALUE_METHOD_MAP(V)                                                                        \
   V(ArrayBuffer)                                                                                   \
@@ -647,6 +669,16 @@ static void GetPerformancePrototype(const v8::FunctionCallbackInfo<v8::Value>& a
   });
 }
 
+static void GetCompatFlags(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto& flags = JSG_REQUIRE_NONNULL(getBootstrapState(js).compatFlagsObj, Error,
+        "utils.getCompatFlags() cannot be called in the main phase of the per-isolate bootstrap, "
+        "which must not depend on compatibility flags. Read them from main-post onwards.");
+    return flags.getHandle(js);
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
@@ -741,6 +773,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "mimeTypeEssence",
     "readableStreamState",
     "structuredClone",
+    "getCompatFlags",
     "performanceNow",
     "requirePerformance",
     "getPerformancePrototype",
@@ -804,6 +837,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, MimeTypeEssence),
     getMethod(js, ReadableStreamState),
     getMethod(js, StructuredClone),
+    getMethod(js, GetCompatFlags),
     performanceNow,
     requirePerformance,
     getPerformancePrototype,
@@ -814,10 +848,10 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
   return jsg::JsObject(tmpl->NewInstance(js.v8Context(), values)).addRef(js);
 }
 
-// The pseudo-global variables that scripts access directly (e.g. `require`, `compatFlags`,
-// `primordials`). Each script is compiled as a function taking them as parameters, in this
-// order. gen-compile-cache (src/rust/gen-compile-cache/cxx-bridge.c++) compiles the scripts
-// with the same parameter list, which must match for V8 to accept the cache.
+// The pseudo-global variables that scripts access directly (e.g. `require`, `primordials`).
+// Each script is compiled as a function taking them as parameters, in this order.
+// gen-compile-cache (src/rust/gen-compile-cache/cxx-bridge.c++) compiles the scripts with the
+// same parameter list, which must match for V8 to accept the cache.
 //
 // They are parameters rather than the properties of a context extension object because an
 // extension object makes V8 resolve every free variable in the script (`undefined` included)
@@ -825,7 +859,6 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
 // even in optimized code.
 constexpr kj::StringPtr PSEUDO_GLOBAL_NAMES[] = {
   "require"_kj,
-  "compatFlags"_kj,
   "autogates"_kj,
   "module"_kj,
   "exports"_kj,
@@ -843,7 +876,6 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
   v8::LocalVector<v8::Value> values(js.v8Isolate,
       {
         js.v8Undefined(),  // require
-        v8::Local<v8::Value>(state.compatFlagsObj.getHandle(js)),
         v8::Local<v8::Value>(state.autogatesObj.getHandle(js)),
         v8::Local<v8::Value>(moduleObj),
         v8::Local<v8::Value>(exportsObj),
@@ -856,28 +888,9 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
     values[0] = v8::Local<v8::Value>(fn);
   }
   KJ_IF_SOME(primordials, state.primordials) {
-    values[5] = v8::Local<v8::Value>(primordials.getHandle(js));
+    values[4] = v8::Local<v8::Value>(primordials.getHandle(js));
   }
   return values;
-}
-
-// Retrieve the BootstrapState from the given context's embedder data, if it has one. Only
-// runPerIsolateBootstrap() stores a jsg::BootstrapModules in the slot of a context it runs in,
-// since this downcasts what the slot holds; a test supplies modules of its own with
-// setBootstrapExportForTest().
-kj::Maybe<BootstrapState&> tryGetBootstrapState(v8::Local<v8::Context> context) {
-  KJ_IF_SOME(modules,
-      jsg::getAlignedPointerFromEmbedderData<jsg::BootstrapModules>(
-          context, jsg::ContextPointerSlot::BOOTSTRAP_STATE)) {
-    return kj::downcast<BootstrapState>(modules);
-  }
-  return kj::none;
-}
-
-// Retrieve the BootstrapState from the current context's embedder data.
-BootstrapState& getBootstrapState(jsg::Lock& js) {
-  return KJ_REQUIRE_NONNULL(
-      tryGetBootstrapState(js.v8Context()), "per-isolate bootstrap state not initialized");
 }
 
 // Which scripts a require() function resolves: workerd's only, or the embedder's as well.
@@ -1044,9 +1057,8 @@ jsg::JsRef<jsg::JsFunction> newRequireFunction(jsg::Lock& js, v8::FunctionCallba
   return jsg::JsFunction(jsg::check(v8::Function::New(js.v8Context(), callback))).addRef(js);
 }
 
-// Build a JS object with { flagName: true } entries for enabled compat flags.
-// Disabled flags are omitted — scripts check with `if ('flag_name' in compatFlags)`
-// which yields false for unset flags.
+// Build a JS object with { flagName: true } entries for enabled compat flags, which
+// utils.getCompatFlags() returns. Disabled flags are omitted, so reading one yields undefined.
 jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   auto obj = js.obj();
   auto dynamicFlags = capnp::toDynamic(flags);
@@ -1103,7 +1115,6 @@ BootstrapState* allocateBootstrapState(jsg::Lock& js,
 constexpr kj::StringPtr STASH_REQUIRE = "require"_kj;
 // Present only when the zygote ran with an embedder bootstrap.
 constexpr kj::StringPtr STASH_EMBEDDER_REQUIRE = "embedderRequire"_kj;
-constexpr kj::StringPtr STASH_COMPAT_FLAGS = "compatFlags"_kj;
 constexpr kj::StringPtr STASH_AUTOGATES = "autogates"_kj;
 constexpr kj::StringPtr STASH_UTILS = "utils"_kj;
 constexpr kj::StringPtr STASH_PRIMORDIALS = "primordials"_kj;
@@ -1133,7 +1144,6 @@ void restoreBootstrapState(jsg::Lock& js, BootstrapState* state, jsg::JsObject b
     auto& obj = KJ_REQUIRE_NONNULL(maybeObj, "snapshot bootstrap state is missing an object", name);
     return obj.addRef(js);
   };
-  state->compatFlagsObj = takeObject(STASH_COMPAT_FLAGS);
   state->autogatesObj = takeObject(STASH_AUTOGATES);
   state->utilsObj = takeObject(STASH_UTILS);
   {
@@ -1161,9 +1171,7 @@ void restoreBootstrapState(jsg::Lock& js, BootstrapState* state, jsg::JsObject b
 
 // Bootstraps a context built from scratch: creates require(), loads primordials and runs main.
 // runPostSnapshotBootstrap() runs the rest.
-void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state, CompatibilityFlags::Reader flags) {
-  // Build the compat flags and autogates objects.
-  state->compatFlagsObj = buildCompatFlagsObject(js, flags);
+void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state) {
   state->autogatesObj = buildAutogatesObject(js);
   state->utilsObj = createUtilsObject(js);
 
@@ -1220,7 +1228,6 @@ kj::Maybe<jsg::Module::Reader> EmbedderBootstrap::tryGetScript(kj::StringPtr spe
 }
 
 void runPerIsolateBootstrap(jsg::Lock& js,
-    CompatibilityFlags::Reader flags,
     kj::Maybe<const EmbedderBootstrap&> embedder,
     const jsg::ModuleSource* moduleSource) {
   auto context = js.v8Context();
@@ -1246,7 +1253,7 @@ void runPerIsolateBootstrap(jsg::Lock& js,
       TRACE_EVENT("workerd", "PerIsolateBootstrap::restore");
       restoreBootstrapState(js, allocateBootstrapState(js, scripts, embedder, moduleSource), bag);
     } else {
-      bootstrapFromScripts(js, allocateBootstrapState(js, scripts, embedder, moduleSource), flags);
+      bootstrapFromScripts(js, allocateBootstrapState(js, scripts, embedder, moduleSource));
     }
   }
   JSG_CATCH(exception) {
@@ -1260,6 +1267,8 @@ void runPostSnapshotBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
       KJ_ASSERT_NONNULL(tryGetBootstrapState(context), "Per-isolate bootstrap is not instantiated");
 
   JSG_TRY(js) {
+    // From here on utils.getCompatFlags() returns the flags.
+    state.compatFlagsObj = buildCompatFlagsObject(js, flags);
     {
       TRACE_EVENT("workerd", "PerIsolateBootstrap::postSnapshot");
       state.requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main-post"_kj));
@@ -1311,7 +1320,6 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
         bag.set(
             js, STASH_EMBEDDER_REQUIRE, KJ_ASSERT_NONNULL(state.embedderRequireFn).getHandle(js));
       }
-      bag.set(js, STASH_COMPAT_FLAGS, state.compatFlagsObj.getHandle(js));
       bag.set(js, STASH_AUTOGATES, state.autogatesObj.getHandle(js));
       bag.set(js, STASH_UTILS, state.utilsObj.getHandle(js));
       bag.set(js, STASH_PRIMORDIALS,

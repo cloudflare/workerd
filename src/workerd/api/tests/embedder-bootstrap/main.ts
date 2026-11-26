@@ -28,7 +28,7 @@ module.exports = {
   // The WeakRef globals are removed only after the embedder's scripts run.
   weakRefType: typeof WeakRef,
   hasUtils: typeof utils.isPromise === 'function',
-  sawCompatFlag: compatFlags['nodejs_compat'] === true,
+  sawCompatFlag: utils.getCompatFlags()['nodejs_compat'] === true,
   sawAutogate: autogates['ts-web-streams'] === true,
   requireLater: (specifier: string): unknown => require(specifier),
 };

@@ -7,9 +7,17 @@ at context creation, before any user code. C++ entry point:
 ## EXECUTION MODEL
 
 - Scripts are compiled as functions whose parameters are the
-  pseudo-globals `require`, `module`, `exports`, `compatFlags`,
-  `autogates`, `primordials`, `utils` are in scope but NOT on
-  `globalThis` (see `per_isolate-env.d.ts`).
+  pseudo-globals `require`, `module`, `exports`, `autogates`,
+  `primordials`, `utils` are in scope but NOT on `globalThis` (see
+  `per_isolate-env.d.ts`).
+- Two phases. `main.ts`, and every module it loads as it runs, may depend
+  on autogates but not on compatibility flags, since a startup snapshot
+  shares their effects between Workers with different flags.
+  `runPostSnapshotBootstrap()` then runs `main-post.ts`, which installs
+  what the flags gate. `utils.getCompatFlags()` returns
+  `{ flag_name: true }` for each enabled flag from then on, and throws
+  before: a module loaded in the main phase may call it only in a function
+  that runs later.
 - Module system is bootstrap CommonJS: `require('webstreams/queue')` +
   `module.exports = {...}`. The `src/node/` ESM-only rule does NOT apply
   here. Circular requires are a FATAL startup error — keep modules
@@ -77,8 +85,8 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
 - Order: `primordials`, workerd's `main` and `main-post`, then
   `<prefix>main`, all before the WeakRef globals are removed. The
   embedder's scripts run in the post-snapshot phase
-  (`runPostSnapshotBootstrap()`), so they may read `compatFlags` at the top
-  level. A failure is fatal, as for workerd's.
+  (`runPostSnapshotBootstrap()`), so they may call `utils.getCompatFlags()`
+  at the top level. A failure is fatal, as for workerd's.
 - Every embedder script is named under the prefix; `require()` takes the
   full specifier (`require('embedder/foo')`, not `require('./foo')`).
 - Embedder scripts share the require() cache and pseudo-globals and can

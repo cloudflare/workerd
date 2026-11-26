@@ -162,7 +162,7 @@ const kEventStreamMimeType = 'text/event-stream';
 // that is not bytes; a non-byte chunk fails the EventSource with it.
 const kNotBytes =
   autogates['ts-web-streams'] === true ||
-  compatFlags['typescript_implemented_streams'] === true
+  utils.getCompatFlags()['typescript_implemented_streams'] === true
     ? 'This ReadableStream did not return bytes.'
     : 'Draining read encountered a value that cannot be converted to bytes';
 
@@ -801,7 +801,7 @@ class EventSource extends EventTarget {
 // The rest makes the class look as JSG's does.
 
 const kSpecCompliantPropertyAttributes =
-  compatFlags['spec_compliant_property_attributes'] === true;
+  utils.getCompatFlags()['spec_compliant_property_attributes'] === true;
 
 const proto = EventSource.prototype;
 

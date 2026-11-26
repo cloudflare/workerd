@@ -782,6 +782,14 @@ kj_test(
 )
 
 kj_test(
+    src = "per-isolate-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "per-isolate-embedder-bootstrap-test.c++",
     deps = [
         "//src/workerd/api/tests/embedder-bootstrap:embedder_bootstrap_test",
