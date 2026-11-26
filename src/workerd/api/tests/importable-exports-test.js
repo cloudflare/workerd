@@ -1,7 +1,8 @@
 // Copyright (c) 2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual, notStrictEqual } from 'node:assert';
+import { inspect } from 'node:util';
 import { DurableObject, exports, withExports } from 'cloudflare:workers';
 
 export class MyService extends DurableObject {
@@ -25,6 +26,16 @@ export const importableExports = {
       'importableExports',
       'nullableExports',
     ]);
+
+    // console.log()/util.inspect() must not render the importable `exports` proxy as an empty
+    // object -- it's a real Proxy, but util.inspect avoids invoking Proxy traps, so it needs a
+    // `util.inspect.custom` implementation to show anything useful.
+    const inspected = inspect(exports);
+    notStrictEqual(inspected, '{}');
+    ok(
+      inspected.includes('MyService'),
+      `inspect(exports) should mention MyService, got: ${inspected}`
+    );
 
     const id = exports.MyService.idFromName('test');
     const stub = exports.MyService.get(id);
