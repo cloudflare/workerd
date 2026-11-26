@@ -953,6 +953,12 @@ size_t local_array_buffer_get_backing_store(const Local& buffer) {
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
 }
 
+// Local<SharedArrayBuffer>
+size_t local_shared_array_buffer_get_backing_store(const Local& buffer) {
+  return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
+      local_as_ref_from_ffi<v8::SharedArrayBuffer>(buffer)->GetBackingStore()));
+}
+
 // Local<WasmModuleObject>
 kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module) {
   return kj::heap(local_as_ref_from_ffi<v8::WasmModuleObject>(module)->GetCompiledModule());

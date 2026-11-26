@@ -123,6 +123,9 @@ namespace workerd::util {
   /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
      (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
   V(RUST_MEMORY_CACHE)                                                                             \
+  /* When enabled, Analytics Engine bindings are the Rust AnalyticsEngine                         \
+     (src/workerd/api/analytics-engine-api) instead of the C++ one (api/analytics-engine.c++). */ \
+  V(RUST_ANALYTICS_ENGINE)                                                                         \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default a new isolate is created in V8's loading mode (v8::Isolate::SetIsLoading()),       \
      which defers full GCs for up to 7 seconds, and V8 is told that loading has ended the first    \
