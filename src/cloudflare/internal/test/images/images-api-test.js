@@ -524,6 +524,23 @@ export const test_images_base64_small_chunks = {
     );
   },
 };
+
+export const test_images_base64_padding_split_across_chunks = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    assert.strictEqual(
+      await decodeBase64ThroughImagesBinding(env, ['QQ=', '=']),
+      'A'
+    );
+    assert.strictEqual(
+      await decodeBase64ThroughImagesBinding(env, ['QUFBQQ=', '', '=']),
+      'AAAA'
+    );
+  },
+};
 // GET metadata
 export const test_images_get_success = {
   /**
