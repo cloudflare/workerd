@@ -62,10 +62,11 @@ class CountingStore final: public CodeCacheStore {
       store.state.lockExclusive()->claimed.eraseMatch(key);
     }
 
-    void insert(Bytes bytes) override {
+    kj::Maybe<kj::Own<Held>> insert(Bytes bytes) override {
       auto lock = store.state.lockExclusive();
       ++lock->inserts;
       lock->entries.upsert(key, kj::arc<Bytes>(kj::mv(bytes)));
+      return kj::none;
     }
     void generationFailed() override {
       KJ_FAIL_ASSERT("unexpected generation failure");

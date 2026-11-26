@@ -35,9 +35,23 @@ kj::uint CodeCacheKey::hashCode() const {
   return kj::hashCode(prefix, static_cast<uint8_t>(unit));
 }
 
+CodeCacheStore::LookupResult CodeCacheStore::Held::decode(MayElect) {
+  KJ_UNIMPLEMENTED("this store hands over no hit undecoded");
+}
+
 IsolateCodeCache::IsolateCodeCache(kj::Own<const CodeCacheStore> store): store(kj::mv(store)) {}
 
+IsolateCodeCache::~IsolateCodeCache() noexcept(false) {
+  if (retained.size() == 0) return;
+  auto released = KJ_MAP(entry, retained) { return kj::mv(entry.value); };
+  // The isolate is being torn down; failing to give the caches back only loses them.
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { store->release(kj::mv(released)); })) {
+    KJ_LOG(ERROR, "failed to release code caches of a destroyed isolate", exception);
+  }
+}
+
 void IsolateCodeCache::prepare(CodeCacheKey::Unit unit, kj::ArrayPtr<const char> utf8Source) {
+  if (ended) return;
   auto key = CodeCacheKey::compute(unit, utf8Source);
   prepare(key);
   preparedSources.upsert(
@@ -45,6 +59,9 @@ void IsolateCodeCache::prepare(CodeCacheKey::Unit unit, kj::ArrayPtr<const char>
 }
 
 void IsolateCodeCache::prepare(const CodeCacheKey& key) {
+  // The embedder prepares as it opens a window, which deferProduction() keeps closed once
+  // production ended.
+  if (ended) return;
   KJ_REQUIRE(deferring, "code cache lookups are prepared only inside a production window");
   // Identical sources share a lookup and at most one producer election.
   preparedLookups.findOrCreate(key, [&]() -> decltype(preparedLookups)::Entry {
@@ -66,14 +83,44 @@ void IsolateCodeCache::forgetPreparedSources() {
 
 CodeCacheStore::LookupResult IsolateCodeCache::takeLookup(const CodeCacheKey& key) {
   KJ_IF_SOME(prepared, preparedLookups.find(key)) {
-    // Keep the result for other modules with identical source. Only the first compile takes
-    // the producer; later compiles reuse the hit or compile from source without another lookup.
+    decodeHit(prepared);
+    if (prepared.held != kj::none) {
+      // The first compile takes a hit that the store handed over, so that its bytes are freed
+      // once that compile is done. Identical sources compiled later, which are rare, compile from
+      // source.
+      auto taken = kj::mv(prepared);
+      prepared = {};
+      return taken;
+    }
+    // A hit that the store shares serves other modules with identical source too. Only the first
+    // compile takes the producer.
     return {
       .hit = prepared.hit.map([](auto& bytes) { return bytes.addRef(); }),
       .producer = kj::mv(prepared.producer),
     };
   }
-  return store->lookup(key, MayElect(deferring));
+  auto result = store->lookup(key, MayElect(deferring));
+  decodeHit(result);
+  return result;
+}
+
+void IsolateCodeCache::decodeHit(CodeCacheStore::LookupResult& lookup) {
+  if (lookup.hit != kj::none) return;
+  auto& held = KJ_UNWRAP_OR_RETURN(lookup.held);
+  auto decoded = held->decode(MayElect(deferring));
+  KJ_IF_SOME(bytes, decoded.hit) {
+    lookup.hit = kj::mv(bytes);
+    return;
+  }
+  // The store could not decode its own cache, or refused to, and counted why. V8 rejected nothing,
+  // so the compile goes on as after a miss.
+  lookup.held = kj::none;
+  if (lookup.producer == kj::none) lookup.producer = kj::mv(decoded.producer);
+}
+
+void IsolateCodeCache::retain(const CodeCacheKey& key, kj::Own<CodeCacheStore::Held> held) {
+  retained.upsert(key, kj::mv(held),
+      [](auto& existing, auto&& replacement) { existing = kj::mv(replacement); });
 }
 
 template <typename T>
@@ -108,12 +155,20 @@ v8::MaybeLocal<T> IsolateCodeCache::compile(v8::Isolate* isolate,
                                        : v8::ScriptCompiler::kConsumeCodeCache;
   KJ_ASSERT(v8::ScriptCompiler::CompileOptionsIsValid(options));
   v8::Local<T> result;
-  if (!compileWithOptions(&compileSource, options).ToLocal(&result)) {
+  bool compiled = compileWithOptions(&compileSource, options).ToLocal(&result);
+  bool consumed = cachedData != nullptr && !compileSource.GetCachedData()->rejected;
+  if (consumed) {
+    // V8 accepted the cache, which stays good even if compilation failed for another reason.
+    KJ_IF_SOME(held, lookup.held) {
+      retain(key, kj::mv(held));
+    }
+  }
+  if (!compiled) {
     return {};
   }
 
   if (cachedData != nullptr) {
-    if (compileSource.GetCachedData()->rejected) {
+    if (!consumed) {
       // V8 refused the data while deserializing it and compiled from source instead.
       producer = store->reject(key, *KJ_ASSERT_NONNULL(lookup.hit), kj::none, MayElect(deferring));
       observer.onCompileCacheRejected(isolate);
@@ -121,11 +176,13 @@ v8::MaybeLocal<T> IsolateCodeCache::compile(v8::Isolate* isolate,
       observer.onCompileCacheFound(isolate);
     }
   }
+  // A refused cache is discarded with `lookup`.
 
   KJ_IF_SOME(p, producer) {
     // Only a compile inside the production window is elected.
     KJ_ASSERT(deferring);
-    pending.add(Pending{.producer = kj::mv(p), .compiled = v8::Global<T>(isolate, result)});
+    pending.add(
+        Pending{.key = key, .producer = kj::mv(p), .compiled = v8::Global<T>(isolate, result)});
   }
   return result;
 }
@@ -153,22 +210,46 @@ template v8::MaybeLocal<v8::Function> IsolateCodeCache::compile<v8::Function>(v8
     CompileCallback<v8::Function>);
 
 void IsolateCodeCache::deferProduction() {
-  // The window is per isolate, but each script opens its own, so a second window would mean a
-  // second script, whose code would be produced or discarded with the first one's.
-  KJ_ASSERT(!deferring, "code cache production window is already open");
+  if (ended) return;
+  if (deferring) {
+    // The window is per isolate, but each script opens its own, so a second window would mean a
+    // second script, whose code would be produced or discarded with the first one's. That is
+    // only acceptable when the embedder closes the window, and so decides when both are done.
+    KJ_ASSERT(store->getProductionTime() == CodeCacheStore::ProductionTime::ON_EMBEDDER_REQUEST,
+        "code cache production window is already open");
+    return;
+  }
   deferring = true;
 }
 
+void IsolateCodeCache::finishStartup(v8::Isolate* isolate, const CompilationObserver& observer) {
+  if (!deferring) return;
+  if (store->getProductionTime() == CodeCacheStore::ProductionTime::END_OF_STARTUP) {
+    produceDeferred(isolate, observer);
+    return;
+  }
+  startupFinished = true;
+}
+
+void IsolateCodeCache::failStartup() {
+  if (!startupFinished) discardDeferred();
+}
+
 void IsolateCodeCache::produceDeferred(v8::Isolate* isolate, const CompilationObserver& observer) {
+  if (!deferring) return;
   closeWindow();
   auto entries = kj::mv(pending);
   for (auto& entry: entries) {
+    // Dropping the rest ends their elections.
+    if (!store->mayProduce()) break;
     KJ_IF_SOME(module, entry.compiled.tryGet<v8::Global<v8::Module>>()) {
       v8::HandleScope scope(isolate);
       // An errored module's code is complete, but the cache policy does not retain it.
       if (module.Get(isolate)->GetStatus() == v8::Module::kErrored) continue;
     }
-    produce(isolate, *entry.producer, entry.compiled, observer);
+    KJ_IF_SOME(held, produce(isolate, *entry.producer, entry.compiled, observer)) {
+      retain(entry.key, kj::mv(held));
+    }
   }
 }
 
@@ -177,13 +258,27 @@ void IsolateCodeCache::discardDeferred() {
   pending.clear();
 }
 
-void IsolateCodeCache::closeWindow() {
-  deferring = false;
-  forgetPreparedSources();
-  preparedLookups.clear();
+void IsolateCodeCache::endProduction() {
+  ended = true;
+  discardDeferred();
 }
 
-void IsolateCodeCache::produce(v8::Isolate* isolate,
+void IsolateCodeCache::closeWindow() {
+  deferring = false;
+  startupFinished = false;
+  forgetPreparedSources();
+  // Give back the caches handed over for keys that no compile used.
+  kj::Vector<kj::Own<CodeCacheStore::Held>> unused;
+  for (auto& entry: preparedLookups) {
+    KJ_IF_SOME(held, entry.value.held) {
+      unused.add(kj::mv(held));
+    }
+  }
+  preparedLookups.clear();
+  if (!unused.empty()) store->release(unused.releaseAsArray());
+}
+
+IsolateCodeCache::MaybeHeld IsolateCodeCache::produce(v8::Isolate* isolate,
     CodeCacheStore::Producer& producer,
     const Compiled& compiled,
     const CompilationObserver& observer) {
@@ -204,11 +299,12 @@ void IsolateCodeCache::produce(v8::Isolate* isolate,
   if (data == nullptr || data->length <= 0) {
     producer.generationFailed();
     observer.onCompileCacheGenerationFailed(isolate);
-    return;
+    return kj::none;
   }
   // Copy the bytes so that the store holds memory it allocated itself rather than V8's.
-  producer.insert(kj::heapArray<kj::byte>(data->data, data->length));
+  auto held = producer.insert(kj::heapArray<kj::byte>(data->data, data->length));
   observer.onCompileCacheGenerated(isolate);
+  return held;
 }
 
 }  // namespace workerd::jsg

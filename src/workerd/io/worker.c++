@@ -1524,6 +1524,14 @@ void discardDeferredCodeCaches(jsg::Lock& js) {
   }
 }
 
+// Ends a Worker's startup that failed. The window stays open if an earlier Worker of the Script
+// started and left it open for the embedder to close, with what that Worker compiled.
+void failCodeCacheStartup(jsg::Lock& js) {
+  KJ_IF_SOME(codeCache, jsg::IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+    codeCache.failStartup();
+  }
+}
+
 // Makes the isolate's code cache forget the addresses of the sources given to
 // prepareCodeCaches(), which are only guaranteed to be alive while the Script is constructed.
 void forgetPreparedCodeCacheSources(jsg::Lock& js) {
@@ -2421,7 +2429,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       } else {
         // Else block to avoid dangling else clang warning.
       }
-      discardDeferredCodeCaches(lock);
+      failCodeCacheStartup(lock);
     });
 
     auto maybeMakeSpan = [&](auto operationName) -> SpanBuilder {
@@ -2507,7 +2515,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         // Script failed to parse. Act as if the script was empty -- i.e. do nothing.
         impl->permanentException =
             script->impl->permanentException.map([](auto& e) { return e.clone(); });
-        discardDeferredCodeCaches(lock);
+        failCodeCacheStartup(lock);
         return;
       }
 
@@ -2705,13 +2713,14 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       });
 
       // Produce the code caches for the code compiled while starting this worker, now that its
-      // top level has run. This is not charged to the startup limits.
+      // top level has run, unless the store has the embedder produce them later. This is not
+      // charged to the startup limits.
       KJ_IF_SOME(codeCache, jsg::IsolateBase::from(lock.v8Isolate).tryGetCodeCache()) {
         if (impl->permanentException == kj::none) {
-          codeCache.produceDeferred(
+          codeCache.finishStartup(
               lock.v8Isolate, jsg::IsolateBase::from(lock.v8Isolate).getObserver());
         } else {
-          codeCache.discardDeferred();
+          codeCache.failStartup();
         }
       }
 
