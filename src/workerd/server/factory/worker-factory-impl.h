@@ -11,7 +11,6 @@
 
 #include <workerd/api/memory-cache.h>
 #include <workerd/io/io-thread-context.h>
-#include <workerd/server/alarm-scheduler.h>
 #include <workerd/server/container-client.h>
 #include <workerd/server/facet-tree-index.h>
 #include <workerd/server/server/bridge.rs.h>
@@ -188,7 +187,8 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   void taskFailed(kj::Exception&& exception) override;
 };
 
-// The storage of a namespace: its directory (none in memory), the VFS, and the alarm scheduler.
+// The storage of a namespace: its directory (none in memory) and the VFS, through which the
+// actors' databases and the scheduler's (`server/alarm_store.rs`) open.
 class ActorStorage::Impl final: public kj::Refcounted {
  public:
   Impl(const WorkerFactory& factory,
@@ -196,7 +196,7 @@ class ActorStorage::Impl final: public kj::Refcounted {
       kj::String uniqueKey,
       ::rust::Box<ActorNamespaceHandle> actors);
 
-  // Declared first: the VFS's hooks and the alarm scheduler call into it.
+  // Declared first: the VFS's hooks call into it.
   ::rust::Box<ActorNamespaceHandle> actors;
   kj::Maybe<kj::Own<const kj::Directory>> directory;
   kj::Own<const kj::Directory> vfsDirectory;  // the in-memory directory when there is none
@@ -205,7 +205,6 @@ class ActorStorage::Impl final: public kj::Refcounted {
   kj::Own<const kj::Directory> sqliteDirectory;
   SqliteDatabase::Vfs vfs;
   kj::String uniqueKey;
-  kj::Own<AlarmScheduler> alarmScheduler;
 
   // The facet index of the root actor `rootKey`, read from disk for one operation; none when it
   // does not exist (so no facet can have storage).

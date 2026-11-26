@@ -176,18 +176,7 @@ ActorStorage::Impl::Impl(const WorkerFactory& factory,
               ? kj::heap<ClusterDirectory>(vfsDirectory->clone(), *actors)
               : vfsDirectory->clone()),
       vfs(*sqliteDirectory, {.sync = factory.getImpl().options->syncStorage}),
-      uniqueKey(kj::mv(uniqueKey)),
-      alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),
-          factory.getImpl().timer,
-          vfs,
-          kj::Path({"metadata.sqlite"}),
-          [this](const ActorKey& actor) -> kj::Own<WorkerInterface> {
-            // The id carries the persisted name so that `ctx.id.name` is set when the alarm runs.
-            auto id = ActorIdFactoryImpl(this->uniqueKey)
-                          .idFromStringNamed(kj::str(actor.actorId),
-                              actor.name.map([](kj::StringPtr n) { return kj::str(n); }));
-            return actors->actor_for_alarm(kj::heap<ActorIdHandle>(kj::mv(id)));
-          })) {}
+      uniqueKey(kj::mv(uniqueKey)) {}
 
 kj::Maybe<kj::Own<FacetTreeIndex>> ActorStorage::Impl::getFacetTreeIndexIfNotEmpty(
     const kj::Directory& dir, kj::StringPtr rootKey) {
@@ -282,20 +271,10 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
       factory, kj::mv(directory), kj::str(uniqueKey), kj::mv(actors)));
 }
 
-void actor_storage_set_alarm(
-    const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs) {
-  auto key = ActorKey(kj::str(actor), name.empty() ? kj::Maybe<kj::String>() : kj::str(name));
-  auto time = kj::UNIX_EPOCH + atMs * kj::MILLISECONDS;
-  auto& scheduler = *storage.getImpl().alarmScheduler;
-  // Only ever earlier: waking an object early is a no-op, late is a missed alarm.
-  KJ_IF_SOME(current, scheduler.getAlarm(key)) {
-    if (current <= time) return;
-  }
-  scheduler.setAlarm(key, time);
-}
-
-void actor_storage_delete_all(const ActorStorage& storage) {
-  storage.getImpl().alarmScheduler->deleteAll();
+kj::Own<SqliteDatabase::Vfs> actor_storage_vfs(const ActorStorage& storage) {
+  auto& impl = storage.getImpl();
+  return kj::Own<SqliteDatabase::Vfs>(&impl.vfs, kj::NullDisposer::instance)
+      .attach(kj::addRef(impl));
 }
 
 void actor_storage_delete_facet(const ActorStorage& storage,
@@ -425,25 +404,27 @@ class ActorHooksImpl final: public Worker::Actor::Loopback,
 // in the order they were made.
 class ActorSqliteHooks final: public ActorSqlite::Hooks {
  public:
-  ActorSqliteHooks(kj::Own<ActorStorage::Impl> storage, ActorKey actor)
+  ActorSqliteHooks(kj::Own<ActorStorage::Impl> storage,
+      ::rust::Box<ActorAlarms> alarms,
+      kj::String actorId,
+      kj::Maybe<kj::String> name)
       : storage(kj::mv(storage)),
-        actor(kj::mv(actor)) {}
+        alarms(kj::mv(alarms)),
+        actorId(kj::mv(actorId)),
+        name(kj::mv(name)) {}
 
   kj::Promise<void> scheduleRun(
       kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
+    schedule(newAlarmTime);
+    if (!storage->actors->replicated()) return kj::READY_NOW;
     uint64_t atMs = 0;
     KJ_IF_SOME(scheduledTime, newAlarmTime) {
-      storage->alarmScheduler->setAlarm(actor, scheduledTime);
       atMs = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
-    } else {
-      storage->alarmScheduler->deleteAlarm(actor);
     }
-    if (!storage->actors->replicated()) return kj::READY_NOW;
     // A new or earlier alarm is in the cluster's index before the commit setting it starts, so
     // that a peer wakes the object if this instance dies once it is durable, acknowledged or not.
-    auto name = kj::str(kj::Maybe<kj::StringPtr>(actor.name).orDefault(""_kj));
-    return priorTask.then(
-        [storage = kj::addRef(*storage), id = kj::str(actor.actorId), name = kj::mv(name), atMs]() {
+    return priorTask.then([storage = kj::addRef(*storage), id = kj::str(actorId),
+                              name = kj::str(namePtr().orDefault(""_kj)), atMs]() {
       return result_task_run(storage->actors->alarm_set(toRust(id), toRust(name), atMs));
     });
   }
@@ -451,10 +432,10 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
   // The object came here with an alarm at `time`, which this instance has not scheduled. A failed
   // index write is written again by the index's next tidy.
   void opened(kj::Date time) {
-    storage->alarmScheduler->setAlarm(actor, time);
-    auto name = kj::Maybe<kj::StringPtr>(actor.name).orDefault(""_kj);
+    schedule(time);
     auto atMs = (time - kj::UNIX_EPOCH) / kj::MILLISECONDS;
-    result_task_run(storage->actors->alarm_opened(toRust(actor.actorId), toRust(name), atMs))
+    result_task_run(
+        storage->actors->alarm_opened(toRust(actorId), toRust(namePtr().orDefault(""_kj)), atMs))
         .detach([](kj::Exception&& e) {
       KJ_LOG(WARNING, "indexing an alarm that came with its object failed", e);
     });
@@ -462,7 +443,23 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
 
  private:
   kj::Own<ActorStorage::Impl> storage;
-  ActorKey actor;
+  // Holds the namespace's alarm store, which keeps an alarm set once the namespace is gone.
+  ::rust::Box<ActorAlarms> alarms;
+  kj::String actorId;
+  // The name the actor was created with by `idFromName()`, if any.
+  kj::Maybe<kj::String> name;
+
+  kj::Maybe<kj::StringPtr> namePtr() {
+    return name.map([](kj::String& n) -> kj::StringPtr { return n; });
+  }
+
+  // Sets the alarm (none: deletes it) with the namespace's scheduler, or once the namespace is
+  // gone in its storage, for the next run.
+  void schedule(kj::Maybe<kj::Date> time) {
+    auto timeNs =
+        time.map([](kj::Date t) -> int64_t { return (t - kj::UNIX_EPOCH) / kj::NANOSECONDS; });
+    alarms->schedule(toRust(actorId), toRust(namePtr()), timeNs);
+  }
 };
 
 // Facets have their own storage but no alarms: the scheduler delivers only to root actors.
@@ -497,8 +494,8 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
     kj::Maybe<ActorSqliteHooks&> rootHooks;
     uint selfId = facetId.orDefault(0);
     if (facetId == kj::none) {
-      auto root =
-          kj::heap<ActorSqliteHooks>(kj::addRef(*storage), ActorKey(rootKey.asPtr(), actorName));
+      auto root = kj::heap<ActorSqliteHooks>(kj::addRef(*storage), storage->actors->alarms(),
+          kj::str(rootKey), actorName.map([](kj::String& n) { return kj::str(n); }));
       rootHooks = *root;
       sqliteHooks = kj::mv(root);
     } else {

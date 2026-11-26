@@ -24,6 +24,7 @@ use kj_rs::KjOwn;
 use crate::Result;
 use crate::actor::ActorContainer;
 use crate::actor::ActorNamespace;
+use crate::alarm_store::AlarmStore;
 use crate::bridge::ffi;
 use crate::config::Server;
 use crate::worker::LinkedChannels;
@@ -169,9 +170,17 @@ pub struct WorkerStub(pub Rc<crate::loader::WorkerStub>);
 /// the server back.
 pub struct ServerHandle(pub Weak<Server>);
 
-/// A Durable Object namespace, as its alarm scheduler sees it. Weak: the scheduler lives in the
-/// namespace's storage, which the namespace owns.
+/// A Durable Object namespace, as its storage sees it. Weak: the namespace owns its storage.
 pub struct ActorNamespaceHandle(pub Weak<ActorNamespace>);
+
+/// A namespace's alarms, as a root actor's storage sets them.
+///
+/// Weak to the namespace, which the actor can outlive. The store it holds, so that an alarm set
+/// after the namespace is gone is still kept for the next run.
+pub struct ActorAlarms {
+    pub namespace: Weak<ActorNamespace>,
+    pub store: Rc<AlarmStore>,
+}
 
 /// An actor's way back to its container: the requests it raises for itself (alarms, hibernated
 /// WebSocket events), its facets, and its transitions between idle and active.

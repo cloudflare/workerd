@@ -167,23 +167,6 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "alarm-scheduler",
-    srcs = [
-        "alarm-scheduler.c++",
-    ],
-    hdrs = [
-        "alarm-scheduler.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/util:sqlite",
-        "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async-core",
-    ],
-)
-
-wd_cc_library(
     name = "actor-id-impl",
     srcs = [
         "actor-id-impl.c++",
@@ -454,17 +437,6 @@ kj_test(
     src = "channel-token-test.c++",
     deps = [
         ":channel-token",
-    ],
-)
-
-kj_test(
-    src = "alarm-scheduler-test.c++",
-    deps = [
-        ":alarm-scheduler",
-        "//src/workerd/util:sqlite",
-        "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 

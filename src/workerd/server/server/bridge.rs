@@ -18,6 +18,7 @@
 pub use assets_router::mitigations::should_block_image_response;
 
 pub use crate::actor::MovedHook;
+pub use crate::channels::ActorAlarms;
 pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
 pub use crate::channels::ActorNamespaceHandle;
@@ -62,6 +63,13 @@ pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/io/frankenvalue/ffi.h");
         type Frankenvalue = frankenvalue::Frankenvalue;
+    }
+
+    // workerd's C++ `SqliteDatabase::Vfs`, which the sqlite-rs crate's bridge declares.
+    #[namespace = "workerd::rust::sqlite_rs"]
+    unsafe extern "C++" {
+        include!("workerd/rust/sqlite-rs/ffi.h");
+        type SqliteVfs = sqlite_rs::SqliteVfs;
     }
 
     #[namespace = "kj::rust"]
@@ -568,28 +576,27 @@ pub mod ffi {
             unique_key: &str,
             hex: &str,
         ) -> Result<KjOwn<ActorIdHandle>>;
+        /// The id of root actor `actor` (its hex) of the namespace `unique_key`, for running its
+        /// alarm: checked against the namespace, and carrying the name the actor was created with.
+        fn actor_id_for_alarm(
+            unique_key: &str,
+            actor: &str,
+            name: KjMaybe<&str>,
+        ) -> Result<KjOwn<ActorIdHandle>>;
 
         /// The storage of one actor namespace: its directory on disk (or none for in-memory
-        /// storage), the SQLite VFS over it, and its alarm scheduler.
+        /// storage) and the SQLite VFS over it.
         type ActorStorage;
-        /// `path` is the namespace's directory; empty for in-memory storage. `actors` answers
-        /// the scheduler's requests for an actor to run an alarm on.
+        /// `path` is the namespace's directory; empty for in-memory storage. `actors` is told of
+        /// the actors' alarms and the writes SQLite makes.
         fn factory_new_actor_storage(
             factory: &WorkerFactory,
             path: &str,
             unique_key: &str,
             actors: Box<ActorNamespaceHandle>,
         ) -> Result<KjOwn<ActorStorage>>;
-        /// Deletes every actor's storage and every alarm. Callers abort the actors first.
-        fn actor_storage_delete_all(storage: &ActorStorage) -> Result<()>;
-        /// Schedules the alarm of root actor `actor` (its id's hex), whose `idFromName()` name
-        /// is `name`, empty for none, unless one is scheduled no later.
-        fn actor_storage_set_alarm(
-            storage: &ActorStorage,
-            actor: &str,
-            name: &str,
-            at_ms: u64,
-        ) -> Result<()>;
+        /// The storage's SQLite VFS, which keeps the storage alive.
+        fn actor_storage_vfs(storage: &ActorStorage) -> KjOwn<SqliteVfs>;
         /// Deletes the storage of the facet `name` of the actor numbered `parent_facet_id` (none
         /// for the root), and its descendants'. Nothing for a root actor that never had facets.
         fn actor_storage_delete_facet(
@@ -1139,14 +1146,10 @@ pub mod ffi {
         fn require_allows_transfer(self: &ActorClassChannel) -> Result<()>;
         fn token(self: &ActorClassChannel, usage: TokenUsage) -> Result<KjOwn<PendingToken>>;
 
-        /// A Durable Object namespace, for its alarm scheduler.
+        /// A Durable Object namespace, for its storage.
         type ActorNamespaceHandle;
-        /// The actor to run an alarm on, started if needed. The id carries the name the actor was
-        /// created with, when the scheduler persisted one.
-        fn actor_for_alarm(
-            self: &ActorNamespaceHandle,
-            id: KjOwn<ActorIdHandle>,
-        ) -> Result<KjOwn<WorkerInterface>>;
+        /// The namespace's alarms, for a root actor's storage to set its alarm in.
+        fn alarms(self: &ActorNamespaceHandle) -> Result<Box<ActorAlarms>>;
         /// Whether the cluster replicates the namespace's actors.
         fn replicated(self: &ActorNamespaceHandle) -> bool;
         /// Called as SQLite opens one of the namespace's files: fails once this instance's
@@ -1173,6 +1176,18 @@ pub mod ffi {
             name: &str,
             at_ms: u64,
         ) -> Box<ResultTask>;
+
+        /// A namespace's alarms, as a root actor's storage sets them: in the namespace's
+        /// scheduler, or once the namespace is gone in the store it kept them in.
+        type ActorAlarms;
+        /// Sets root actor `actor`'s alarm (none: deletes it). `name` is the one the actor was
+        /// created with by `idFromName()`, if any.
+        fn schedule(
+            self: &ActorAlarms,
+            actor: &str,
+            name: KjMaybe<&str>,
+            scheduled_time_ns: KjMaybe<i64>,
+        ) -> Result<()>;
 
         /// An actor's way back to the server: the requests it raises for itself, its facets
         /// (named child actors sharing its storage), and its transitions between idle and active.
