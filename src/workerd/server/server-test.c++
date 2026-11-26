@@ -4834,6 +4834,78 @@ KJ_TEST("Server: Durable Objects websocket constructor blockConcurrencyWhile thr
   KJ_ASSERT(wsConn.isEof());
 }
 
+KJ_TEST(
+    "Server: server-closed hibernatable WebSocket ends the connection after the close handshake") {
+  TestServer test(R"((
+    services = [(
+      name = "main",
+      worker = (
+        compatibilityDate = "2026-07-01",
+        modules = [(
+          name = "main.js",
+          esModule =
+            `export default {
+            `  fetch(request, env) {
+            `    return env.ns.getByName("room").fetch(request);
+            `  }
+            `};
+            `
+            `export class Room {
+            `  constructor(ctx) {
+            `    this.ctx = ctx;
+            `  }
+            `
+            `  fetch(request) {
+            `    if (new URL(request.url).pathname === "/tags") {
+            `      return new Response(this.tagsInCloseHandler);
+            `    }
+            `    if (new URL(request.url).pathname === "/close") {
+            `      for (const ws of this.ctx.getWebSockets()) ws.close(4001, "kicked");
+            `      return new Response("closed");
+            `    }
+            `    const [client, server] = Object.values(new WebSocketPair());
+            `    this.ctx.acceptWebSocket(server, ["tag-a"]);
+            `    return new Response(null, {status: 101, webSocket: client});
+            `  }
+            `
+            `  async webSocketClose(ws, code, reason) {
+            `    await new Promise((resolve) => setTimeout(resolve, 10));
+            `    this.tagsInCloseHandler = JSON.stringify(this.ctx.getTags(ws));
+            `  }
+            `}
+        )],
+        bindings = [(name = "ns", durableObjectNamespace = "Room")],
+        durableObjectNamespaces = [(
+          className = "Room",
+          uniqueKey = "room-key",
+        )],
+        durableObjectStorage = (inMemory = void),
+      ),
+    )],
+    sockets = [(name = "main", address = "test-addr", service = "main")],
+  ))"_kj);
+
+  test.start();
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // The client sends no data frame before the server closes the socket.
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/close", "closed");
+  wsConn.recvWebSocketClose(4001);
+
+  // Complete the closing handshake (code 4001 = 0x0FA1).
+  wsConn.send(kj::str("\x88\x02\x0f\xa1"));
+
+  // Durable Objects are evicted after 10 seconds of inactivity, which also ends the connection.
+  // The connection must end well before that, as soon as the handshake has completed.
+  test.wait(1);
+  KJ_EXPECT(wsConn.isEof());
+
+  // The close handler can still read the WebSocket's tags after the connection has ended.
+  conn.httpGet200("/tags", R"(["tag-a"])");
+}
+
 KJ_TEST("Server: tail workers") {
   TestServer test(R"((
     services = [

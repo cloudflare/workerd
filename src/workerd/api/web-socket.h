@@ -698,8 +698,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
       // Transitions our Hibernatable websocket to a "Releasing" state. The websocket will
       // transition to `Released` when convenient.
-      void initiateHibernatableRelease(
-          jsg::Lock& js, kj::Array<kj::String> tags, WebSocket::HibernatableReleaseState state);
+      void initiateHibernatableRelease(WebSocket::HibernatableReleaseState state);
 
       bool isAwaitingRelease();
       bool isAwaitingError();
@@ -892,6 +891,10 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   // so it cannot be `IoOwn`ed as `farNative` is. Informs the HibernatableWebSocket if we
   // called `close()`, preventing send() after revival.
   bool closedOutgoingForHib = false;
+
+  // The tags of a hibernatable WebSocket whose release has been initiated. The close or error
+  // event handler can read them after the native WebSocket has been released.
+  kj::Maybe<kj::Array<kj::String>> releasedHibernatableTags;
 
   // When YES, a server-initiated close does NOT automatically send a reciprocal close
   // frame, leaving readyState as CLOSING (2) when the close event fires. When NO (the

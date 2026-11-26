@@ -1556,6 +1556,9 @@ void LegacyWebSocketAdapter::tryReleaseNative(jsg::Lock& js) {
 }
 
 kj::Array<kj::StringPtr> LegacyWebSocketAdapter::getHibernatableTags() {
+  KJ_IF_SOME(tags, releasedHibernatableTags) {
+    return KJ_MAP(tag, tags) -> kj::StringPtr { return tag; };
+  }
   auto& accepted = JSG_REQUIRE_NONNULL(farNative->state.tryGet<Accepted>(), Error,
       "you must call 'acceptWebSocket()' before attempting to access the tags of a WebSocket.");
   JSG_REQUIRE(accepted.isHibernatable(), Error, "only hibernatable websockets can have tags.");
@@ -1786,8 +1789,17 @@ void LegacyWebSocketAdapter::initiateHibernatableRelease(
   KJ_IF_SOME(state, farNative->state.tryGet<Accepted>()) {
     KJ_REQUIRE(state.isHibernatable(),
         "tried to initiate hibernatable release but websocket wasn't hibernatable");
-    state.ws.initiateHibernatableRelease(js, kj::mv(tags), releaseState);
+    state.ws.initiateHibernatableRelease(releaseState);
+    releasedHibernatableTags = kj::mv(tags);
     farNative->closedIncoming = true;
+
+    // If our Close has already been sent, the connection is over in both directions, but it ends
+    // only when this end of the pipe goes away: when the incoming pump delivers a Close as the
+    // first message the pipe receives, it keeps pumping afterwards. The pump continuation in
+    // ensurePumping() releases the native WebSocket only if the Close is still being sent when
+    // the peer's Close arrives, so without this the connection would stay open until the actor is
+    // evicted.
+    tryReleaseNative(js);
   } else {
     KJ_LOG(WARNING, "Unexpected Hibernatable WebSocket state on release", farNative->state);
   }
@@ -1884,10 +1896,9 @@ kj::Array<kj::StringPtr> LegacyWebSocketAdapter::Accepted::WrappedWebSocket::get
 }
 
 void LegacyWebSocketAdapter::Accepted::WrappedWebSocket::initiateHibernatableRelease(
-    jsg::Lock& js, kj::Array<kj::String> tags, WebSocket::HibernatableReleaseState state) {
+    WebSocket::HibernatableReleaseState state) {
   auto& hibernatable = KJ_REQUIRE_NONNULL(getIfHibernatable());
   hibernatable.releaseState = state;
-  hibernatable.tags = kj::mv(tags);
 }
 
 bool LegacyWebSocketAdapter::Accepted::WrappedWebSocket::isAwaitingRelease() {
