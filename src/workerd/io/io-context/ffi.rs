@@ -422,15 +422,19 @@ async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<(), cxx:
 }
 
 /// The future that the function of a `ReentryCallback` returns, with its output type erased. KJ
-/// polls it on the thread of the `IoContext`, so it need not be `Send`.
-pub type ReentryFuture = Pin<Box<dyn Future<Output = Result<Box<dyn Any>, cxx::KjException>>>>;
+/// polls it on the event loop of the `IoContext`, which may move between OS threads, so it and its
+/// output are `Send`.
+pub type ReentryFuture =
+    Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send>, cxx::KjException>> + Send>>;
 
 /// The function of a `ReentryCallback`, with its output type erased. It finds the `IoContext`
 /// itself, which `IoContext::run()` has made current.
-pub type ReentryFnBox = Box<dyn for<'s> FnMut(&mut jsg::Lock<'s>) -> jsg::Result<ReentryFuture>>;
+pub type ReentryFnBox =
+    Box<dyn for<'s> FnMut(&mut jsg::Lock<'s>) -> jsg::Result<ReentryFuture> + Send>;
 
 /// See `bridge::ReentryFn`. C++ holds it in the `IoContext`, as a `ReverseIoOwn`, and runs and drops
-/// it only on the thread of the `IoContext`, so it need not be `Send`.
+/// it only on the event loop of the `IoContext`, which may move between OS threads, so it is
+/// `Send`.
 pub struct ReentryFn(pub ReentryFnBox);
 
 /// See `bridge::ReentryCall`.
@@ -438,8 +442,8 @@ pub struct ReentryCall {
     /// The future of the function, once `reentry_fn_run()` has started it.
     pub future: Option<ReentryFuture>,
     /// Where `reentry_call_wait()` puts the future's output, for the `ReentryCallFuture` of the
-    /// call. Both run on the thread of the `IoContext`.
-    pub output: Rc<Cell<Option<Box<dyn Any>>>>,
+    /// call. Both run on the event loop of the `IoContext`.
+    pub output: Rc<Cell<Option<Box<dyn Any + Send>>>>,
 }
 
 /// Runs `function` for `call`, from a `ReentryCallback` in `IoContext::run()`, with the isolate
