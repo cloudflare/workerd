@@ -4,6 +4,8 @@
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import assert from 'node:assert';
 import { scheduler } from 'node:timers/promises';
+// This module itself, to find its test cases (see the end of the file).
+import * as cases from 'worker';
 
 // 5s timeout for some of the requests going to the container.
 // We can get to have a stack trace with an
@@ -3793,3 +3795,20 @@ export const testContainerSnapshotRelayerWithDirectoryMounts = {
     await stub.testContainerSnapshotRelayerWithDirectoryMounts();
   },
 };
+
+// Each case starts containers, about two seconds' worth, so Bazel runs the cases in shards
+// (`shard_count`). A shard runs every TEST_TOTAL_SHARDS-th case in name order, starting at its
+// TEST_SHARD_INDEX-th; the others pass at once.
+const shardCases = Object.entries(cases)
+  .filter(([, value]) => typeof value?.test === 'function')
+  .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+for (const [index, [, testCase]] of shardCases.entries()) {
+  const runCase = testCase.test;
+  testCase.test = async function (ctrl, env, ctx) {
+    const shards = Number(env.TEST_TOTAL_SHARDS ?? 1);
+    const shard = Number(env.TEST_SHARD_INDEX ?? 0);
+    if (index % shards === shard) {
+      await runCase.call(this, ctrl, env, ctx);
+    }
+  };
+}

@@ -14,7 +14,7 @@
 
 namespace workerd::rust::worker {
 
-using HttpMethod = kj::HttpMethod;
+using HttpMethod = kj::HttpMethod::Known;
 using HttpHeaders = kj::HttpHeaders;
 using HttpServiceResponse = kj::HttpService::Response;
 using AsyncInputStream = kj::AsyncInputStream;
@@ -45,7 +45,7 @@ inline kj::Promise<void> worker_request(WorkerInterface& worker,
     AsyncInputStream& requestBody,
     HttpServiceResponse& response) {
   auto urlStr = kj::str(kj::from<kj_rs::Rust>(url).asChars());
-  co_await worker.request(method, urlStr, headers, requestBody, response);
+  co_await worker.request(kj::HttpMethod(method), urlStr, headers, requestBody, response);
 }
 
 inline kj::Promise<void> worker_connect(WorkerInterface& worker,

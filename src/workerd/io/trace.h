@@ -10,6 +10,7 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/util/strong-bool.h>
 
+#include <kj/compat/http.h>
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
@@ -20,7 +21,6 @@
 #include <initializer_list>
 
 namespace kj {
-enum class HttpMethod;
 class EntropySource;
 }  // namespace kj
 

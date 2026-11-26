@@ -24,8 +24,11 @@ build:regenerate-snapshots --//build/config:python_snapshots=false
 test --local_resources=wptserve=1
 
 # use lower test timeouts: https://bazel.build/reference/test-encyclopedia#role-test-runner
-# corresponds to small,medium,large,enormous tests (medium is default)
-build --test_timeout=3,15,60,240
+# corresponds to small,medium,large,enormous tests (medium is default). No test gets more than 60 s,
+# in any config: every test should finish within 40 s, sanitizers included, so a test that reaches
+# 60 s has hung or regressed. Make a slow test faster or shard it; don't raise its size. Only PGO
+# training (pgo-instrument) allows longer.
+build --test_timeout=3,15,60,60
 
 # TODO(cleanup): Bazel 9 sets this by default, which breaks the macOS-cross build. Fix and re-enable.
 common --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=False
@@ -336,8 +339,8 @@ build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:hi
 build:tsan-common --test_env=KJ_CLEAN_SHUTDOWN=1
 # Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
 build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
-# TSan significantly increases test runtime.
-build:tsan-common --test_timeout=30,150,600,2400
+# TSan significantly increases test runtime, so the smaller sizes get more time, up to the 60 s cap.
+build:tsan-common --test_timeout=30,60,60,60
 # Enable V8's TSan synchronization annotations. V8's Bazel build does not currently derive this
 # define from the compiler's sanitizer flags. V8_IS_TSAN, which would also make V8's generated code
 # call into TSan on every load and store, is left off: that costs V8-heavy tests about 20x the time
@@ -427,7 +430,7 @@ build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
 build:macos-cross-x86_64 --cpu=darwin_x86_64 --host_cpu=darwin_arm64 --platforms //:macOS_x86
 # Some cross-compiled tests are slower when run over Rosetta, increase the medium test size timeout.
 # Test performance is still very much satisfactory considering that emulation is being used here.
-build:macos-cross-x86_64 --test_timeout=1,30,60,240
+build:macos-cross-x86_64 --test_timeout=1,30,60,60
 
 # On Linux, the toolchain is LLVM's own, over a pinned sysroot (build/deps/llvm.MODULE.bazel), and
 # nothing is taken from the host. It links libc++, libc++abi and libunwind statically, so binaries
@@ -545,7 +548,8 @@ build:pgo-instrument --config=release_linux-without-pgo --config=thin-lto --conf
 build:pgo-instrument --copt=-fprofile-generate --linkopt=-fprofile-generate
 # The instrumented tests run slower and also merge their profiles (build/pgo/profile-env.sh). In
 # training, the serving workload takes about a minute against its 15 s limit, and the eventsource
-# tests 10-12 s. A test that times out loses its profile.
+# tests 10-12 s. A test that times out loses its profile. Training collects profiles rather than
+# checking changes, so it keeps longer timeouts than the 60 s cap on every other config.
 build:pgo-instrument --test_timeout=30,240,600,1200
 # Instrument the Rust code too. Its counters go into the same profile, written by the profile
 # runtime that clang links; rustc's own copy of that runtime would clash with it, and stable rustc
@@ -680,10 +684,11 @@ build:coverage --copt=-g1
 # Use limited coverage mode for smaller binaries and faster execution (used by Chromium)
 build:coverage --copt=-mllvm --copt=-limited-coverage-experimental=true
 coverage --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine,-lint,-benchmark,-workerd-benchmark,-no-coverage
-# Coverage instrumentation slows down test execution, so extend timeouts
+# Coverage instrumentation slows down test execution, so every size gets the full 60 s cap. The
+# slowest test takes about 25 s under coverage on bazelflare.
 # We disable enormous tests due to the slowdown (CI jobs have a 6h max duration)
 coverage --test_size_filters=-enormous
-coverage --test_timeout=240,240,240,240
+coverage --test_timeout=60,60,60,60
 coverage --build_tests_only
 
 # These configs are defined internally and enabled on many machines.

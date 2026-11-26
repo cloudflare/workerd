@@ -69,3 +69,22 @@ fn rejects_a_repeated_flag() {
         "field someField has more than one $compatEnableFlag"
     );
 }
+
+#[test]
+fn maps_every_flag_to_its_slot() {
+    let table = FlagTable::get().unwrap();
+    let mut expected = HashMap::new();
+    for (index, info) in table.fields.iter().enumerate() {
+        for (flag, kind) in [
+            (info.enable_flag, FlagKind::Enable),
+            (info.disable_flag, FlagKind::Disable),
+        ] {
+            if let Some(flag) = flag {
+                expected
+                    .entry(flag.as_bytes())
+                    .or_insert_with(|| slot(index, kind));
+            }
+        }
+    }
+    assert_eq!(table.slots, expected);
+}

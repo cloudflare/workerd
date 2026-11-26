@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { deepStrictEqual, strictEqual, ok } from 'node:assert';
+import { deepStrictEqual, strictEqual, ok, rejects } from 'node:assert';
 
 // Test for the Event and EventTarget standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
@@ -64,29 +64,26 @@ export const wait = {
 
 export const sequentialAbort = {
   async test(ctrl, env, ctx) {
-    // Sequentially wait a very long time 11k times, each time aborting via an
-    // AbortController. This exercises the abort path under heavy repetition.
-    // Test ensures that the underlying timer quota is not exceeded when the
-    // timeout is cancelled with an AbortSignal
-    const iterations = 11_000;
-    let completed = 0;
-    for (let i = 0; i < iterations; i++) {
+    // Aborting a wait must free its slot in the quota of 10,000 active timeouts. Fill all but one
+    // slot with waits that never end, then repeatedly wait in the last free slot and abort: if an
+    // abort leaked its slot, the next wait would exceed the quota. (Aborting 11,000 waits would
+    // check the same, but each abort throws an exception, which takes about 5 ms under TSan.)
+    const quota = 10_000;
+    for (let i = 0; i < quota - 1; i++) {
+      scheduler.wait(1_000_000);
+    }
+    for (let i = 0; i < 100; i++) {
       const ac = new AbortController();
       const promise = scheduler.wait(1_000_000, { signal: ac.signal });
-      ac.abort();
-      try {
-        await promise;
-        throw new Error('should have thrown');
-      } catch (err) {
-        strictEqual(err.message, 'The operation was aborted');
+      if (i === 0) {
+        // The quota is full now, so this check would notice if the quota grew.
+        await rejects(async () => scheduler.wait(1_000_000), {
+          name: 'QuotaExceededError',
+        });
       }
-      completed++;
+      ac.abort();
+      await rejects(promise, { message: 'The operation was aborted' });
     }
-    strictEqual(
-      completed,
-      11_000,
-      `Expected 11000 iterations but only completed ${completed}`
-    );
   },
 };
 
