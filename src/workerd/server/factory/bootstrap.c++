@@ -12,15 +12,12 @@
 #include <workerd/io/release-version.embed.h>
 #include <workerd/server/json-logger.h>
 #include <workerd/server/server/bridge.rs.h>
-#include <workerd/server/workerd.capnp.h>
 #include <workerd/util/entropy.h>
 
 #include <kj-rs-io/async-io.h>
 #include <kj-rs/kj-rs.h>
 #include <v8-initialization.h>
 
-#include <capnp/message.h>
-#include <capnp/serialize.h>
 #include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/io.h>
@@ -121,13 +118,6 @@ kj::StringPtr buildMode() {
 #endif
 }
 
-bool structuredLogging(const ::rust::Vec<uint64_t>& configWords) {
-  capnp::FlatArrayMessageReader reader(asWords(kj::from<Rust>(configWords)), CONFIG_READER_OPTIONS);
-  auto config = reader.getRoot<config::Config>();
-  return config.hasLogging() ? config.getLogging().getStructuredLogging()
-                             : config.getStructuredLogging();
-}
-
 // The I/O of one factory over the Rust-owned loop, attached to the factory. Members are declared
 // in construction order, which is the reverse of destruction.
 class LoopIo {
@@ -162,47 +152,21 @@ class LoopIo {
   kj_rs_io::TokioAsyncIoProvider provider;
 };
 
-// The `serve` / `test` options that apply to the process.
-void setUpServeOrTestProcess(
-    ProcessState::Options& process, const ServeOrTestOptions& serveOrTest) {
-  KJ_IF_SOME(path, serveOrTest.perfetto_trace_path) {
-    process.perfettoTracePath = kj::str(path);
-  }
-  KJ_IF_SOME(categories, serveOrTest.perfetto_trace_categories) {
-    process.perfettoTraceCategories = kj::str(categories);
-  }
-  KJ_IF_SOME(path, serveOrTest.async_trace_path) {
-    process.asyncTracePath = kj::str(path);
-  }
+kj::Maybe<kj::String> toKj(const kj::Maybe<::rust::String>& string) {
+  return string.map([](const ::rust::String& string) { return kj::str(string); });
 }
 
-// The `test` options that apply to the process.
-void setUpTestProcess(ProcessState::Options& process, const TestOptions& testOptions) {
-  // Always turn on info logging when running tests so that uncaught exceptions are displayed.
-  // TODO(beta): This can be removed once we improve our error logging story.
-  process.infoLogging = !testOptions.no_verbose;
-  process.predictable = testOptions.predictable;
-  process.gcStress = testOptions.gc_stress;
-  process.allAutogates = testOptions.all_autogates;
-}
-
-// The `bench` options that apply to the process. Bench mode is on before any worker compiles.
-void setUpBenchProcess(ProcessState::Options& process, const BenchOptions& benchOptions) {
-  process.benchMode = true;
-  // As for tests, so that uncaught exceptions are displayed.
-  process.infoLogging = !benchOptions.no_verbose;
-  process.allAutogates = benchOptions.all_autogates;
-}
-
-void applyServeOrTestOptions(
-    WorkerFactory::Options& options, const ServeOrTestOptions& serveOrTest, kj::Filesystem& fs) {
-  KJ_IF_SOME(frames, serveOrTest.async_trace_stacks) {
+// The command line's factory options, applied to the factory's `options`. Paths resolve against
+// `fs`'s working directory.
+void applyFactoryOptions(
+    WorkerFactory::Options& options, const FactoryOptions& from, kj::Filesystem& fs) {
+  KJ_IF_SOME(frames, from.async_trace_stacks) {
     options.asyncTraceStackDepth = frames;
   }
-  options.asyncTracePromises = serveOrTest.async_trace_promises;
-  options.experimental = serveOrTest.experimental;
+  options.asyncTracePromises = from.async_trace_promises;
+  options.experimental = from.experimental;
   auto& python = options.pythonConfig;
-  KJ_IF_SOME(path, serveOrTest.pyodide_bundle_disk_cache_dir) {
+  KJ_IF_SOME(path, from.pyodide_bundle_disk_cache_dir) {
     // Resolved as kj resolves paths, so `..` is taken lexically (`file/..` names the file's
     // directory).
     auto dir = fs.getCurrentPath().eval(kj::str(path)).toNativeString(true);
@@ -211,34 +175,17 @@ void applyServeOrTestOptions(
         "--pyodide-bundle-disk-cache-dir does not resolve to a UTF-8 path", dir);
     options.pyodideBundleDiskCacheDir = kj::mv(dir);
   }
-  python.createSnapshot = serveOrTest.python_save_snapshot;
-  python.createBaselineSnapshot = serveOrTest.python_save_baseline_snapshot;
-  KJ_IF_SOME(path, serveOrTest.python_load_snapshot) {
-    python.loadSnapshotFromDisk = kj::str(path);
-  }
-  KJ_IF_SOME(path, serveOrTest.python_snapshot_dir) {
+  python.createSnapshot = from.python_save_snapshot;
+  python.createBaselineSnapshot = from.python_save_baseline_snapshot;
+  python.loadSnapshotFromDisk = toKj(from.python_load_snapshot);
+  KJ_IF_SOME(path, from.python_snapshot_dir) {
     python.snapshotDirectory =
         fs.getRoot().tryOpenSubdir(fs.getCurrentPath().eval(kj::str(path)), kj::WriteMode::MODIFY);
   }
-}
-
-// The `test` options that apply to a factory.
-void applyTestOptions(WorkerFactory::Options& options, const TestOptions& testOptions) {
-  KJ_IF_SOME(compatDate, testOptions.compat_date) {
-    options.testCompatibilityDateOverride = kj::str(compatDate);
-  }
-  options.syncStorage = false;
-}
-
-// The `bench` options that apply to a factory.
-void applyBenchOptions(WorkerFactory::Options& options, const BenchOptions& benchOptions) {
-  KJ_IF_SOME(compatDate, benchOptions.compat_date) {
-    options.testCompatibilityDateOverride = kj::str(compatDate);
-  }
-  KJ_IF_SOME(compatDate, benchOptions.default_compat_date) {
-    options.defaultCompatibilityDate = kj::str(compatDate);
-  }
-  options.tailWorkers = benchOptions.trace;
+  options.testCompatibilityDateOverride = toKj(from.compat_date_override);
+  options.defaultCompatibilityDate = toKj(from.default_compat_date);
+  options.syncStorage = from.sync_storage;
+  options.tailWorkers = from.tail_workers;
 }
 
 }  // namespace
@@ -263,8 +210,7 @@ bool fuzzilli_supported() {
 #endif
 }
 
-int32_t with_process_context(
-    bool verbose, ::rust::Vec<uint64_t> config, ::rust::Box<PendingCommand> command) {
+int32_t with_process_context(bool verbose, bool structured, ::rust::Box<PendingCommand> command) {
   kj::printStackTraceOnCrash();
 #if defined(WORKERD_FUZZILLI) && defined(__linux__)
   initSignalHandlers();
@@ -273,49 +219,38 @@ int32_t with_process_context(
     kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
   }
   kj::Maybe<JsonLogger> jsonLogger;
-  bool structured = structuredLogging(config);
   if (structured) {
     jsonLogger.emplace();
   }
-  return run_pending_command(kj::mv(command), kj::mv(config), structured);
+  return run_pending_command(kj::mv(command));
 }
 
-kj::Arc<ProcessState> process_start(::rust::Slice<const uint64_t> config,
-    const ServeOrTestOptions& serveOrTest,
-    kj::Maybe<const TestOptions&> test,
-    kj::Maybe<const BenchOptions&> bench) {
-  capnp::FlatArrayMessageReader reader(asWords(kj::from<Rust>(config)), CONFIG_READER_OPTIONS);
-  auto root = reader.getRoot<config::Config>();
-  ProcessState::Options options{
-    .autogates = KJ_MAP(gate, root.getAutogates()) { return kj::str(gate); },
-    .v8Flags = KJ_MAP(flag, root.getV8Flags()) { return kj::str(flag); },
+kj::Arc<ProcessState> process_start(const ProcessOptions& options) {
+  auto strings = [](const ::rust::Vec<::rust::String>& strings) {
+    return KJ_MAP(string, strings) { return kj::str(string); };
   };
-  setUpServeOrTestProcess(options, serveOrTest);
-  KJ_IF_SOME(t, test) {
-    setUpTestProcess(options, t);
-  }
-  KJ_IF_SOME(b, bench) {
-    setUpBenchProcess(options, b);
-  }
-  return ProcessState::start(options);
+  return ProcessState::start(ProcessState::Options{
+    .perfettoTracePath = toKj(options.perfetto_trace_path),
+    .perfettoTraceCategories = toKj(options.perfetto_trace_categories).orDefault(kj::String()),
+    .asyncTracePath = toKj(options.async_trace_path),
+    .autogates = strings(options.autogates),
+    .v8Flags = strings(options.v8_flags),
+    .allAutogates = options.all_autogates,
+    .infoLogging = options.info_logging,
+    .predictable = options.predictable,
+    .gcStress = options.gc_stress,
+    .benchMode = options.bench_mode,
+  });
 }
 
 kj::Own<WorkerFactory> factory_new(const ProcessState& process,
     kj_rs_tokio::TokioAsyncIoContext& loop,
     ::rust::Vec<uint64_t> config,
-    const ServeOrTestOptions& serveOrTest,
-    kj::Maybe<const TestOptions&> test,
-    kj::Maybe<const BenchOptions&> bench) {
+    const FactoryOptions& factoryOptions) {
   auto io = kj::heap<LoopIo>(loop);
   auto options = kj::heap<WorkerFactory::Options>();
   options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
-  applyServeOrTestOptions(*options, serveOrTest, io->getFilesystem());
-  KJ_IF_SOME(t, test) {
-    applyTestOptions(*options, t);
-  }
-  KJ_IF_SOME(b, bench) {
-    applyBenchOptions(*options, b);
-  }
+  applyFactoryOptions(*options, factoryOptions, io->getFilesystem());
   // Destroyed in this order: the factory, its reference to the process, then its I/O.
   return newWorkerFactory(process, io->get(), kj::mv(options), kj::mv(config)).attach(kj::mv(io));
 }

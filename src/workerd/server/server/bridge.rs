@@ -223,16 +223,31 @@ pub mod ffi {
     }
 
     // =====================================================================================
-    // The command line (bootstrap.h): the options the C++ driver applies, and the driver itself.
+    // The command line (bootstrap.h): the process, the factory, the process's logging and exit.
 
-    /// The options of `serve`, `test` and `bench` the C++ driver applies: to the process
-    /// (perfetto, the async trace file), or to the worker factory (async tracing, experimental,
-    /// Python).
+    /// What the process sets up once (`process_start`, factory/per-process.h), in that order: the
+    /// perfetto session, the async trace file, tcmalloc, the autogates, the modes, V8.
     #[namespace = "workerd::server::cli"]
-    struct ServeOrTestOptions {
+    struct ProcessOptions {
         perfetto_trace_path: KjMaybe<String>,
         perfetto_trace_categories: KjMaybe<String>,
         async_trace_path: KjMaybe<String>,
+        /// The gates to enable, each `workerd-autogate-<name>`; others are ignored.
+        autogates: Vec<String>,
+        v8_flags: Vec<String>,
+        /// Every gate, over `autogates`.
+        all_autogates: bool,
+        /// Info logging, so that uncaught exceptions are displayed.
+        info_logging: bool,
+        predictable: bool,
+        gc_stress: bool,
+        /// Bench mode, on before any worker compiles.
+        bench_mode: bool,
+    }
+
+    /// What one worker factory is built with (`factory_new`).
+    #[namespace = "workerd::server::cli"]
+    struct FactoryOptions {
         async_trace_stacks: KjMaybe<u32>,
         async_trace_promises: bool,
         experimental: bool,
@@ -241,30 +256,14 @@ pub mod ffi {
         python_save_baseline_snapshot: bool,
         python_load_snapshot: KjMaybe<String>,
         python_snapshot_dir: KjMaybe<String>,
-    }
-
-    /// The options of `test` the C++ driver applies: logging, V8 modes, autogates, the
-    /// compatibility date every worker gets.
-    #[namespace = "workerd::server::cli"]
-    struct TestOptions {
-        no_verbose: bool,
-        predictable: bool,
-        gc_stress: bool,
-        all_autogates: bool,
-        compat_date: KjMaybe<String>,
-    }
-
-    /// The options of `bench` the C++ driver applies: bench mode, which they turn on, logging,
-    /// autogates, the compatibility dates workers get, whether requests get tail workers.
-    #[namespace = "workerd::server::cli"]
-    struct BenchOptions {
-        no_verbose: bool,
-        all_autogates: bool,
-        /// Every worker's date; none may specify its own.
-        compat_date: KjMaybe<String>,
-        /// The date of workers that don't specify one.
+        /// Every worker's compatibility date; none may specify its own.
+        compat_date_override: KjMaybe<String>,
+        /// The compatibility date of workers that don't specify one.
         default_compat_date: KjMaybe<String>,
-        trace: bool,
+        /// Whether Durable Object storage is written synchronously.
+        sync_storage: bool,
+        /// Whether requests get tail workers.
+        tail_workers: bool,
     }
 
     /// What the binary was built from, as `workerd bench`'s report records it.
@@ -310,36 +309,27 @@ pub mod ffi {
 
         /// Runs `command` (`run_pending_command`) with the process's logging set up on the C++
         /// stack around it: the crash handler, info logging if `verbose`, and the JSON logger if
-        /// `config` asks for structured logging (KJ requires a `kj::ExceptionCallback` to live
-        /// on the stack of the thread that installs it). The command gets `config` and whether
-        /// logging is structured. The command's result is the result.
+        /// `structured` (KJ requires a `kj::ExceptionCallback` to live on the stack of the
+        /// thread that installs it). The command's result is the result.
         fn with_process_context(
             verbose: bool,
-            config: Vec<u64>,
+            structured: bool,
             command: Box<PendingCommand>,
         ) -> Result<i32>;
 
-        /// Sets up the process (`ProcessState::start`, factory/per-process.h) for `config` and the
-        /// options: perfetto, the async trace file, tcmalloc, the config's autogates, the test
-        /// and bench modes, and V8 with the config's flags. `config` is an encoded message
-        /// (segment table, then segments) in 8-byte words. `test` and `bench` are the options of
-        /// those commands, at most one of them given. Once per process: an error once V8 has
-        /// started; any other error means the process failed to start.
+        /// Sets up the process (`ProcessState::start`, factory/per-process.h): perfetto, the async
+        /// trace file, tcmalloc, autogates, the test and bench modes and V8. Once per process:
+        /// an error once V8 has started. Other errors mean the process failed to start.
         ///
         /// Every factory built on it holds a reference, so it is torn down -- V8 disposed, the
         /// async trace file ended, the perfetto trace flushed -- once the last factory and this
         /// handle are dropped.
-        fn process_start(
-            config: &[u64],
-            options: &ServeOrTestOptions,
-            test: KjMaybe<&TestOptions>,
-            bench: KjMaybe<&BenchOptions>,
-        ) -> Result<KjArc<ProcessState>>;
+        fn process_start(options: &ProcessOptions) -> Result<KjArc<ProcessState>>;
 
-        /// The worker factory over `config` on `process`, with I/O of its own over
-        /// `event_loop`'s timer (a tokio-backed `kj::Network`, the disk, entropy), which it
-        /// drops after itself. The options are `process_start`'s. An error means the process
-        /// failed to start.
+        /// The worker factory over `config` on `process`, with its own I/O over `event_loop`'s
+        /// timer (a tokio-backed `kj::Network`, the disk, entropy), which it owns and drops
+        /// after itself. `config` is an encoded message (segment table, then segments) in 8-byte
+        /// words. An error means the process failed to start.
         ///
         /// The factory dies before the Runtime (the timer and the loop must outlive everything
         /// on them).
@@ -347,9 +337,7 @@ pub mod ffi {
             process: &ProcessState,
             event_loop: Pin<&mut TokioAsyncIoContext>,
             config: Vec<u64>,
-            options: &ServeOrTestOptions,
-            test: KjMaybe<&TestOptions>,
-            bench: KjMaybe<&BenchOptions>,
+            options: &FactoryOptions,
         ) -> Result<KjOwn<WorkerFactory>>;
 
         fn build_info() -> Result<BuildInfo>;
@@ -924,11 +912,7 @@ pub mod ffi {
 
         /// The Rust half of a command, run by `with_process_context` (entry.rs).
         type PendingCommand;
-        fn run_pending_command(
-            command: Box<PendingCommand>,
-            config: Vec<u64>,
-            structured_logging: bool,
-        ) -> Result<i32>;
+        fn run_pending_command(command: Box<PendingCommand>) -> Result<i32>;
 
         /// The server run inside another program's event loop (in_process.rs), on a factory
         /// that program built: a test, or `workerd repl`. After `mock_internet`, connections to

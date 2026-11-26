@@ -12,7 +12,7 @@ use clap::Parser;
 use clap::Subcommand;
 use clap::ValueEnum;
 use workerd_server::bench;
-use workerd_server::bridge::ffi as server;
+use workerd_server::process as server;
 
 use crate::help;
 
@@ -512,17 +512,17 @@ impl From<&ServeOrTestArgs> for server::ServeOrTestOptions {
             .map(|Override { name, value }| (name, value))
             .unzip();
         Self {
-            perfetto_trace_path: perfetto_trace_path.into(),
-            perfetto_trace_categories: perfetto_trace_categories.into(),
-            async_trace_path: args.async_trace.clone().into(),
-            async_trace_stacks: args.async_trace_stacks.into(),
+            perfetto_trace_path,
+            perfetto_trace_categories,
+            async_trace_path: args.async_trace.clone(),
+            async_trace_stacks: args.async_trace_stacks,
             async_trace_promises: args.async_trace_promises,
             experimental: args.experimental,
-            pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.clone().into(),
+            pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.clone(),
             python_save_snapshot: args.python_save_snapshot,
             python_save_baseline_snapshot: args.python_save_baseline_snapshot,
-            python_load_snapshot: args.python_load_snapshot.clone().into(),
-            python_snapshot_dir: args.python_snapshot_dir.clone().into(),
+            python_load_snapshot: args.python_load_snapshot.clone(),
+            python_snapshot_dir: args.python_snapshot_dir.clone(),
         }
     }
 }
@@ -549,7 +549,7 @@ impl From<&TestArgs> for server::TestOptions {
             predictable: args.predictable,
             gc_stress: args.gc_stress,
             all_autogates: args.all_autogates,
-            compat_date: args.compat_date.clone().into(),
+            compat_date: args.compat_date.clone(),
         }
     }
 }
