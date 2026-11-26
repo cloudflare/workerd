@@ -1905,6 +1905,35 @@ KJ_TEST("SQLite memory metering tracks allocations correctly") {
       "memory should decrease when running `PRAGMA shrink_memory`");
 }
 
+KJ_TEST("SQLite memory metering counts text bound from an array in a UTF-16 database") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/16 * 1024 * 1024);
+  // SQLite converts bound UTF-8 text to the database's encoding when it is bound, so binding text
+  // allocates a copy, which SQLite frees when the binding is cleared.
+  db.run("PRAGMA encoding = 'UTF-16'");
+  db.run("CREATE TABLE t (v TEXT)");
+  KJ_ASSERT(db.run("PRAGMA encoding").getText(0) == "UTF-16le");
+
+  static constexpr size_t TEXT_LENGTH = 4096;
+  auto text = kj::str(kj::repeat('x', TEXT_LENGTH));
+  SqliteDatabase::Query::ValuePtr bindings[] = {text.asPtr()};
+  auto statement = db.prepare("SELECT length(?)");
+  auto run = [&]() {
+    auto query = statement.run(kj::ArrayPtr<const SqliteDatabase::Query::ValuePtr>(bindings));
+    KJ_ASSERT(query.getInt(0) == TEXT_LENGTH);
+  };
+
+  run();
+  size_t memoryBytes = db.getSqliteMemoryBytes();
+  for (auto i KJ_UNUSED: kj::zeroTo(100)) {
+    run();
+  }
+  // Each binding's copy is counted when it is allocated as well as when it is freed.
+  KJ_EXPECT(db.getSqliteMemoryBytes() >= memoryBytes, db.getSqliteMemoryBytes(), memoryBytes);
+}
+
 KJ_TEST("I/O exceptions pass through SQLite with the error context") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
   SqliteDatabase::Vfs vfs(*dir);

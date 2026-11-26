@@ -1736,6 +1736,7 @@ void SqliteDatabase::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
 }
 
 void SqliteDatabase::Query::bind(uint i, ValuePtr value) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
 
   KJ_SWITCH_ONEOF(value) {
