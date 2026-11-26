@@ -64,6 +64,19 @@ fn quoting() {
 }
 
 #[test]
+fn quotes_bytes_that_parsing_rejects() {
+    // MimeType takes parameters that no parse produced, so a value may hold any byte.
+    assert_eq!(params_to_string(&[P(b"a", b"\n")]), b"a=\"\n\"");
+    assert_eq!(params_to_string(&[P(b"a", b"\0")]), b"a=\"\0\"");
+    assert_eq!(params_to_string(&[P(b"a", b"\x7f")]), b"a=\"\x7f\"");
+    assert_eq!(params_to_string(&[P(b"a", b"\xff")]), b"a=\"\xff\"");
+    assert_eq!(
+        params_to_string(&[P(b"boundary", b"\r\n")]),
+        b" boundary=\"\r\n\""
+    );
+}
+
+#[test]
 fn reports_a_length_that_disagrees() {
     let mut short = [0u8; 4];
     assert_eq!(

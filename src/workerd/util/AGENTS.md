@@ -22,7 +22,7 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 | `thread-scopes.h` | Thread-local scope flags                                 | Self-described "horrible hacks"; `AllowV8BackgroundThreadsScope`, `MultiTenantProcess` |
 | `abortable.h`     | `newAbortableInputStream/OutputStream`                   | Wraps KJ streams with disconnect capability                                            |
 | `stream-utils.h`  | `NeuterableInputStream`, `newNullInputStream`            | Disconnectable I/O; null/identity stream factories                                     |
-| `mimetype.h`      | MIME type parser/serializer                              | Rust `mimetype/` (`RUST_MIMETYPE`), C++ `mimetype-legacy.c++`; TS: `api/mimetype-js.h` |
+| `mimetype.h`      | MIME type parser/serializer                              | Rust `mimetype/` behind a C++ facade; TS: `api/mimetype-js.h`                          |
 | `wait-list.h`     | Cross-request event subscription                         | Shared fulfiller list for signaling waiters                                            |
 
 ## Guidelines
