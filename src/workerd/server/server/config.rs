@@ -1668,11 +1668,16 @@ impl Server {
 
         worker.link(
             LinkedChannels {
-                first_subrequest: 0,
-                first_actor_class: 0,
-                subrequest,
+                subrequest: subrequest
+                    .into_iter()
+                    .map(SubrequestChannel::Rust)
+                    .collect(),
                 actor,
-                actor_class,
+                actor_class: actor_class
+                    .into_iter()
+                    .map(ActorClassChannel::Rust)
+                    .collect(),
+                rpc: Vec::new(),
                 cache,
                 tails,
                 streaming_tails,

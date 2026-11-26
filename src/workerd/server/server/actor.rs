@@ -2053,7 +2053,7 @@ async fn resolve_facet_start(
 ) -> Result<()> {
     let ffi::FacetStartInfo { id, actor_class } = ffi::facet_start_resolve(start).await?;
     if let Some(container) = container.upgrade() {
-        let class = actor_class.0;
+        let class = Rc::clone(actor_class.rust()?);
         *container.class_and_id.borrow_mut() = ClassState::Ready { class, id };
     }
     Ok(())

@@ -11,6 +11,11 @@
 //! (worker-factory.h's `SubrequestChannelHandle`). A facet's class comes back from the runtime
 //! and is unwrapped to the same `Rc` (`ActorClassChannelHandle::tryUnwrap`).
 //!
+//! A channel can also be a C++ one, which the server only stores and hands back: what a dynamic
+//! worker's source supplies (its global outbound and the capabilities in its `env`) that is not
+//! one of the server's own. C++ gets the same object back, not a wrapper of it. A C++ channel
+//! that wraps one of the server's is unwrapped as it comes in, as a facet's class is.
+//!
 //! Every type here is single-threaded (`Rc`): channels live and die on the loop thread, as the
 //! runtime's do.
 
@@ -19,11 +24,15 @@ use std::rc::Rc;
 use std::rc::Weak;
 
 use futures::future::LocalBoxFuture;
+use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
+use kj_rs::KjRc;
 
 use crate::Result;
 use crate::actor::ActorContainer;
 use crate::actor::ActorNamespace;
+use crate::bindings::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+use crate::bindings::len_u32;
 use crate::bridge::ffi;
 use crate::config::Server;
 use crate::worker::LinkedChannels;
@@ -151,11 +160,41 @@ pub struct NewActor<'a> {
 }
 
 // =====================================================================================
-// The bridge types: the handles C++ holds. Each is a newtype so that cxx can name it; the
-// methods the bridge declares on one are written beside the type it holds.
+// The bridge types: the handles C++ holds. Each is a newtype or an enum so that cxx can name it;
+// the methods the bridge declares on one are written beside the type it holds.
 
-pub struct SubrequestChannel(pub Rc<dyn Channel>);
-pub struct ActorClassChannel(pub Rc<dyn ActorClass>);
+/// A subrequest channel: the server's own, or a C++ one it stores.
+///
+/// C++ wraps only the server's own in a `SubrequestChannelHandle`, and takes a C++ one back as
+/// itself (`cxx_channel`), so the methods the handle calls serve only the server's own.
+#[derive(Clone)]
+pub enum SubrequestChannel {
+    Rust(Rc<dyn Channel>),
+    Cxx(io_channels::SubrequestChannel),
+}
+
+/// An actor class: the server's own, or a C++ one it stores, as [`SubrequestChannel`].
+#[derive(Clone)]
+pub enum ActorClassChannel {
+    Rust(Rc<dyn ActorClass>),
+    Cxx(io_channels::ActorClassChannel),
+}
+
+/// A dynamic worker's channels from its source, numbered as its `env` refers to them.
+///
+/// `indexDynamicChannels()` (worker-factory.c++) adds them as it rewrites the capabilities in
+/// the `env` into channel numbers. The worker's `ctx.exports` is numbered after them. Empty for a
+/// config worker, whose bindings the server resolves itself.
+#[derive(Default)]
+pub struct DynamicChannels {
+    /// The source's global outbound, or a channel that refuses every request when it gave none,
+    /// so that the worker may not reach the internet.
+    pub global_outbound: Option<SubrequestChannel>,
+    /// Numbered after the global outbound's `SPECIAL_SUBREQUEST_CHANNEL_COUNT` slots.
+    pub subrequest: Vec<SubrequestChannel>,
+    pub actor_class: Vec<ActorClassChannel>,
+    pub rpc: Vec<io_channels::RpcChannel>,
+}
 
 /// A worker's I/O channel table: what its bindings reach. The runtime's `IoChannelFactory`, one
 /// per worker, handed to every request.
@@ -208,39 +247,140 @@ pub struct Tail {
 impl SubrequestChannel {
     #[must_use]
     pub fn new(channel: Rc<dyn Channel>) -> Box<Self> {
-        Box::new(Self(channel))
+        Box::new(Self::Rust(channel))
+    }
+    #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
+    pub(crate) fn subrequest_channel_clone(&self) -> Box<Self> {
+        Box::new(self.clone())
+    }
+    /// The C++ channel, which C++ uses as itself; none for the server's own.
+    pub(crate) fn cxx_channel(&self) -> KjMaybe<KjRc<ffi::CxxSubrequestChannel>> {
+        match self {
+            Self::Rust(_) => KjMaybe::None,
+            Self::Cxx(channel) => KjMaybe::Some(channel.as_kj().clone()),
+        }
+    }
+    /// This channel with `props` bound. Only the server's own channels can take props.
+    pub(crate) fn for_props(
+        &self,
+        props: KjOwn<Frankenvalue>,
+        persistent: Persistent,
+    ) -> Result<Self> {
+        match self {
+            Self::Rust(channel) => Ok(Self::Rust(channel.for_props(props, persistent)?)),
+            Self::Cxx(_) => Err(kj::failed!("can't override props for this service")),
+        }
+    }
+    fn rust(&self) -> Result<&Rc<dyn Channel>> {
+        match self {
+            Self::Rust(channel) => Ok(channel),
+            Self::Cxx(_) => Err(kj::failed!(
+                "bug: a C++ channel reached the server's handle; C++ takes it back as itself"
+            )),
+        }
     }
     pub(crate) fn start_request(
         &self,
         metadata: KjOwn<RequestMetadata>,
     ) -> Result<KjOwn<WorkerInterface>> {
-        self.0.start_request(metadata)
+        self.rust()?.start_request(metadata)
     }
     pub(crate) fn require_allows_transfer(&self) -> Result<()> {
-        self.0.require_allows_transfer()
+        self.rust()?.require_allows_transfer()
     }
     pub(crate) fn token(&self, usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
-        self.0.token(usage)
+        self.rust()?.token(usage)
     }
     pub(crate) async fn evict_for_test(&self, hibernate: bool) -> Result<()> {
-        self.0.evict_for_test(hibernate).await
+        self.rust()?.evict_for_test(hibernate).await
     }
 }
 
 impl ActorClassChannel {
     #[must_use]
     pub fn new(class: Rc<dyn ActorClass>) -> Box<Self> {
-        Box::new(Self(class))
+        Box::new(Self::Rust(class))
     }
     #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
     pub(crate) fn actor_class_channel_clone(&self) -> Box<Self> {
-        Box::new(Self(Rc::clone(&self.0)))
+        Box::new(self.clone())
+    }
+    /// As [`SubrequestChannel::cxx_channel`].
+    pub(crate) fn cxx_channel(&self) -> KjMaybe<KjRc<ffi::CxxActorClassChannel>> {
+        match self {
+            Self::Rust(_) => KjMaybe::None,
+            Self::Cxx(class) => KjMaybe::Some(class.as_kj().clone()),
+        }
+    }
+    /// As [`SubrequestChannel::for_props`].
+    pub(crate) fn for_props(
+        &self,
+        props: KjOwn<Frankenvalue>,
+        persistent: Persistent,
+    ) -> Result<Self> {
+        match self {
+            Self::Rust(class) => Ok(Self::Rust(class.for_props(props, persistent)?)),
+            Self::Cxx(_) => Err(kj::failed!("can't override props for this actor class")),
+        }
+    }
+    /// The server's own class, which constructs actors; an error for a C++ one.
+    pub(crate) fn rust(&self) -> Result<&Rc<dyn ActorClass>> {
+        match self {
+            Self::Rust(class) => Ok(class),
+            Self::Cxx(_) => Err(kj::failed!(
+                "bug: a C++ actor class reached the server's handle; C++ takes it back as itself"
+            )),
+        }
     }
     pub(crate) fn require_allows_transfer(&self) -> Result<()> {
-        self.0.require_allows_transfer()
+        self.rust()?.require_allows_transfer()
     }
     pub(crate) fn token(&self, usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
-        self.0.token(usage)
+        self.rust()?.token(usage)
+    }
+}
+
+/// A C++ channel, as C++ hands it to the server to store (worker-factory.c++'s
+/// `subrequestChannelFromKj()`).
+#[must_use]
+pub fn subrequest_channel_from_cxx(
+    channel: KjRc<ffi::CxxSubrequestChannel>,
+) -> Box<SubrequestChannel> {
+    Box::new(SubrequestChannel::Cxx(
+        io_channels::SubrequestChannel::from_kj(channel),
+    ))
+}
+
+/// As [`subrequest_channel_from_cxx`], for an actor class.
+#[must_use]
+pub fn actor_class_channel_from_cxx(
+    channel: KjRc<ffi::CxxActorClassChannel>,
+) -> Box<ActorClassChannel> {
+    Box::new(ActorClassChannel::Cxx(
+        io_channels::ActorClassChannel::from_kj(channel),
+    ))
+}
+
+#[expect(
+    clippy::boxed_local,
+    reason = "cxx passes a Rust type by value in a Box"
+)]
+impl DynamicChannels {
+    pub(crate) fn set_global_outbound(&mut self, channel: Box<SubrequestChannel>) {
+        self.global_outbound = Some(*channel);
+    }
+    /// Adds a channel of the `env`, returning its number.
+    pub(crate) fn add_subrequest(&mut self, channel: Box<SubrequestChannel>) -> u32 {
+        self.subrequest.push(*channel);
+        len_u32(&self.subrequest) - 1 + SPECIAL_SUBREQUEST_CHANNEL_COUNT
+    }
+    pub(crate) fn add_actor_class(&mut self, channel: Box<ActorClassChannel>) -> u32 {
+        self.actor_class.push(*channel);
+        len_u32(&self.actor_class) - 1
+    }
+    pub(crate) fn add_rpc(&mut self, channel: KjRc<ffi::CxxRpcChannel>) -> u32 {
+        self.rpc.push(io_channels::RpcChannel::from_kj(channel));
+        len_u32(&self.rpc) - 1
     }
 }
 
