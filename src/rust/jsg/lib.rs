@@ -422,16 +422,21 @@ impl<'s> FromJS<'s> for Error {
 
     /// Creates an Error from a V8 value (typically an exception).
     ///
-    /// If the value is a native error, extracts the name and message properties.
-    /// Otherwise, converts the value to a string for the message.
+    /// A `DOMException` becomes an error thrown as a `DOMException` with the name and message it
+    /// was created with, as [`try_unwrap_dom_exception`] reads them. A native error becomes an
+    /// error of the class its `name` property names, with its `message` property. Any other value
+    /// fails to convert with a `TypeError`.
     ///
-    /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
-    /// If it throws, or an exception or a termination is already pending, this fails with an
-    /// error for which [`Error::is_pending`] is true.
+    /// Reading `name` and `message` of a native error can run JavaScript (a getter, a Proxy trap,
+    /// or `toString`). If it throws, or an exception or a termination is already pending, this
+    /// fails with an error for which [`Error::is_pending`] is true.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
+        if let Some((name, message)) = tunnel::try_unwrap_dom_exception(lock, value)? {
+            return Ok(Self::new_dom_exception(name, message));
+        }
         if value.is_native_error()
             && let Ok(obj) = v8::Local::<v8::Object>::try_from(value)
         {
@@ -450,7 +455,7 @@ impl<'s> FromJS<'s> for Error {
             };
 
             Ok(Self {
-                // A `DOMException` is not a native error, so `name` names a class.
+                // A `DOMException` was converted above, so `name` names a class.
                 name: name.map_or(ErrorName::Class(ExceptionType::Error), |n| {
                     ErrorName::class_named(&n)
                 }),
