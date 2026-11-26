@@ -29,8 +29,9 @@ with `--config=rust-debug`, and other builds log a warning and check only the C+
 
 The `smoke-test` target also sets `JSG_BENCH_SMOKE=1` to use small inputs and one operation per
 batch, without timed warmup. It retains result, optimization, and Fast API checks. Performance
-runs use the full input sizes and warmup. The target is tagged `workerd-benchmark`, so CI
-configurations that skip benchmarks skip it too.
+runs use the full input sizes and warmup. The target is tagged `off-by-default`, so CI doesn't run
+it; select it with `--test_tag_filters=`. It's also tagged `workerd-benchmark`, so CI
+configurations that skip building benchmarks skip it too.
 
 ## Compare Rust with C++
 

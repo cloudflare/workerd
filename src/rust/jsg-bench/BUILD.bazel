@@ -36,9 +36,11 @@ wd_sh_test(
     srcs = ["smoke-test.sh"],
     args = ["$(location :bench-jsg)"],
     data = [":bench-jsg"],
-    # Builds the benchmark executable, so CI configurations that skip benchmarks skip it too.
+    # Benchmarks don't need to run in CI. The test builds the benchmark executable, so CI
+    # configurations that skip building benchmarks skip it too.
     tags = [
         "cpu:2",
+        "off-by-default",
         "workerd-benchmark",
     ],
 )

@@ -39,7 +39,12 @@ def wd_cc_benchmark(
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
         size = "large",
-        **(kwargs | test_attrs(["workerd-benchmark", "google_benchmark"] + tags, "large"))
+        # Benchmarks don't need to run in CI, so `bazel test` runs this only when it's selected with
+        # `--test_tag_filters=`.
+        **(kwargs | test_attrs(
+            ["off-by-default", "workerd-benchmark", "google_benchmark"] + tags,
+            "large",
+        ))
     )
 
     # generate benchmark report

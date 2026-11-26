@@ -18,7 +18,9 @@ To obtain most consistent results it is recommended to disable CPU frequency sca
 
 Micro benchmarks are defined using `wd_cc_benchmark` bazel macro. Use `bazel run --config=benchmark`
 on a defined target to obtain benchmarking results. `bazel test` runs each benchmark once
-(`--benchmark_dry_run`), to check that it works, and measures nothing.
+(`--benchmark_dry_run`), to check that it works, and measures nothing. CI doesn't run it: the test
+is tagged `off-by-default`, so select it with `--test_tag_filters=`, for example
+`bazel test --test_tag_filters= //src/workerd/tests:bench-json`.
 
 See example in [bench-json.c++](../src/workerd/tests/bench-json.c++)
 
