@@ -92,6 +92,8 @@ inline workerd::WorkerInterface::AlarmResult fromImpl(
     .outcome = kj::from<kj_rs::Rust>(result.outcome),
     .errorDescription =
         result.error_description.map([](const ::rust::String& desc) { return kj::str(desc); }),
+    .ranScheduledTime =
+        result.ran_scheduled_time.map([](int64_t nanos) { return kj_rs::repr::fromNanos(nanos); }),
   };
 }
 

@@ -102,6 +102,7 @@ impl Interface for Worker {
             retry_counts_against_limit: true,
             outcome: EventOutcome::KillSwitch,
             error_description: None,
+            ran_scheduled_time: None,
         })
     }
 

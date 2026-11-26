@@ -172,6 +172,7 @@ KJ_TEST("kill_switch worker runAlarm") {
   KJ_ASSERT(result.retry == false);
   KJ_ASSERT(result.retryCountsAgainstLimit == true);
   KJ_ASSERT(result.outcome == workerd::EventOutcome::KILL_SWITCH);
+  KJ_ASSERT(result.ranScheduledTime == kj::none);
 }
 
 KJ_TEST("kill_switch worker customEvent") {
@@ -426,8 +427,10 @@ class StubWorker final: public WorkerInterface {
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     runAlarmCalled = true;
-    return AlarmResult{
-      .retry = true, .retryCountsAgainstLimit = false, .outcome = workerd::EventOutcome::OK};
+    return AlarmResult{.retry = true,
+      .retryCountsAgainstLimit = false,
+      .outcome = workerd::EventOutcome::OK,
+      .ranScheduledTime = RAN_ALARM_TIME};
   }
 
   kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
@@ -439,6 +442,7 @@ class StubWorker final: public WorkerInterface {
   bool abandonAlarmCalled = false;
   kj::Date abandonedAlarmTime = kj::UNIX_EPOCH;
   static constexpr kj::Date STORED_ALARM_TIME = kj::UNIX_EPOCH + 5000 * kj::SECONDS;
+  static constexpr kj::Date RAN_ALARM_TIME = kj::UNIX_EPOCH + 4000 * kj::SECONDS;
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     customEventCalled = true;
@@ -545,6 +549,7 @@ KJ_TEST("cxx_worker delegates non-HTTP events to the wrapped C++ worker") {
   KJ_ASSERT(alarm.retry == true);
   KJ_ASSERT(alarm.retryCountsAgainstLimit == false);
   KJ_ASSERT(alarm.outcome == workerd::EventOutcome::OK);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(alarm.ranScheduledTime) == StubWorker::RAN_ALARM_TIME);
 
   auto stored = worker->abandonAlarm(kj::UNIX_EPOCH + 3000 * kj::SECONDS).wait(waitScope);
   KJ_ASSERT(stubRef.abandonAlarmCalled);

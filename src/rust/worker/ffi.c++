@@ -40,6 +40,8 @@ kj::Promise<AlarmResult> worker_run_alarm(
     .retry_counts_against_limit = result.retryCountsAgainstLimit,
     .outcome = toRustOutcome(result.outcome),
     .error_description = kj::mv(errorDescription),
+    .ran_scheduled_time =
+        result.ranScheduledTime.map([](kj::Date date) { return kj_rs::repr::toNanos(date); }),
   };
 }
 

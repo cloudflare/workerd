@@ -102,6 +102,7 @@ impl Interface for AlarmOwnedElsewhere {
                 EventOutcome::Ok
             },
             error_description: None,
+            ran_scheduled_time: None,
         })
     }
 

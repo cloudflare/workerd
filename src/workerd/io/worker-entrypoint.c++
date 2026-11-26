@@ -1006,7 +1006,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
     auto outcome = co_await promise;
     co_return AlarmResult{.retry = outcome.retry,
       .retryCountsAgainstLimit = outcome.retryCountsAgainstLimit,
-      .outcome = outcome.outcome};
+      .outcome = outcome.outcome,
+      .ranScheduledTime = outcome.ranScheduledTime};
   }
 
   // There isn't a pre-existing alarm, we can set event info and call `delivered()` (which emits
@@ -1099,7 +1100,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
       // The alarm was cancelled while we were waiting to run, go ahead and return the result.
       co_return AlarmResult{.retry = outcome.retry,
         .retryCountsAgainstLimit = outcome.retryCountsAgainstLimit,
-        .outcome = outcome.outcome};
+        .outcome = outcome.outcome,
+        .ranScheduledTime = outcome.ranScheduledTime};
     }
   }
 

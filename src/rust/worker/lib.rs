@@ -166,6 +166,9 @@ pub struct AlarmResult {
     pub retry_counts_against_limit: bool,
     pub outcome: EventOutcome,
     pub error_description: Option<String>,
+    /// Set when the actor ran its stored alarm, at this time, instead of the requested one, which
+    /// it had replaced.
+    pub ran_scheduled_time: Option<SystemTime>,
 }
 
 /// Result of a custom event.

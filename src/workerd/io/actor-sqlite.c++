@@ -7,6 +7,7 @@
 #include "io-gate.h"
 
 #include <workerd/jsg/exception.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/exception.h>
@@ -1036,7 +1037,11 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         inAlarmHandler = true;
         deferredAlarmSpan = kj::mv(parentSpan);
         static const DeferredAlarmDeleter disposer;
-        return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
+        RunAlarmHandler result{.deferredDelete = kj::Own<void>(this, disposer)};
+        if (util::Autogate::isEnabled(util::AutogateKey::ATTRIBUTE_OVERDUE_ALARM_RUN)) {
+          result.storedAlarmTime = localAlarmTime;
+        }
+        return result;
       }
 
       // If there's a clean db time that differs from the requested handler's scheduled time, this

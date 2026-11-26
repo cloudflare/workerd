@@ -229,6 +229,14 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
     // delete itself.
     tasks.add(kj::mv(entry.value.task));
 
+    KJ_IF_SOME(ranTime, alarmOutcome.ranScheduledTime) {
+      if (ranTime != scheduledTime) {
+        adoptRanAlarm(entry.value, ranTime);
+      }
+    }
+    // The alarm the actor ran, which can differ from the requested one.
+    auto ranScheduledTime = entry.value.scheduledTime;
+
     // If an alarm is queued, there's no point in retrying the current one -- proceed
     // to running the queued alarm instead.
     KJ_IF_SOME(a, entry.value.queuedAlarm) {
@@ -252,7 +260,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
         // already has visibility into the actor's alarm state via its SQLite hooks.
         // If the notification fails, we keep the alarm in the scheduler so it is not silently
         // lost.
-        entry.value.task = abandonAlarm(ownActor, scheduledTime);
+        entry.value.task = abandonAlarm(ownActor, ranScheduledTime);
         co_return;
       }
       if (alarmOutcome.retryCountsAgainstLimit) {
@@ -279,11 +287,11 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
       entry.value.backoff++;
       entry.value.retry++;
 
-      entry.value.task = makeAlarmTask(delay, ownActor, scheduledTime);
+      entry.value.task = makeAlarmTask(delay, ownActor, ranScheduledTime);
     } else {
       KJ_ASSERT(entry.value.queuedAlarm == kj::none);
       if (alarmOutcome.outcome == EventOutcome::ABORTED) {
-        entry.value.task = abandonAlarm(ownActor, scheduledTime);
+        entry.value.task = abandonAlarm(ownActor, ranScheduledTime);
         co_return;
       }
       deleteAlarm(ownActor);
@@ -292,6 +300,19 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
     auto exception = kj::getCaughtExceptionAsKj();
     KJ_LOG(ERROR, "Failed to run alarm and was unable to schedule a retry", exception);
   }
+}
+
+void AlarmScheduler::adoptRanAlarm(ScheduledAlarm& alarm, kj::Date ranTime) {
+  // The actor's write of the alarm it ran queued that alarm behind this one, unless something
+  // replaced it since.
+  if (alarm.queuedAlarm == ranTime) {
+    alarm.queuedAlarm = kj::none;
+  }
+  alarm.scheduledTime = ranTime;
+  alarm.previousRetryCountedAgainstLimit = false;
+  alarm.backoff = 0;
+  alarm.retry = 0;
+  alarm.countedRetry = 0;
 }
 
 kj::Promise<void> AlarmScheduler::abandonAlarm(const ActorKey& actor, kj::Date scheduledTime) {

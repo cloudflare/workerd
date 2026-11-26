@@ -756,17 +756,24 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
   KJ_SWITCH_ONEOF(persistent.armAlarmHandler(
                       scheduledTime, context.getCurrentTraceSpan(), currentTime, false, actorId)) {
     KJ_CASE_ONEOF(armResult, ActorCacheInterface::RunAlarmHandler) {
+      // When the actor runs its stored alarm instead, the handler sees that alarm's first run, and
+      // the result says which alarm ran.
+      auto ranScheduledTime = armResult.storedAlarmTime;
+      auto invocationTime = ranScheduledTime.orDefault(scheduledTime);
+      uint32_t invocationRetryCount = ranScheduledTime == kj::none ? retryCount : 0;
+
       auto& handler = KJ_REQUIRE_NONNULL(exportedHandler);
       if (handler.alarm == kj::none) {
 
         lock.logWarningOnce("Attempted to run a scheduled alarm without a handler, "
                             "did you remember to export an alarm() function?");
-        return WorkerInterface::AlarmResult{
-          .retry = false, .outcome = EventOutcome::SCRIPT_NOT_FOUND};
+        return WorkerInterface::AlarmResult{.retry = false,
+          .outcome = EventOutcome::SCRIPT_NOT_FOUND,
+          .ranScheduledTime = ranScheduledTime};
       }
 
       return context
-          .run([exportedHandler, timeout, retryCount, scheduledTime,
+          .run([exportedHandler, timeout, invocationRetryCount, invocationTime,
                    weakRequest = incomingRequest.addWeak(),
                    maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](Worker::Lock& lock,
                    IoContext& context) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
@@ -809,7 +816,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         });
 
         auto& alarm = KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(exportedHandler).alarm);
-        return alarm(lock, js.alloc<AlarmInvocationInfo>(scheduledTime, retryCount))
+        return alarm(lock, js.alloc<AlarmInvocationInfo>(invocationTime, invocationRetryCount))
             .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
           return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
         }).exclusiveJoin(kj::mv(timeoutPromise));
@@ -935,6 +942,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
             .outcome = alarmException.isAbort ? EventOutcome::ABORTED : EventOutcome::EXCEPTION,
             .errorDescription = kj::str(e.getDescription())};
         });
+      })
+          .then([ranScheduledTime](WorkerInterface::AlarmResult result) {
+        result.ranScheduledTime = ranScheduledTime;
+        return result;
       });
     }
     KJ_CASE_ONEOF(armResult, ActorCacheInterface::CancelAlarmHandler) {

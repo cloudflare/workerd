@@ -173,6 +173,8 @@ impl From<bridge::AlarmResult> for AlarmResult {
             retry_counts_against_limit: value.retry_counts_against_limit,
             outcome: value.outcome.into(),
             error_description: value.error_description.into(),
+            ran_scheduled_time: Option::from(value.ran_scheduled_time)
+                .map(|nanos: i64| KjDate::from(nanos).into()),
         }
     }
 }

@@ -4,10 +4,13 @@
 
 #include "worker-entrypoint.h"
 
+#include <workerd/io/actor-sqlite.h>
 #include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/jsg/util.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/exception.h>
+#include <workerd/util/sqlite.h>
 
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
@@ -989,6 +992,69 @@ KJ_TEST("an alarm canceled while it waits for its scheduled time drains its requ
   fixture.pollEventLoop();
   KJ_EXPECT(ran == 1, ran);
   KJ_EXPECT(context->getAbortReason() == kj::none, context->getAbortReason());
+}
+
+// SQLite storage in memory, whose commits and alarm scheduling complete at once.
+struct InMemorySqliteStorage final: public ActorSqlite::Hooks {
+  kj::Own<const kj::Directory> dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs{*dir};
+  SqliteDatabase db{vfs, kj::Path({"actor"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY};
+
+  kj::Promise<void> scheduleRun(kj::Maybe<kj::Date>, kj::Promise<void> priorTask) override {
+    return kj::mv(priorTask);
+  }
+
+  kj::Own<ActorCacheInterface> makeActorSqlite(OutputGate& outputGate) {
+    return kj::heap<ActorSqlite>(kj::attachRef(db), outputGate,
+        [](SpanParent) -> kj::Promise<void> { return kj::READY_NOW; }, *this);
+  }
+};
+
+// Its alarm handler fails, reporting the alarm it was given.
+constexpr kj::StringPtr FAILING_ALARM_ACTOR_SOURCE = R"SCRIPT(
+  export default class {
+    alarm(alarmInfo) {
+      throw new Error(`alarm ${alarmInfo.scheduledTime} ${alarmInfo.retryCount}`);
+    }
+  }
+)SCRIPT"_kj;
+
+// Asks the actor to retry its alarm set for 1s after the epoch, when it has replaced that alarm
+// with one for 2s, and returns the result.
+WorkerInterface::AlarmResult retryReplacedAlarm(kj::Array<util::AutogateKey> autogateKeys) {
+  InMemorySqliteStorage storage;
+  TestFixture fixture({
+    .autogateKeys = kj::mv(autogateKeys),
+    .ignoreAllAutogatesEnv = true,
+    .mainModuleSource = FAILING_ALARM_ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("overdue-alarm-test")),
+    .actorClassName = "default"_kj,
+    .useRealTimers = true,
+    .makeActorStorage = kj::Function<kj::Own<ActorCacheInterface>(OutputGate&)>(
+        [&storage](OutputGate& outputGate) { return storage.makeActorSqlite(outputGate); }),
+  });
+  auto& persistent = KJ_ASSERT_NONNULL(fixture.getActor().getPersistent());
+  persistent.setAlarm(kj::UNIX_EPOCH + 2 * kj::SECONDS, {}, nullptr);
+  fixture.pollEventLoop();
+
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  return entrypoint->runAlarm(kj::UNIX_EPOCH + 1 * kj::SECONDS, 1).wait(fixture.getWaitScope());
+}
+
+KJ_TEST("an actor's overdue alarm, run as the alarm it replaced, gets that alarm's retry") {
+  auto result = retryReplacedAlarm({});
+
+  KJ_EXPECT(KJ_ASSERT_NONNULL(result.errorDescription).contains("alarm 1000 1"),
+      result.errorDescription);
+  KJ_EXPECT(result.ranScheduledTime == kj::none);
+}
+
+KJ_TEST("an actor's overdue alarm, run as the alarm it replaced, gets its own first run") {
+  auto result = retryReplacedAlarm(kj::arr(util::AutogateKey::ATTRIBUTE_OVERDUE_ALARM_RUN));
+
+  KJ_EXPECT(KJ_ASSERT_NONNULL(result.errorDescription).contains("alarm 2000 0"),
+      result.errorDescription);
+  KJ_EXPECT(result.ranScheduledTime == kj::UNIX_EPOCH + 2 * kj::SECONDS);
 }
 
 KJ_TEST("custom events tag failures after delivery") {

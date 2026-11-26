@@ -26,6 +26,7 @@ fn retry_is_canceled_and_retried_against_no_limit() {
             retry_counts_against_limit: false,
             outcome: EventOutcome::Canceled,
             error_description: None,
+            ran_scheduled_time: None,
         }
     );
 }
@@ -39,6 +40,7 @@ fn done_succeeds_without_retry() {
             retry_counts_against_limit: false,
             outcome: EventOutcome::Ok,
             error_description: None,
+            ran_scheduled_time: None,
         }
     );
 }

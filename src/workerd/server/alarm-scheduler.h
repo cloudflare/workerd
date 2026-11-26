@@ -118,6 +118,10 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
 
   kj::Promise<void> makeAlarmTask(
       kj::Duration delay, const ActorKey& actor, kj::Date scheduledTime);
+  // Makes `alarm` the one at `ranTime`, which the actor ran in its place (see
+  // WorkerInterface::AlarmResult::ranScheduledTime), with no retries yet, so that the run counts
+  // toward the alarm that ran.
+  static void adoptRanAlarm(ScheduledAlarm& alarm, kj::Date ranTime);
   kj::Promise<void> abandonAlarm(const ActorKey& actor, kj::Date scheduledTime);
 
   kj::Promise<void> checkTimestamp(kj::Duration delay, kj::Date scheduledTime);

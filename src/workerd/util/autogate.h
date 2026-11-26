@@ -161,7 +161,13 @@ namespace workerd::util {
   /* Counts the bytes behind a Request or Response body built from in-memory data, such as a       \
      string or BufferSource, as the isolate's external memory, so that they prompt GCs and the     \
      isolate's memory limit applies to them. See JsReadableStream::Buffer. */                      \
-  V(BODY_BUFFER_EXTERNAL_MEMORY)
+  V(BODY_BUFFER_EXTERNAL_MEMORY)                                                                   \
+  /* A SQLite-backed Durable Object asked to run an alarm it has since replaced runs its stored    \
+     alarm instead, if that alarm is overdue. With this gate, the handler then gets the stored     \
+     alarm's time and a retry count of 0, as on that alarm's first run, and the result reports the \
+     stored alarm's time, so that the caller can count the run against that alarm's retries. See   \
+     ActorCacheInterface::RunAlarmHandler::storedAlarmTime. */                                     \
+  V(ATTRIBUTE_OVERDUE_ALARM_RUN)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

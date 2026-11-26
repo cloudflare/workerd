@@ -5,6 +5,7 @@
 #include "actor-sqlite.h"
 #include "io-gate.h"
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/test.h>
@@ -665,7 +666,9 @@ KJ_TEST("tells alarm handler to reschedule when handler alarm is earlier than co
   waitBeforeCancel.wait(test.ws);
 }
 
-KJ_TEST("runs overdue alarm immediately when local alarm time is in the past") {
+// Runs the alarm handler for 1ms at 5ms, when the actor's alarm is set for 2ms, and returns the
+// stored alarm time the handler reports.
+kj::Maybe<kj::Date> runOverdueAlarm() {
   ActorSqliteTest test;
 
   // Initialize alarm state to 2ms.
@@ -678,15 +681,52 @@ KJ_TEST("runs overdue alarm immediately when local alarm time is in the past") {
   // The local state says the alarm is due to fire at 2ms, but we're saying the AlarmManager has 1ms,
   // usually this would result in a rescheduling of the alarm, but since our currentTime is 5ms, we
   // will just run the alarm now since it's already overdue.
+  kj::Maybe<kj::Date> storedAlarmTime;
   {
     auto overdueCurrentTime = fiveMs;
     auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, overdueCurrentTime);
 
     // Should run the handler immediately instead of canceling/rescheduling.
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    storedAlarmTime = armResult.get<ActorSqlite::RunAlarmHandler>().storedAlarmTime;
   }
 
   // commit and delete the alarm after we drop the alarm handler (this is a deferred delete).
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  return storedAlarmTime;
+}
+
+KJ_TEST("runs overdue alarm immediately when local alarm time is in the past") {
+  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
+  KJ_DEFER(util::Autogate::deinitAutogate());
+
+  KJ_EXPECT(runOverdueAlarm() == kj::none);
+}
+
+KJ_TEST("reports the overdue alarm it runs instead of the requested one") {
+  util::Autogate::initAutogateForTest({util::AutogateKey::ATTRIBUTE_OVERDUE_ALARM_RUN});
+  KJ_DEFER(util::Autogate::deinitAutogate());
+
+  KJ_EXPECT(runOverdueAlarm() == twoMs);
+}
+
+KJ_TEST("does not report a stored alarm time when running the requested alarm") {
+  util::Autogate::initAutogateForTest({util::AutogateKey::ATTRIBUTE_OVERDUE_ALARM_RUN});
+  KJ_DEFER(util::Autogate::deinitAutogate());
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  {
+    auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, fiveMs);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    KJ_EXPECT(armResult.get<ActorSqlite::RunAlarmHandler>().storedAlarmTime == kj::none);
+  }
+
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
 }

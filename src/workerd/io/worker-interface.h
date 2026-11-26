@@ -77,6 +77,7 @@ class WorkerInterface: public kj::HttpService {
     bool retry = true;
     bool retryCountsAgainstLimit = true;
     EventOutcome outcome = EventOutcome::UNKNOWN;
+    kj::Maybe<kj::Date> ranScheduledTime;
   };
 
   // keep in sync with `src/rust/worker/ffi.rs`
@@ -85,10 +86,15 @@ class WorkerInterface: public kj::HttpService {
     bool retryCountsAgainstLimit = true;
     EventOutcome outcome = EventOutcome::UNKNOWN;
     kj::Maybe<kj::String> errorDescription;
+    // Set when the actor ran its stored alarm, with this time, instead of the requested one. See
+    // ActorCacheInterface::RunAlarmHandler::storedAlarmTime.
+    kj::Maybe<kj::Date> ranScheduledTime;
 
     AlarmOutcome asOutcome() const {
-      return {
-        .retry = retry, .retryCountsAgainstLimit = retryCountsAgainstLimit, .outcome = outcome};
+      return {.retry = retry,
+        .retryCountsAgainstLimit = retryCountsAgainstLimit,
+        .outcome = outcome,
+        .ranScheduledTime = ranScheduledTime};
     }
   };
 

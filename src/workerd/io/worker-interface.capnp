@@ -433,6 +433,10 @@ struct AlarmRun @0xfa8ea4e97e23b03d {
   retry @1 :Bool;
   retryCountsAgainstLimit @2 :Bool = true;
   errorDescription @3 :Text;
+
+  ranScheduledTimeMs @4 :Int64;
+  # Set, in ms since epoch, when the actor ran its stored alarm, at that time, instead of the
+  # requested one, which it had replaced. 0 otherwise.
 }
 
 struct QueueMessage @0x944adb18c0352295 {

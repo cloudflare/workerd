@@ -68,6 +68,8 @@ pub mod bridge {
         pub retry_counts_against_limit: bool,
         pub outcome: EventOutcome,
         pub error_description: KjMaybe<String>,
+        // Nanoseconds since the Unix epoch, as the dates the C++ functions below take.
+        pub ran_scheduled_time: KjMaybe<i64>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -367,6 +369,10 @@ impl From<crate::AlarmResult> for bridge::AlarmResult {
             retry_counts_against_limit: value.retry_counts_against_limit,
             outcome: value.outcome.into(),
             error_description: value.error_description.into(),
+            ran_scheduled_time: value
+                .ran_scheduled_time
+                .map(|time| KjDate::from(time).nanoseconds())
+                .into(),
         }
     }
 }

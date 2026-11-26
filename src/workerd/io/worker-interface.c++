@@ -481,10 +481,15 @@ kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(
     if (respResult.hasErrorDescription()) {
       errorDescription = kj::str(respResult.getErrorDescription());
     }
+    kj::Maybe<kj::Date> ranScheduledTime;
+    if (auto ms = respResult.getRanScheduledTimeMs(); ms != 0) {
+      ranScheduledTime = kj::UNIX_EPOCH + ms * kj::MILLISECONDS;
+    }
     return WorkerInterface::AlarmResult{.retry = respResult.getRetry(),
       .retryCountsAgainstLimit = respResult.getRetryCountsAgainstLimit(),
       .outcome = respResult.getOutcome(),
-      .errorDescription = kj::mv(errorDescription)};
+      .errorDescription = kj::mv(errorDescription),
+      .ranScheduledTime = ranScheduledTime};
   });
 }
 

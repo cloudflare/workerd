@@ -337,6 +337,7 @@ wd_cc_library(
         "actor-sqlite.h",
         "actor-storage.h",
     ],
+    implementation_deps = ["//src/workerd/util:autogate"],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-storage_capnp",
@@ -703,6 +704,7 @@ kj_test(
     deps = [
         ":actor",
         ":io-gate",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
@@ -887,8 +889,11 @@ kj_test(
 kj_test(
     src = "worker-entrypoint-test.c++",
     deps = [
+        ":actor",
         ":worker-entrypoint",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
+        "//src/workerd/util:sqlite",
         "@capnp-cpp//src/kj:kj-async-io",
     ],
 )

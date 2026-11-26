@@ -43,26 +43,35 @@ class AdjustableClock final: public kj::Clock {
 // `onAlarm` so the test can observe that the alarm fired.
 class AlarmStubWorkerInterface final: public WorkerInterface {
  public:
+  using RunAlarmFn = kj::Function<AlarmResult(kj::Date scheduledTime, uint32_t retryCount)>;
+  using AbandonAlarmFn = kj::Function<kj::Promise<kj::Maybe<kj::Date>>(kj::Date scheduledTime)>;
+
   explicit AlarmStubWorkerInterface(kj::Function<void()> onAlarm)
-      : onAlarm(kj::mv(onAlarm)),
-        onAbandon([]() { return kj::Maybe<kj::Date>(kj::none); }) {}
+      : AlarmStubWorkerInterface(kj::mv(onAlarm),
+            {.retry = false, .outcome = EventOutcome::OK},
+            [](kj::Date) { return kj::Maybe<kj::Date>(kj::none); }) {}
 
-  AlarmStubWorkerInterface(kj::Function<void()> onAlarm,
-      AlarmOutcome outcome,
-      kj::Function<kj::Promise<kj::Maybe<kj::Date>>()> onAbandon)
-      : onAlarm(kj::mv(onAlarm)),
-        outcome(outcome),
-        onAbandon(kj::mv(onAbandon)) {}
-
-  kj::Promise<AlarmResult> runAlarm(kj::Date, uint32_t) override {
+  AlarmStubWorkerInterface(
+      kj::Function<void()> onAlarm, AlarmOutcome outcome, AbandonAlarmFn onAbandon)
+      : AlarmStubWorkerInterface(
+            [onAlarm = kj::mv(onAlarm), outcome](kj::Date, uint32_t) mutable {
     onAlarm();
     return AlarmResult{.retry = outcome.retry,
       .retryCountsAgainstLimit = outcome.retryCountsAgainstLimit,
       .outcome = outcome.outcome};
+  }, kj::mv(onAbandon)) {}
+
+  // Answers each runAlarm() with what `run` returns for the alarm.
+  AlarmStubWorkerInterface(RunAlarmFn run, AbandonAlarmFn onAbandon)
+      : run(kj::mv(run)),
+        onAbandon(kj::mv(onAbandon)) {}
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    return run(scheduledTime, retryCount);
   }
 
-  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date) override {
-    return onAbandon();
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    return onAbandon(scheduledTime);
   }
 
   kj::Promise<void> request(kj::HttpMethod,
@@ -90,9 +99,8 @@ class AlarmStubWorkerInterface final: public WorkerInterface {
   }
 
  private:
-  kj::Function<void()> onAlarm;
-  AlarmOutcome outcome{.retry = false, .outcome = EventOutcome::OK};
-  kj::Function<kj::Promise<kj::Maybe<kj::Date>>()> onAbandon;
+  RunAlarmFn run;
+  AbandonAlarmFn onAbandon;
 };
 
 KJ_TEST("AlarmScheduler migrates a database created before the actor_name column existed") {
@@ -254,7 +262,7 @@ KJ_TEST("AlarmScheduler abandons an alarm when ctx.abort() sets retryAlarm to fa
           .retryCountsAgainstLimit = true,
           .outcome = EventOutcome::ABORTED,
         },
-        [&abandoned]() {
+        [&abandoned](kj::Date) {
       abandoned = true;
       return kj::Maybe<kj::Date>(kj::none);
     });
@@ -299,7 +307,7 @@ KJ_TEST("AlarmScheduler preserves an alarm queued while abandonment is pending")
             .retryCountsAgainstLimit = true,
             .outcome = EventOutcome::ABORTED,
           },
-          [&abandonStarted, &abandonPromise]() {
+          [&abandonStarted, &abandonPromise](kj::Date) {
         abandonStarted = true;
         return abandonPromise.addBranch();
       });
@@ -326,6 +334,89 @@ KJ_TEST("AlarmScheduler preserves an alarm queued while abandonment is pending")
 
   AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
   KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
+}
+
+// An actor that, by the time its alarm at `requestedTime` runs, has moved the alarm later to
+// `storedTime`, which has also passed, and so runs that alarm instead, as ActorSqlite does. Its
+// write of `storedTime` reaches the scheduler while the replaced alarm runs. Every run ends with
+// `outcome`.
+struct OverdueStoredAlarmTest {
+  struct Run {
+    kj::Date scheduledTime;
+    uint32_t retryCount;
+  };
+
+  explicit OverdueStoredAlarmTest(WorkerInterface::AlarmOutcome outcome): outcome(outcome) {
+    scheduler.setAlarm(actor, requestedTime);
+    clock.setTime(storedTime);
+  }
+
+  // Runs the actor's alarms, and each retry once its backoff has passed, until none is left.
+  void runAlarms() {
+    for (uint i = 0; i < 100 && scheduler.getAlarm(actor) != kj::none; i++) {
+      timer.advanceTo(timer.now() + 1 * kj::HOURS);
+      waitScope.poll();
+    }
+  }
+
+  WorkerInterface::AlarmResult runAlarm(kj::Date scheduledTime, uint32_t retryCount) {
+    runs.add(Run{scheduledTime, retryCount});
+    WorkerInterface::AlarmResult result{.retry = outcome.retry,
+      .retryCountsAgainstLimit = outcome.retryCountsAgainstLimit,
+      .outcome = outcome.outcome};
+    if (scheduledTime == requestedTime) {
+      scheduler.setAlarm(actor, storedTime);
+      result.ranScheduledTime = storedTime;
+    }
+    return result;
+  }
+
+  kj::EventLoop loop;
+  kj::WaitScope waitScope{loop};
+  AdjustableClock clock;
+  kj::TimerImpl timer{kj::origin<kj::TimePoint>()};
+  kj::Own<const kj::Directory> dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs{*dir};
+  kj::Date requestedTime = kj::UNIX_EPOCH + 1 * kj::HOURS;
+  kj::Date storedTime = requestedTime + 1 * kj::MILLISECONDS;
+  ActorKey actor{"overdue-actor"_kj, kj::none};
+  WorkerInterface::AlarmOutcome outcome;
+  kj::Vector<Run> runs;
+  kj::Vector<kj::Date> abandoned;
+  AlarmScheduler scheduler{clock, timer, vfs, kj::Path({"alarms"}),
+    [this](const ActorKey&) -> kj::Own<WorkerInterface> {
+    return kj::heap<AlarmStubWorkerInterface>(
+        [this](kj::Date scheduledTime, uint32_t retryCount) {
+      return runAlarm(scheduledTime, retryCount);
+    }, [this](kj::Date scheduledTime) {
+      abandoned.add(scheduledTime);
+      return kj::Maybe<kj::Date>(kj::none);
+    });
+  }};
+};
+
+KJ_TEST("AlarmScheduler counts a failed run toward the overdue alarm the actor ran instead") {
+  OverdueStoredAlarmTest t({.retry = true, .outcome = EventOutcome::EXCEPTION});
+  t.runAlarms();
+
+  // The stored alarm's retries continue from its first run rather than start over.
+  KJ_ASSERT(t.runs.size() == AlarmScheduler::RETRY_MAX_TRIES + 1, t.runs.size());
+  KJ_EXPECT(t.runs[0].scheduledTime == t.requestedTime);
+  for (uint32_t i = 1; i < t.runs.size(); i++) {
+    KJ_EXPECT(t.runs[i].scheduledTime == t.storedTime, i);
+    KJ_EXPECT(t.runs[i].retryCount == i, i, t.runs[i].retryCount);
+  }
+  KJ_ASSERT(t.abandoned.size() == 1, t.abandoned.size());
+  KJ_EXPECT(t.abandoned[0] == t.storedTime);
+  KJ_EXPECT(t.scheduler.getAlarm(t.actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler doesn't rerun the overdue alarm the actor ran instead after it succeeds") {
+  OverdueStoredAlarmTest t({.retry = false, .outcome = EventOutcome::OK});
+  t.runAlarms();
+
+  KJ_EXPECT(t.runs.size() == 1, t.runs.size());
+  KJ_EXPECT(t.scheduler.getAlarm(t.actor) == kj::none);
 }
 
 }  // namespace
