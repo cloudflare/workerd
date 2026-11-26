@@ -10,41 +10,48 @@ import {
   drainByob,
   drainBytes,
   expectEqual,
+  scaled,
   sizeLabel,
 } from 'helpers';
 
 export const read = {
   bench(b) {
-    for (const size of [4096, 65536, 1048576]) {
+    const [small, medium, large] = [4096, 65536, 1048576].map((size) =>
+      scaled(b, size)
+    );
+    for (const size of [small, medium, large]) {
       const bytes = bytesOf(size);
       b.run(`default reader, ${sizeLabel(size)}`, async () => {
         const reader = new Response(bytes).body.getReader();
         expectEqual(await drainBytes(reader), size, 'bytes read');
       });
     }
-    for (const size of [65536, 1048576]) {
+    const view = scaled(b, 16384);
+    for (const size of [medium, large]) {
       const bytes = bytesOf(size);
-      b.run(`BYOB reader into 16 KiB views, ${sizeLabel(size)}`, async () => {
-        const reader = new Response(bytes).body.getReader({ mode: 'byob' });
-        expectEqual(await drainByob(reader, 16384), size, 'bytes read');
-      });
+      b.run(
+        `BYOB reader into ${sizeLabel(view)} views, ${sizeLabel(size)}`,
+        async () => {
+          const reader = new Response(bytes).body.getReader({ mode: 'byob' });
+          expectEqual(await drainByob(reader, view), size, 'bytes read');
+        }
+      );
     }
-    const size = 1048576;
-    const bytes = bytesOf(size);
-    b.run(`for await, ${sizeLabel(size)}`, async () => {
+    const bytes = bytesOf(large);
+    b.run(`for await, ${sizeLabel(large)}`, async () => {
       let read = 0;
       for await (const chunk of new Response(bytes).body) {
         read += chunk.byteLength;
       }
-      expectEqual(read, size, 'bytes read');
+      expectEqual(read, large, 'bytes read');
     });
-    const text = 'a'.repeat(65536);
-    b.run('default reader, 64 KiB string body', async () => {
+    const text = 'a'.repeat(medium);
+    b.run(`default reader, ${sizeLabel(medium)} string body`, async () => {
       const reader = new Response(text).body.getReader();
       expectEqual(await drainBytes(reader), text.length, 'bytes read');
     });
-    const blob = new Blob([bytesOf(65536)]);
-    b.run('Blob.stream(), default reader, 64 KiB', async () => {
+    const blob = new Blob([bytesOf(medium)]);
+    b.run(`Blob.stream(), default reader, ${sizeLabel(medium)}`, async () => {
       const reader = blob.stream().getReader();
       expectEqual(await drainBytes(reader), blob.size, 'bytes read');
     });

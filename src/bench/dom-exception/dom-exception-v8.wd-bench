@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the DOMException benchmarks against V8's implementation (under
+# V8_DOM_EXCEPTION). No compatibilityDate, so that the variants supply it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "dom-exception-v8",
+      worker = (
+        modules = [(name = "worker", esModule = embed "dom-exception.js")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-v8-dom-exception"],
+);

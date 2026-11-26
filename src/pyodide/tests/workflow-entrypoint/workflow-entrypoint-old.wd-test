@@ -4,6 +4,8 @@ using Workerd = import "/workerd/workerd.capnp";
 # the `depends` parameter. See workflow-entrypoint.wd-test for why this is a separate test.
 
 const config :Workerd.Config = (
+  # Tiering Pyodide up to TurboFan costs these short tests more CPU than it saves.
+  v8Flags = ["--liftoff-only"],
   services = [
     (name = "pyOld", worker = .pyWorkerOld),
     (name = "js", worker = .jsWorker),

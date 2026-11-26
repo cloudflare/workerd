@@ -364,6 +364,7 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType,
 
   context->incomingRequests.addFront(*this);
   wasDelivered = true;
+  context->worker->getIsolate().startedRequest();
   deliveredLocation = location;
   metrics->delivered();
 
@@ -464,7 +465,9 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   KJ_IF_SOME(a, context->actor) {
     a.getMetrics().endRequest();
   }
-  context->worker->getIsolate().completedRequest();
+  KJ_IF_SOME(task, context->worker->getIsolate().completedRequest()) {
+    context->thread.addTask(kj::mv(task));
+  }
   metrics->jsDone();
 
   if (context->isShared()) {

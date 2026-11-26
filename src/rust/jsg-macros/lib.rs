@@ -684,11 +684,12 @@ fn invocation(
     match receiver {
         Receiver::SelfRef => quote! {
             let this = args.this();
-            // A callback without a signature may receive a wrong receiver. Throw V8's
-            // "Illegal invocation" rather than panic, which would terminate execution.
+            // A callback without a signature may receive a wrong receiver. Throw the
+            // "Illegal invocation" TypeError that V8's signature check throws, rather than
+            // panic, which would terminate execution.
             let resource = #resolve;
             let Some(resource) = resource else {
-                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
+                lock.throw_exception(&jsg::Error::new_illegal_invocation());
                 return;
             };
             // SAFETY: `resource` points at the `Self` of `this`, whose wrapper keeps it alive
@@ -705,7 +706,7 @@ fn invocation(
             let this = match <jsg::Rc<Self> as jsg::FromJS<'_>>::try_from_js(lock, args.this()) {
                 Ok(Some(this)) => this,
                 Ok(None) => {
-                    lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
+                    lock.throw_exception(&jsg::Error::new_illegal_invocation());
                     return;
                 }
                 Err(err) => {

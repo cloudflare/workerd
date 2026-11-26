@@ -23,6 +23,10 @@ export default {
       span.setAttribute('answer', 42);
       span.setAttribute('ratio', 0.5);
       span.setAttribute('cached', false);
+      span.setAttribute('tags', ['a', null, 'b']);
+      span.setAttribute('flags', [true]);
+      span.setAttribute('scores', [1.5, undefined]);
+      span.setAttribute('none', []);
       await (await env.SELF.fetch('http://traced/leaf?secret=1')).text();
     });
     return new Response('not here', { status: 503 });
@@ -113,6 +117,10 @@ export const test = {
     assert.strictEqual(mySpan.attributes.answer, 42);
     assert.strictEqual(mySpan.attributes.ratio, 0.5);
     assert.strictEqual(mySpan.attributes.cached, false);
+    assert.deepStrictEqual(mySpan.attributes.tags, ['a', null, 'b']);
+    assert.deepStrictEqual(mySpan.attributes.flags, [true]);
+    assert.deepStrictEqual(mySpan.attributes.scores, [1.5, null]);
+    assert.deepStrictEqual(mySpan.attributes.none, []);
     assert.strictEqual(mySpan.status, undefined);
 
     // The subrequest made inside it.

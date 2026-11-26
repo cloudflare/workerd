@@ -112,17 +112,126 @@ assert(
 );
 
 // CLUSTER_TESTS, a regular expression, picks the tests a target runs, and
-// Bazel shards those (`shard_count`): each shard runs every n-th of them.
+// Bazel shards those (`shard_count`), each shard about the same cost
+// (`COSTS`). The end of this file runs the shard's tests (`runShard`).
 const picked = new RegExp(env.CLUSTER_TESTS ?? '');
 const SHARDS = Number(env.TEST_TOTAL_SHARDS ?? 1);
 const SHARD = Number(env.TEST_SHARD_INDEX ?? 0);
 if (env.TEST_SHARD_STATUS_FILE !== undefined) {
   await writeFile(env.TEST_SHARD_STATUS_FILE, '');
 }
-let testIndex = 0;
+const declared = new Set();
+const registered = [];
 function test(name, ...rest) {
-  if (picked.test(name) && testIndex++ % SHARDS === SHARD)
-    nodeTest(name, ...rest);
+  declared.add(name);
+  if (picked.test(name)) registered.push({ name, rest });
+}
+
+// About how many seconds each test that takes 3 s or more takes on a busy
+// machine: those that wait out a lease, a drain or a delay. Every other test
+// costs 1.
+const COSTS = new Map([
+  ['cluster: the nodes share one Cache API cache', 11],
+  ['cluster: a rolling restart under load loses and replays no request', 9],
+  ['cluster: killing the owner allows another node to take over', 9],
+  [
+    'cluster: a node serves its DOs through its shutdown delay, then hands them off',
+    8,
+  ],
+  ["cluster: a killed owner's alarm runs once on a survivor", 7],
+  ['cluster: a node stopping under load hands its DOs to its peers', 7],
+  ['cluster: a node whose event loop makes no progress fences', 7],
+  ['cluster: a KV namespace survives its owner', 7],
+  [
+    "cluster: a stopping node's DOs finish calls to themselves and across nodes",
+    7,
+  ],
+  [
+    'cluster: a node keeps its lease through a turn of its event loop that outlasts the lease',
+    6,
+  ],
+  [
+    'cluster: a DO whose node drains while restoring it does not start there',
+    6,
+  ],
+  [
+    'cluster: a gs:// bucket holds the cluster, with tokens from the metadata server',
+    5,
+  ],
+  ["cluster: a peer takes over a draining owner's DO before its lease ends", 5],
+  [
+    "cluster: a peer's request a DO's late handoff releases is answered moved",
+    5,
+  ],
+  ['cluster: a held stub follows its DO once the owner drains', 5],
+  [
+    "cluster: other DOs' calls to a DO of a stopping node wait for its handoff",
+    5,
+  ],
+  [
+    "cluster: a draining node's own JS RPC call that waits for a handoff follows the DO",
+    5,
+  ],
+  ['cluster: an R2 bucket is an object, seen from every node', 5],
+  ["cluster: an alarm runs once on its object's owner", 4],
+  ['cluster: under structured logging, a fenced node says why on stderr', 4],
+  [
+    'serve: a SIGTERM while the server starts drains it without the shutdown delay',
+    4,
+  ],
+  [
+    'cluster: a lease write the gcs bucket stalls is sent again, and the node serves on',
+    4,
+  ],
+  [
+    'cluster: a lease write the s3 bucket stalls is sent again, and the node serves on',
+    4,
+  ],
+  [
+    'cluster: calls a peer has on the way to a node that stops are sent again',
+    4,
+  ],
+  ['cluster: a second SIGTERM cuts the shutdown delay short', 4],
+  [
+    'cluster: a DO whose handoff outlasts its deadline moves once its stopping node left',
+    4,
+  ],
+  [
+    'cluster: an instance bound to a wildcard advertises --cluster-advertise',
+    3,
+  ],
+  ['cluster: a stopping node hands off a DO it evicted before', 3],
+  [
+    'cluster: two nodes stopping at once under load hand their DOs to the third',
+    3,
+  ],
+  [
+    'cluster: requests to a DO of a stopping node wait for its handoff and follow it',
+    3,
+  ],
+  ['cluster: a request that reached a draining owner is not replayed', 3],
+  ['cluster: a node serves beside deployments it cannot serve', 3],
+]);
+
+// Runs this shard's share of the tests, in the order they were declared.
+// Costliest first, each test goes to the shard with the least cost so far.
+async function runShard() {
+  for (const name of COSTS.keys()) {
+    assert(declared.has(name), `COSTS names no test ${name}`);
+  }
+  const cost = (t) => COSTS.get(t.name) ?? 1;
+  const load = Array(SHARDS).fill(0);
+  const mine = new Set();
+  for (const t of [...registered].sort((a, b) => cost(b) - cost(a))) {
+    const shard = load.indexOf(Math.min(...load));
+    load[shard] += cost(t);
+    if (shard === SHARD) mine.add(t);
+  }
+  const runs = registered
+    .filter((t) => mine.has(t))
+    .map((t) => nodeTest(t.name, ...t.rest));
+  await Promise.all(runs);
+  for (const server of fakeServers.values()) server.close();
 }
 
 const CONTROL_FD = 3;
@@ -137,10 +246,17 @@ const SIGTERM_DRAINS = {
 const TIME_DIVISOR = 4;
 // How long a node's lease lasts: a dead owner's DOs wait this long.
 const LEASE_MS = 20_000 / TIME_DIVISOR;
-// How often a node renews its lease.
+// How often a node renews its lease, and how long a renewal may take.
 const RENEW_INTERVAL_MS = 3_000 / TIME_DIVISOR;
+const RENEW_TIMEOUT_MS = 4_000 / TIME_DIVISOR;
 // How long a stopping node accepts requests at least.
 const GRACE_MS = 5_000 / TIME_DIVISOR;
+// The same times in cluster-test.wd-test's `shortLease`, a tenth of the
+// default, and how long a node's event loop may make no progress there
+// before the node fences.
+const SHORT_LEASE_MS = 20_000 / 10;
+const SHORT_RENEW_INTERVAL_MS = 3_000 / 10;
+const SHORT_LEASE_STALL_MS = 60_000 / 10;
 
 // A minimal harness specialized for the cluster test. Unlike server-harness.mjs
 // it:
@@ -561,6 +677,12 @@ class FakeS3 {
   async faultHits() {
     const res = await fetch(`http://127.0.0.1:${this.port}/_faults`);
     return (await res.json()).map((f) => f.hits);
+  }
+
+  // How many requests each armed fault has delayed and then let go on.
+  async faultsDelayed() {
+    const res = await fetch(`http://127.0.0.1:${this.port}/_faults`);
+    return (await res.json()).map((f) => f.delayed);
   }
 
   // How many GET, PUT and DELETE requests the bucket served for `key`, a key
@@ -1501,7 +1623,9 @@ test('cluster: the nodes share one Cache API cache', async () => {
         20_000,
         "b never saw a's puts"
       );
-      for (const key of keys) {
+      // The keys side by side, as each write waits out the leases granted
+      // on its key.
+      await each(async (key) => {
         // A copy a just read is gone once b's overwrite is done.
         assert.strictEqual(await cacheMatch(a, key), `a-${key}`);
         await cachePut(b, key, `b-${key}`);
@@ -1511,7 +1635,7 @@ test('cluster: the nodes share one Cache API cache', async () => {
         assert.strictEqual(await cacheDelete(a, key), true);
         assert.strictEqual(await cacheMatch(b, key), null);
         assert.strictEqual(await cacheDelete(b, key), false);
-      }
+      });
 
       // An expired entry is none, at its home too: deleting it finds nothing.
       await each((key) => cacheCall(a, 'PUT', key, { body: 'e', ttl: 1 }));
@@ -1837,67 +1961,78 @@ test('cluster: each running instance holds a lease record', async () => {
   });
 });
 
+// Under `shortLease`, so that the turn is short too.
 test('cluster: a node keeps its lease through a turn of its event loop that outlasts the lease', async () => {
-  await withCluster(1, async ({ nodes, bucket, nodeKeys }) => {
-    const [node] = nodes;
-    const record = async () =>
-      JSON.parse(await bucket.get(`nodes/${nodeKeys.get(node.nodeId)}.json`));
-    // One request that runs `n` million iterations of JavaScript: how long
-    // the node's loop spent in it by the node's own clock, and how many times
-    // the node wrote its lease record meanwhile. A turn that does not end
-    // fails the request rather than hang the test.
-    const spin = async (n) => {
-      const before = await record();
-      const { status, body } = await fetchJson(node.httpPort, `/spin?n=${n}`, {
-        timeoutMs: 10 * LEASE_MS,
-      });
-      assert.strictEqual(status, 200, JSON.stringify(body));
-      return { took: body.took, writes: (await record()).write - before.write };
-    };
-    // How many iterations take long enough to tell this machine's speed.
-    let n = 50;
-    let { took } = await spin(n);
-    while (took < 200) {
-      n *= 4;
-      ({ took } = await spin(n));
-    }
-    // Aim at a turn of one and a half leases: one of three (`stall_ms`)
-    // would fence the node, whose loop makes no progress meanwhile.
-    const aim = (n, took) =>
-      Math.min(Math.ceil((n * 1.5 * LEASE_MS) / Math.max(took, 1)), 4 * n);
-    n = aim(n, took);
-    const armed = node.stderr.length;
-    // Optimized code may run faster than the measurement did.
-    let writes;
-    ({ took, writes } = await spin(n));
-    for (let tries = 0; took <= LEASE_MS && tries < 3; tries++) {
+  await withCluster(
+    1,
+    async ({ nodes, bucket, nodeKeys }) => {
+      const [node] = nodes;
+      const record = async () =>
+        JSON.parse(await bucket.get(`nodes/${nodeKeys.get(node.nodeId)}.json`));
+      // One request that runs `n` million iterations of JavaScript: how long
+      // the node's loop spent in it by the node's own clock, and how many times
+      // the node wrote its lease record meanwhile. A turn that does not end
+      // fails the request rather than hang the test.
+      const spin = async (n) => {
+        const before = await record();
+        const { status, body } = await fetchJson(
+          node.httpPort,
+          `/spin?n=${n}`,
+          {
+            timeoutMs: 10 * SHORT_LEASE_MS,
+          }
+        );
+        assert.strictEqual(status, 200, JSON.stringify(body));
+        return {
+          took: body.took,
+          writes: (await record()).write - before.write,
+        };
+      };
+      // How many iterations take long enough to tell this machine's speed.
+      let n = 50;
+      let { took } = await spin(n);
+      while (took < 200) {
+        n *= 4;
+        ({ took } = await spin(n));
+      }
+      // Aim at a turn of one and a half leases: one of three (`stall_ms`)
+      // would fence the node, whose loop makes no progress meanwhile.
+      const aim = (n, took) =>
+        Math.min(
+          Math.ceil((n * 1.5 * SHORT_LEASE_MS) / Math.max(took, 1)),
+          4 * n
+        );
       n = aim(n, took);
+      const armed = node.stderr.length;
+      // Optimized code may run faster than the measurement did.
+      let writes;
       ({ took, writes } = await spin(n));
-    }
-    assert(took > LEASE_MS, `a turn of ${took} ms outlasts no lease`);
-    // The lease held as the turn began expired during it, so the node renewed
-    // while its loop ran nothing else, once a round (`interval_ms`) or nearly.
-    const rounds = Math.floor(took / RENEW_INTERVAL_MS);
-    assert(
-      writes >= rounds / 2,
-      `${writes} renewals in a turn of ${took} ms, which spans ${rounds} rounds`
-    );
-    assert.doesNotMatch(
-      node.stderr.slice(armed),
-      /leaving the cluster|renewing the cluster lease failed/
-    );
-    const { status, body } = await fetchJson(
-      node.httpPort,
-      '/increment?name=long-turn',
-      { timeoutMs: 10_000 }
-    );
-    assert.strictEqual(status, 200, JSON.stringify(body));
-  });
+      for (let tries = 0; took <= SHORT_LEASE_MS && tries < 3; tries++) {
+        n = aim(n, took);
+        ({ took, writes } = await spin(n));
+      }
+      assert(took > SHORT_LEASE_MS, `a turn of ${took} ms outlasts no lease`);
+      // The lease held as the turn began expired during it, so the node renewed
+      // while its loop ran nothing else, once a round (`interval_ms`) or nearly.
+      const rounds = Math.floor(took / SHORT_RENEW_INTERVAL_MS);
+      assert(
+        writes >= rounds / 2,
+        `${writes} renewals in a turn of ${took} ms, which spans ${rounds} rounds`
+      );
+      assert.doesNotMatch(
+        node.stderr.slice(armed),
+        /leaving the cluster|renewing the cluster lease failed/
+      );
+      const { status, body } = await fetchJson(
+        node.httpPort,
+        '/increment?name=long-turn',
+        { timeoutMs: 10_000 }
+      );
+      assert.strictEqual(status, 200, JSON.stringify(body));
+    },
+    { configName: 'shortLease' }
+  );
 });
-
-// How long a node's event loop may make no progress before the node fences,
-// in cluster-test.wd-test's `shortLease`, a tenth of the default.
-const SHORT_LEASE_STALL_MS = 60_000 / 10;
 
 // A loop that stands still keeps a lease, which is kept on a thread of its
 // own, but not its objects: it fences while the lease holds, and peers may
@@ -2006,6 +2141,8 @@ for (const dialect of ['s3', 'gcs']) {
         const key = nodeKeys.get(node.nodeId);
         const resent =
           /PUT \S*nodes\/\S+\.json had no answer in \d+ ms; sending it again/;
+        const record = async () =>
+          JSON.parse(await bucket.get(`nodes/${key}.json`));
         // What the node logs from here on.
         const armed = node.stderr.length;
         // Longer than a renewal round may take: unanswered, it would time the
@@ -2014,19 +2151,29 @@ for (const dialect of ['s3', 'gcs']) {
           {
             method: 'PUT',
             prefix: `nodes/${key}.json`,
-            delayMs: 3000,
+            delayMs: 1.5 * RENEW_TIMEOUT_MS,
             times: 1,
           },
         ]);
         await node.waitForStderr(resent, 5000);
-        // Until the stalled write has been answered, and a few rounds past it.
-        await sleep(4000);
+        // Until the stalled write has been answered, and two rounds past it.
+        await until(
+          async () => (await bucket.faultsDelayed())[0] === 1,
+          5000,
+          'the stalled write was never answered'
+        );
+        const answered = (await record()).write;
+        await until(
+          async () => (await record()).write >= answered + 2,
+          4 * RENEW_INTERVAL_MS + 2000,
+          'the node renewed no more after the stalled write'
+        );
         assert.deepStrictEqual(await bucket.faultHits(), [1]);
         const since = node.stderr.slice(armed);
         assert.match(since, resent);
         assert.doesNotMatch(since, /renewing the cluster lease failed/);
-        const record = JSON.parse(await bucket.get(`nodes/${key}.json`));
-        assert(record.expires_ms > Date.now(), `lease of ${key} has expired`);
+        const { expires_ms } = await record();
+        assert(expires_ms > Date.now(), `lease of ${key} has expired`);
         const { status, body } = await fetchJson(
           node.httpPort,
           '/increment?name=stalled-lease'
@@ -3372,14 +3519,14 @@ test(
   SIGTERM_DRAINS,
   async () => {
     // A worker whose evaluation keeps the server starting, synchronously,
-    // for seconds after it logs.
+    // for a second or two after it logs.
     const dir = await mkdtemp(join(tmpdir(), 'workerd-starting-'));
     try {
       await writeFile(
         join(dir, 'worker.js'),
         `console.log('evaluating');
 let x = 0;
-for (let j = 0; j < 8; j++) for (let i = 0; i < 1e8; i++) x = (x + i) | 0;
+for (let j = 0; j < 3; j++) for (let i = 0; i < 1e8; i++) x = (x + i) | 0;
 export default { fetch: () => new Response(String(x)) };
 `
       );
@@ -4363,3 +4510,5 @@ test('cluster: --cluster-addr and --data-dir are refused where they cannot apply
     await rm(project, { recursive: true, force: true });
   }
 });
+
+await runShard();

@@ -478,7 +478,7 @@ struct HttpCall {
   kj::HttpClient::Request request;
 };
 kj::Own<HttpCall> http_call(kj::Own<WorkerInterface> interface,
-    kj::HttpMethod method,
+    kj::HttpMethod::Known method,
     ::rust::Str url,
     const kj::HttpHeaders& headers,
     uint64_t length);

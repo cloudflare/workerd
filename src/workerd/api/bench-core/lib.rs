@@ -37,8 +37,11 @@ pub const DEFAULT_MIN_TIME_NS: u64 = 1_000_000_000;
 pub const DEFAULT_SAMPLES: u32 = 50;
 
 /// Under `--quick`, the sampling budget and the number of samples are capped at these.
+///
+/// A quick run checks that cases work rather than measuring them, so two samples are enough: a
+/// case still runs more than once, and a slow one costs a few calls rather than several.
 pub const QUICK_MIN_TIME_NS: u64 = 10_000_000;
-pub const QUICK_SAMPLES: u32 = 5;
+pub const QUICK_SAMPLES: u32 = 2;
 
 /// The most samples a case can ask for.
 pub const MAX_SAMPLES: u32 = 1_000_000;
@@ -162,11 +165,25 @@ pub fn fill_group(
     Ok(())
 }
 
-/// `result` as an encoded `BenchReport.Group` message (segment table, then segments) in words.
-pub fn encode_group(result: &GroupResult) -> Result<Vec<u64>, Error> {
+/// `result` as an encoded `BenchReport.Group` message (segment table, then segments), as the
+/// bytes of the `ArrayBuffer` the runner resolves with.
+pub fn encode_group(result: &GroupResult) -> Result<Vec<u8>, Error> {
     let mut message = capnp::message::TypedBuilder::<bench_report::group::Owned>::new_default();
     fill_group(result, message.init_root())?;
-    to_words(&message)
+    Ok(capnp::serialize::write_message_to_words(
+        message.borrow_inner(),
+    ))
+}
+
+/// `words`, an encoded message, as the bytes that hold it, for a reader or a buffer that takes
+/// bytes. Copied a word at a time: the messages can be tens of megabytes.
+#[must_use]
+pub fn words_to_bytes(words: &[u64]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(size_of_val(words));
+    for word in words {
+        bytes.extend_from_slice(&word.to_ne_bytes());
+    }
+    bytes
 }
 
 /// `message`, encoded (segment table, then segments) in words.

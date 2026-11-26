@@ -41,8 +41,9 @@ use options::parse_duration;
 /// The warmup, when neither the case nor the command line sets one.
 const DEFAULT_WARMUP_NS: u64 = 200_000_000;
 
-/// Under `--quick`, warmups are capped at this.
-const QUICK_WARMUP_NS: u64 = 2_000_000;
+/// Under `--quick`, the warmup: none, as for startup groups. The calibration call still runs each
+/// case once before it is sampled.
+const QUICK_WARMUP_NS: u64 = 0;
 
 /// The most calls a batch makes.
 const MAX_CALLS_PER_BATCH: u64 = 1 << 40;
@@ -151,7 +152,7 @@ impl BenchController {
         }
         if self.quick {
             budget.min_time_ns = budget.min_time_ns.min(QUICK_MIN_TIME_NS);
-            budget.warmup_ns = budget.warmup_ns.min(QUICK_WARMUP_NS);
+            budget.warmup_ns = QUICK_WARMUP_NS;
             budget.samples = budget.samples.min(QUICK_SAMPLES);
         }
         let case = Case {
@@ -193,7 +194,7 @@ impl BenchController {
 impl BenchController {
     /// A controller for `params`, an encoded `BenchParams` message, in words.
     fn read(params: &[u64]) -> capnp::Result<Self> {
-        let bytes: Vec<u8> = params.iter().flat_map(|word| word.to_ne_bytes()).collect();
+        let bytes = bench_core::words_to_bytes(params);
         let message =
             capnp::serialize::read_message(bytes.as_slice(), capnp::message::ReaderOptions::new())?;
         let params: bench_capnp::bench_params::Reader<'_> = message.get_root()?;

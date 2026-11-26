@@ -16,6 +16,7 @@
 #include <capnp/rpc.capnp.h>
 #include <capnp/serialize-async.h>
 #include <kj/compat/http.h>
+#include <kj/encoding.h>
 
 namespace workerd::server {
 
@@ -406,12 +407,12 @@ kj::Own<WorkerInterface> rpc_client_start_request(
 }
 
 kj::Own<HttpCall> http_call(kj::Own<WorkerInterface> interface,
-    kj::HttpMethod method,
+    kj::HttpMethod::Known method,
     ::rust::Str url,
     const kj::HttpHeaders& headers,
     uint64_t length) {
   auto client = kj::newHttpClient(*interface).attach(kj::mv(interface));
-  auto request = client->request(method, kj::str(url), headers, length);
+  auto request = client->request(kj::HttpMethod(method), kj::str(url), headers, length);
   return kj::heap<HttpCall>(kj::mv(client), kj::mv(request));
 }
 
@@ -574,8 +575,23 @@ class InspectorService final: public kj::HttpService, public kj::HttpServerError
     kj::HttpHeaders responseHeaders(headerTable);
     if (headers.isWebSocket()) {
       KJ_IF_SOME(pos, url.findLast('/')) {
-        auto id = url.slice(pos + 1);
-        KJ_IF_SOME(isolate, isolates.find(id)) {
+        // Worker names can contain '/' (e.g. Worker Loader names), so the whole path is tried
+        // first. The last path segment is the fallback for clients that add a prefix.
+        kj::ArrayPtr<const char> path = url.slice(1);
+        KJ_IF_SOME(queryPos, path.findFirst('?')) {
+          path = path.first(queryPos);
+        }
+        auto decoded = kj::decodeUriComponent(path);
+        kj::StringPtr id = decoded;
+        kj::Maybe<kj::Own<const Worker::Isolate::WeakIsolateRef>&> found;
+        if (!decoded.hadErrors) {
+          found = isolates.find(id);
+        }
+        if (found == kj::none) {
+          id = url.slice(pos + 1);
+          found = isolates.find(id);
+        }
+        KJ_IF_SOME(isolate, found) {
           // The isolate is held weakly so that it need not know about the inspector; a weak ref
           // that no longer upgrades means the isolate is gone and the entry is dropped.
           KJ_IF_SOME(ref, isolate->tryAddStrongRef()) {

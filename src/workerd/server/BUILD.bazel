@@ -107,7 +107,11 @@ wd_rust_crate(
         ":config-compiler",
         "//src/workerd/server/repl",
     ],
-    test_compile_data = ["//samples:wrangler/wrangler.jsonc"],
+    test_compile_data = [
+        "//samples:kubernetes/app/src/index.js",
+        "//samples:kubernetes/app/wrangler.json",
+        "//samples:wrangler/wrangler.jsonc",
+    ],
     # Its tests run one at a time (RUST_TEST_THREADS=1); on Windows CI they took over the 15 s of
     # "medium".
     test_size = "large",
@@ -428,12 +432,14 @@ wd_capnp_library(
 )
 
 kj_test(
-    size = "enormous",
+    size = "large",
     src = "server-test.c++",
     local_defines = select({
         ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],
         "//conditions:default": [],
     }),
+    # Its cases each start a server, which is slow under sanitizers; shards run them in parallel.
+    shard_count = 12,
     deps = [
         ":workerd_capnp",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",

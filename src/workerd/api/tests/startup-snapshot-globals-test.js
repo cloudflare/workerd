@@ -7,9 +7,10 @@
 // shipped flags and Temporal (RESTORE_TIME_GLOBALS in jsg/setup.h), and the globals the runtime
 // defines in ways a snapshot must carry: process and Buffer, and the lazy MessageChannel and
 // MessagePort. One service per case: MODE selects the case's top-level behaviour, and each case
-// reports what its Worker sees at request time. The runner asserts the reports. Under the
-// startup-snapshot autogate every service here goes through the zygote; without it they are plain
-// Workers and the same assertions hold with snapshotUsed false.
+// reports what its Worker sees at request time. The runner asserts the reports of the group of
+// cases its config runs (startup-snapshot-globals-<group>-test.wd-test). Under the startup-snapshot
+// autogate every service here goes through the zygote; without it they are plain Workers and the
+// same assertions hold with snapshotUsed false.
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert';
 import { env } from 'cloudflare:workers';
@@ -115,6 +116,9 @@ switch (MODE) {
     break;
   case 'temporal-on-control':
     break;
+  case 'quota-exceeded-error-polyfill':
+    globalThis.QuotaExceededError = { polyfill: true };
+    break;
   case 'date-frozen':
     Object.freeze(Date.prototype);
     break;
@@ -170,6 +174,10 @@ function report() {
         ? 'polyfill'
         : typeof globalThis.Temporal,
     toTemporalInstant: typeof Date.prototype.toTemporalInstant,
+    quotaExceededError:
+      globalThis.QuotaExceededError?.polyfill === true
+        ? 'polyfill'
+        : typeof globalThis.QuotaExceededError,
     processCustom: globalThis.process?.custom ?? null,
     bufferCustom: globalThis.Buffer?.custom ?? null,
     processEnv: globalThis.process?.env?.FROM_TOP_LEVEL ?? null,
@@ -252,7 +260,8 @@ async function test(ctrl, env) {
   const pipelineOn = unsafe.startedFromStartupSnapshot();
 
   // Cases whose top level the zygote can run: started from the snapshot when the pipeline is on.
-  const transferable = {
+  // First those that touch what V8 adds to a context, then those that touch the runtime's globals.
+  const transferableV8 = {
     control(r) {
       deepStrictEqual(r.stackTraceLimit, V8_DEFAULT);
       strictEqual(r.topLevel.stackIsString, true);
@@ -287,6 +296,13 @@ async function test(ctrl, env) {
       strictEqual(r.temporal, 'object');
       strictEqual(r.toTemporalInstant, 'function');
     },
+    // V8 installs its own QuotaExceededError, which the zygote's context removed before the top
+    // level ran; removing it again on restore would remove the polyfill.
+    'quota-exceeded-error-polyfill'(r) {
+      strictEqual(r.quotaExceededError, 'polyfill');
+    },
+  };
+  const transferableRuntime = {
     'process-assign'(r) {
       strictEqual(r.processCustom, 'process');
     },
@@ -392,11 +408,16 @@ async function test(ctrl, env) {
     ok(r.errorFrozen === (name === 'error-frozen'), `${name}: Error frozen`);
     check(r);
   };
-  for (const [name, check] of Object.entries(transferable)) {
-    await run(name, pipelineOn, check);
-  }
-  for (const [name, check] of Object.entries(fallback)) {
-    await run(name, false, check);
+  // Each config runs one group, and has a service for each of its cases: GROUP names the group.
+  const groups = {
+    'transferable-v8': [transferableV8, pipelineOn],
+    'transferable-runtime': [transferableRuntime, pipelineOn],
+    fallback: [fallback, false],
+  };
+  ok(Object.hasOwn(groups, env.GROUP), `unknown GROUP ${env.GROUP}`);
+  const [cases, expectedSnapshotUsed] = groups[env.GROUP];
+  for (const [name, check] of Object.entries(cases)) {
+    await run(name, expectedSnapshotUsed, check);
   }
 }
 

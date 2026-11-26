@@ -1,10 +1,9 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 # Errors thrown, returned and sent over RPC, and cloned, between workers with
-# and without enhanced error serialization: a native Error and a
-# CloneableTestError (under expose_serialization_test_class), which should
-# keep or lose their stacks alike. Each worker names its error serialization
-# flag, so that every variant tests the same pairs.
+# and without enhanced error serialization, and whether each keeps its stack.
+# Each worker names its error serialization flag, so that every variant tests
+# the same pairs.
 const unitTests :Workerd.Config = (
   services = [
     ( name = "client-enhanced",
@@ -16,8 +15,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "rpc",
-          "experimental",
-          "expose_serialization_test_class",
           "enhanced_error_serialization",
         ],
         bindings = [
@@ -36,8 +33,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "rpc",
-          "experimental",
-          "expose_serialization_test_class",
           "legacy_error_serialization",
         ],
         bindings = [
@@ -56,8 +51,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "rpc",
-          "experimental",
-          "expose_serialization_test_class",
           "enhanced_error_serialization",
         ],
       )
@@ -71,8 +64,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "rpc",
-          "experimental",
-          "expose_serialization_test_class",
           "legacy_error_serialization",
         ],
       )

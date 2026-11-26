@@ -67,9 +67,20 @@ function anyValue(bytes) {
           0,
           true
         );
+      case 5:
+        return arrayValue(value);
     }
   }
   throw new Error('attribute without a value');
+}
+
+// opentelemetry.proto.common.v1.ArrayValue. An element with no value set is a null slot.
+function arrayValue(bytes) {
+  const values = [];
+  for (const [number, value] of fields(bytes)) {
+    if (number === 1) values.push(value.length === 0 ? null : anyValue(value));
+  }
+  return values;
 }
 
 // A repeated opentelemetry.proto.common.v1.KeyValue field, collected into `attributes`.

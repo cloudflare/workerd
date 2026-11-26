@@ -154,7 +154,7 @@ def wd_test(
 WINDOWS_TEMPLATE = """
 @echo off
 setlocal EnableDelayedExpansion
-
+{shard_status}
 REM Run supervisor to assign ports and start the sidecar, if any
 if "{supervise}" == "true" (
     REM These environment variables are processed by the supervisor executable
@@ -190,7 +190,7 @@ exit /b %ERRORLEVEL%
 
 SH_TEMPLATE = """#!/bin/bash
 set -euo pipefail
-
+{shard_status}
 # Set up coverage for workerd subprocess
 if [ -n "${{COVERAGE_DIR:-}}" ]; then
     export LLVM_PROFILE_FILE="${{COVERAGE_DIR}}/%p-%m.profraw"
@@ -206,6 +206,13 @@ if [ "{supervise}" = "true" ]; then
 else
     {runtest}
 fi
+"""
+
+# Tells Bazel that the test divides its cases among the shards of a target with `shard_count`.
+SH_SHARD_STATUS = """if [ -n "${TEST_SHARD_STATUS_FILE:-}" ]; then touch "$TEST_SHARD_STATUS_FILE"; fi
+"""
+
+WINDOWS_SHARD_STATUS = """if defined TEST_SHARD_STATUS_FILE type nul > "%TEST_SHARD_STATUS_FILE%"
 """
 
 WINDOWS_RUNTEST_NORMAL = "goto run_workerd"
@@ -259,6 +266,7 @@ def _wd_test_impl(ctx):
         # Batch script executables must end with ".bat"
         executable = ctx.actions.declare_file("%s_wd_test.bat" % ctx.label.name)
         template = WINDOWS_TEMPLATE
+        shard_status = WINDOWS_SHARD_STATUS
         if ctx.attr.python_snapshot_test:
             runtest = WINDOWS_RUNTEST_SNAPSHOT
         elif supervise:
@@ -268,9 +276,11 @@ def _wd_test_impl(ctx):
     else:
         executable = ctx.outputs.executable
         template = SH_TEMPLATE
+        shard_status = SH_SHARD_STATUS
         runtest = SH_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else SH_RUNTEST_NORMAL
 
     content = template.format(
+        shard_status = shard_status if ctx.attr.supports_sharding else "",
         supervise = "true" if supervise else "false",
         sidecar = ctx.file.sidecar.short_path if ctx.file.sidecar else "",
         # `set NAME=` with nothing after it leaves NAME unset, where `""` would set it to two quotes.
@@ -427,6 +437,9 @@ _wd_test = rule(
             default = "//src/workerd/api/node/tests:sidecar-supervisor",
         ),
         "python_snapshot_test": attr.bool(),
+        # If true, the test runs only its share of its cases when Bazel shards it (`shard_count`),
+        # as told by TEST_TOTAL_SHARDS and TEST_SHARD_INDEX, so the script reports sharding support.
+        "supports_sharding": attr.bool(),
         "load_snapshot": attr.label(allow_single_file = True),
         # Environment variables to set when running the test
         "env": attr.string_dict(),

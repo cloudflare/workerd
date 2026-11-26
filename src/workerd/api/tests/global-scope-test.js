@@ -137,9 +137,12 @@ export const mutableGlobals = {
   },
 };
 
-export const datagramRequiresExperimental = {
+export const datagramRequiresUdpIngress = {
   test() {
-    strictEqual(globalThis.Datagram, undefined);
+    strictEqual(
+      typeof globalThis.Datagram,
+      Cloudflare.compatibilityFlags.udp_ingress ? 'function' : 'undefined'
+    );
   },
 };
 

@@ -491,6 +491,79 @@ export const testDetailAcceptsAnyValue = {
   },
 };
 
+export const testMarkDetailIsCloned = {
+  test() {
+    perfHooksPerformance.clearMarks();
+    const detail = { foo: 1, bar: { 1: 2 } };
+
+    const mark = perfHooksPerformance.mark('m', { detail });
+    const ctorMark = new PerformanceMark('c', { detail });
+    detail.foo = 2;
+
+    for (const entry of [mark, ctorMark]) {
+      notStrictEqual(entry.detail, detail);
+      deepStrictEqual(entry.detail, { foo: 1, bar: { 1: 2 } });
+      strictEqual(entry.detail, entry.detail);
+    }
+    perfHooksPerformance.clearMarks();
+  },
+};
+
+export const testMeasureDetailIsCloned = {
+  test() {
+    perfHooksPerformance.clearMeasures();
+    const detail = { foo: 1 };
+
+    const measure = perfHooksPerformance.measure('m', { start: 0, detail });
+    detail.foo = 2;
+
+    notStrictEqual(measure.detail, detail);
+    deepStrictEqual(measure.detail, { foo: 1 });
+    strictEqual(measure.detail, measure.detail);
+    perfHooksPerformance.clearMeasures();
+  },
+};
+
+export const testPrimitiveDetailRoundTrips = {
+  test() {
+    for (const detail of [null, 0, 'text', true]) {
+      strictEqual(perfHooksPerformance.mark('m', { detail }).detail, detail);
+      strictEqual(
+        perfHooksPerformance.measure('m', { start: 0, detail }).detail,
+        detail
+      );
+    }
+    strictEqual(
+      perfHooksPerformance.mark('m', { detail: undefined }).detail,
+      null
+    );
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+  },
+};
+
+export const testUncloneableDetailThrows = {
+  test() {
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+
+    for (const detail of [Symbol(), { s: Symbol() }, () => {}, { fn() {} }]) {
+      const isDataCloneError = (err) => err.name === 'DataCloneError';
+      throws(
+        () => perfHooksPerformance.mark('bad', { detail }),
+        isDataCloneError
+      );
+      throws(() => new PerformanceMark('bad', { detail }), isDataCloneError);
+      throws(
+        () => perfHooksPerformance.measure('bad', { start: 0, detail }),
+        isDataCloneError
+      );
+    }
+
+    strictEqual(perfHooksPerformance.getEntriesByName('bad').length, 0);
+  },
+};
+
 export const testMeasureEndMarkWithoutStart = {
   test() {
     perfHooksPerformance.clearMarks();

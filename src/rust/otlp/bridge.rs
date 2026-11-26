@@ -15,6 +15,7 @@
 
 use kj_rs::KjMaybe;
 
+use crate::attributes::AttributeArray;
 use crate::attributes::Attributes;
 use crate::buffer;
 use crate::buffer::SpanBuffer;
@@ -22,6 +23,7 @@ use crate::json;
 use crate::logs;
 use crate::logs::LogBuffer;
 use crate::proto;
+use crate::proto::any_value::Value;
 
 #[cxx::bridge(namespace = "workerd::rust::otlp")]
 mod ffi {
@@ -91,6 +93,16 @@ mod ffi {
         fn add_bool(attributes: &mut Attributes, key: &[u8], value: bool);
         fn add_int(attributes: &mut Attributes, key: &[u8], value: i64);
         fn add_double(attributes: &mut Attributes, key: &[u8], value: f64);
+        fn add_array(attributes: &mut Attributes, key: &[u8], value: Box<AttributeArray>);
+
+        /// An array attribute's elements, in order. Null elements are OpenTelemetry's null slots.
+        type AttributeArray;
+
+        fn new_attribute_array() -> Box<AttributeArray>;
+        fn push_string_element(array: &mut AttributeArray, value: &[u8]);
+        fn push_bool_element(array: &mut AttributeArray, value: bool);
+        fn push_double_element(array: &mut AttributeArray, value: f64);
+        fn push_null_element(array: &mut AttributeArray);
 
         /// One invocation's spans on their way to a collector. Times are unix nanoseconds.
         type SpanBuffer;
@@ -227,6 +239,30 @@ fn add_int(attributes: &mut Attributes, key: &[u8], value: i64) {
 
 fn add_double(attributes: &mut Attributes, key: &[u8], value: f64) {
     attributes.push(text(key), value);
+}
+
+fn add_array(attributes: &mut Attributes, key: &[u8], value: Box<AttributeArray>) {
+    attributes.push(text(key), *value);
+}
+
+fn new_attribute_array() -> Box<AttributeArray> {
+    Box::default()
+}
+
+fn push_string_element(array: &mut AttributeArray, value: &[u8]) {
+    array.push(Some(Value::String(text(value))));
+}
+
+fn push_bool_element(array: &mut AttributeArray, value: bool) {
+    array.push(Some(Value::Bool(value)));
+}
+
+fn push_double_element(array: &mut AttributeArray, value: f64) {
+    array.push(Some(Value::Double(value)));
+}
+
+fn push_null_element(array: &mut AttributeArray) {
+    array.push(None);
 }
 
 fn new_span_buffer(

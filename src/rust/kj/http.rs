@@ -26,10 +26,10 @@ pub mod ffi {
         include!("workerd/rust/kj/ffi.h");
     }
 
-    /// Corresponds to `kj::HttpMethod`.
+    /// Corresponds to `kj::HttpMethod::Known`, without `OTHER`.
     /// Values are automatically assigned by `cxx` because of extern declaration below.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-    #[repr(u32)]
+    #[repr(u8)]
     enum HttpMethod {
         GET,
         HEAD,

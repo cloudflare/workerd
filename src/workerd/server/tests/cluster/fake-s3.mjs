@@ -24,7 +24,8 @@
 // and whose method is `method` by `delayMs`, then answers `status` instead if
 // given, for the next `times` of them; with `after`, it serves the request
 // first and answers `status` instead of its answer. `GET /_faults` lists
-// them, with `hits`.
+// them, with `hits`, and `delayed`: how many of those have waited out their
+// delay.
 // `GET /_rejected?key=` counts the writes to a key whose precondition failed.
 //
 // With the dialect "gcs", it speaks Cloud Storage's XML API instead: an
@@ -138,6 +139,13 @@ export class FakeS3Server {
     this.#server.unref();
   }
 
+  // Stops listening and closes the connections it accepted, idle ones too,
+  // which would otherwise hold the test process until they time out.
+  close() {
+    this.#server.close();
+    this.#server.closeAllConnections();
+  }
+
   get port() {
     return this.#server.address().port;
   }
@@ -174,7 +182,7 @@ export class FakeS3Server {
     if (url.pathname === '/_faults') {
       if (req.method === 'POST') {
         const armed = JSON.parse(await readBody(req));
-        this.#faults = armed.map((f) => ({ ...f, hits: 0 }));
+        this.#faults = armed.map((f) => ({ ...f, hits: 0, delayed: 0 }));
       }
       return send(200, JSON.stringify(this.#faults));
     }
@@ -200,7 +208,10 @@ export class FakeS3Server {
     );
     if (fault !== undefined) {
       fault.hits++;
-      await sleep(fault.delayMs ?? 0);
+      // Unref'd: a delay that outlasts its test does not hold the process,
+      // which the request's own connection does while a client waits.
+      await sleep(fault.delayMs ?? 0, undefined, { ref: false });
+      fault.delayed++;
       if (generation !== this.#generation) return send(503);
       if (fault.status !== undefined && !fault.after) return send(fault.status);
     }

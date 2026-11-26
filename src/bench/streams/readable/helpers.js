@@ -16,6 +16,17 @@ export function expectEqual(actual, expected, what) {
 // chunk.
 export const CHUNK = { value: 1 };
 
+// Under --quick, which only checks that each case runs, the from,
+// asyncIteration and tee cases read a sixteenth as many chunks, so that the
+// @smoke tests stay fast in sanitizer and debug builds. Labels show the
+// counts a run used.
+const QUICK_DIVISOR = 16;
+
+// `count` chunks, cut down under --quick.
+export function scaled(b, count) {
+  return b.options.quick ? count / QUICK_DIVISOR : count;
+}
+
 // Reads `reader` to the end, returning the number of chunks read.
 export async function drainReader(reader) {
   let count = 0;

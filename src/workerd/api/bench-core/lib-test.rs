@@ -31,8 +31,7 @@ fn make_case(samples: &[f64], returns_promise: bool) -> CaseResult {
 
 /// The group of `result`, encoded and read back as C++ would.
 fn round_trip(result: &GroupResult) -> capnp::message::Reader<capnp::serialize::OwnedSegments> {
-    let words = encode_group(result).unwrap();
-    let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_ne_bytes()).collect();
+    let bytes = encode_group(result).unwrap();
     capnp::serialize::read_message(bytes.as_slice(), capnp::message::ReaderOptions::new()).unwrap()
 }
 
@@ -205,4 +204,12 @@ fn takes_the_median() {
     assert_eq!(median(&[3.0, 1.0, 2.0]), 2.0);
     assert_eq!(median(&[4.0, 1.0, 3.0, 2.0]), 2.5);
     assert!(median(&[]).is_nan());
+}
+
+#[test]
+fn words_to_bytes_keeps_memory_order() {
+    let words = [0x0102_0304_0506_0708_u64, u64::MAX, 0];
+    let expected: Vec<u8> = words.iter().flat_map(|word| word.to_ne_bytes()).collect();
+    assert_eq!(words_to_bytes(&words), expected);
+    assert!(words_to_bytes(&[]).is_empty());
 }
