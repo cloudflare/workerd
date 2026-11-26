@@ -109,14 +109,27 @@ const IN_MEMORY_BUFFER: usize = 64 << 10;
 pub fn connect(host: &str) -> Option<DuplexStream> {
     let (accept, hang_ups) = IN_MEMORY.lock().unwrap().get(host)?.clone();
     let (client, server) = tokio::io::duplex(IN_MEMORY_BUFFER);
-    let hang_up = hang_ups.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
-    if hang_up.is_ok() {
+    if take_one(&hang_ups) {
         // Closed before the client reads from it or writes to it.
         drop(server);
     } else {
         accept.send(server).ok()?;
     }
     Some(client)
+}
+
+/// Takes one from `n` unless it is 0, and says whether it did. (Not
+/// `fetch_update`, which newer Rust deprecates for a `try_update` that
+/// workerd's Rust doesn't have yet.)
+fn take_one(n: &AtomicUsize) -> bool {
+    let mut current = n.load(Ordering::SeqCst);
+    while let Some(less) = current.checked_sub(1) {
+        match n.compare_exchange(current, less, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(now) => current = now,
+        }
+    }
+    false
 }
 
 pub struct Server {

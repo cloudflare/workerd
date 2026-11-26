@@ -37,6 +37,7 @@ wd_cc_library(
     deps = [
         ":ffi.rs@cxx",
         "//src/workerd/util:sqlite",
+        "//src/workerd/util:wal-reporting-directory",
         "@capnp-cpp//src/kj",
     ],
 )

@@ -5,6 +5,7 @@
 #include "ffi.h"
 
 #include <workerd/rust/sqlite-rs/ffi.rs.h>
+#include <workerd/util/wal-reporting-directory.h>
 
 #include <kj/debug.h>
 
@@ -23,6 +24,28 @@ kj::Own<SqliteVfs> newVfs(kj::Own<const kj::Directory> directory, VfsSettings se
   };
   return kj::heap<SqliteVfs>(*directory, options).attach(kj::mv(directory));
 }
+
+// The existing directory at `path`, absolute or relative to the current directory.
+kj::Own<const kj::Directory> openDiskDirectory(::rust::Str path) {
+  auto filesystem = kj::newDiskFilesystem();
+  auto directoryPath = filesystem->getCurrentPath().evalNative(kj::str(path));
+  return filesystem->getRoot().openSubdir(directoryPath, kj::WriteMode::MODIFY);
+}
+
+// Passes each WAL write on to a Rust `WalObserver`.
+class RustWalObserver final: public WalObserver {
+ public:
+  explicit RustWalObserver(::rust::Box<WalObserverBox> observer): observer(kj::mv(observer)) {}
+
+  void walWrite(
+      kj::StringPtr path, uint64_t offset, kj::ArrayPtr<const kj::byte> data) const override {
+    observer->wal_write(::rust::Str(path.begin(), path.size()), offset,
+        ::rust::Slice<const uint8_t>(data.begin(), data.size()));
+  }
+
+ private:
+  ::rust::Box<WalObserverBox> observer;
+};
 
 kj::Maybe<kj::WriteMode> toWriteMode(OpenMode mode) {
   switch (mode) {
@@ -120,9 +143,14 @@ kj::Own<SqliteVfs> vfs_new_in_memory(VfsSettings settings) {
 }
 
 kj::Own<SqliteVfs> vfs_new_on_disk(::rust::Str path, VfsSettings settings) {
-  auto filesystem = kj::newDiskFilesystem();
-  auto directoryPath = filesystem->getCurrentPath().evalNative(kj::str(path));
-  return newVfs(filesystem->getRoot().openSubdir(directoryPath, kj::WriteMode::MODIFY), settings);
+  return newVfs(openDiskDirectory(path), settings);
+}
+
+kj::Own<SqliteVfs> vfs_new_on_disk_observed(
+    ::rust::Str path, VfsSettings settings, ::rust::Box<WalObserverBox> observer) {
+  return newVfs(
+      newWalReportingDirectory(openDiskDirectory(path), kj::arc<RustWalObserver>(kj::mv(observer))),
+      settings);
 }
 
 int64_t set_max_memory_per_process_bytes(int64_t bytes) {

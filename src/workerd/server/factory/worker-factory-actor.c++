@@ -10,6 +10,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/workerd-api.h>
+#include <workerd/util/wal-reporting-directory.h>
 
 namespace workerd::server {
 
@@ -18,9 +19,25 @@ namespace workerd::server {
 
 namespace {
 
+// Reports a clustered namespace's WAL writes to the cluster, which cuts commits from them. Its
+// databases are named `*.sqlite`, so their WALs `*.sqlite-wal`.
+class ClusterWalObserver final: public WalObserver {
+ public:
+  explicit ClusterWalObserver(const ActorNamespaceHandle& actors): actors(actors) {}
+
+  void walWrite(
+      kj::StringPtr path, uint64_t offset, kj::ArrayPtr<const kj::byte> data) const override {
+    if (!path.endsWith(".sqlite-wal")) return;
+    actors.wal_write(toRust(path), offset, ::rust::Slice<const uint8_t>(data.begin(), data.size()));
+  }
+
+ private:
+  const ActorNamespaceHandle& actors;
+};
+
 // The directory a clustered namespace's SQLite opens its files through. Opening fails once this
-// instance's cluster lease has lapsed, and writes to a WAL are reported to the cluster, which cuts
-// commits from them. It has no fd, so SQLite uses the KJ VFS, on every platform.
+// instance's cluster lease has lapsed. `inner` reports WAL writes (`newWalReportingDirectory()`).
+// It has no fd, so SQLite uses the KJ VFS, on every platform.
 class ClusterDirectory final: public kj::Directory {
  public:
   ClusterDirectory(kj::Own<const kj::Directory> inner, const ActorNamespaceHandle& actors)
@@ -64,12 +81,7 @@ class ClusterDirectory final: public kj::Directory {
   kj::Maybe<kj::Own<const kj::File>> tryOpenFile(
       kj::PathPtr path, kj::WriteMode mode) const override {
     actors.check_open();
-    auto name = path.toString();
-    return inner->tryOpenFile(path, mode)
-        .map([&](kj::Own<const kj::File>&& file) -> kj::Own<const kj::File> {
-      if (!name.endsWith(".sqlite-wal")) return kj::mv(file);
-      return kj::heap<WalFile>(kj::mv(file), kj::mv(name), actors);
-    });
+    return inner->tryOpenFile(path, mode);
   }
   kj::Own<Replacer<kj::File>> replaceFile(kj::PathPtr path, kj::WriteMode mode) const override {
     return inner->replaceFile(path, mode);
@@ -105,60 +117,15 @@ class ClusterDirectory final: public kj::Directory {
   }
 
  private:
-  // A WAL file: each write, once it succeeds, goes to the cluster.
-  class WalFile final: public kj::File {
-   public:
-    WalFile(kj::Own<const kj::File> inner, kj::String name, const ActorNamespaceHandle& actors)
-        : inner(kj::mv(inner)),
-          name(kj::mv(name)),
-          actors(actors) {}
-
-    Metadata stat() const override {
-      return inner->stat();
-    }
-    void sync() const override {
-      inner->sync();
-    }
-    void datasync() const override {
-      inner->datasync();
-    }
-    kj::Own<const FsNode> cloneFsNode() const override {
-      return kj::heap<WalFile>(inner->clone(), kj::str(name), actors);
-    }
-    size_t read(uint64_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
-      return inner->read(offset, buffer);
-    }
-    kj::Array<const kj::byte> mmap(uint64_t offset, uint64_t size) const override {
-      return inner->mmap(offset, size);
-    }
-    kj::Array<kj::byte> mmapPrivate(uint64_t offset, uint64_t size) const override {
-      return inner->mmapPrivate(offset, size);
-    }
-    void write(uint64_t offset, kj::ArrayPtr<const kj::byte> data) const override {
-      inner->write(offset, data);
-      actors.wal_write(
-          toRust(name), offset, ::rust::Slice<const uint8_t>(data.begin(), data.size()));
-    }
-    void zero(uint64_t offset, uint64_t size) const override {
-      inner->zero(offset, size);
-    }
-    void truncate(uint64_t size) const override {
-      inner->truncate(size);
-    }
-    kj::Own<const kj::WritableFileMapping> mmapWritable(
-        uint64_t offset, uint64_t size) const override {
-      return inner->mmapWritable(offset, size);
-    }
-
-   private:
-    kj::Own<const kj::File> inner;
-    kj::String name;
-    const ActorNamespaceHandle& actors;
-  };
-
   kj::Own<const kj::Directory> inner;
   const ActorNamespaceHandle& actors;
 };
+
+kj::Own<const kj::Directory> newClusterDirectory(
+    kj::Own<const kj::Directory> inner, const ActorNamespaceHandle& actors) {
+  return kj::heap<ClusterDirectory>(
+      newWalReportingDirectory(kj::mv(inner), kj::arc<ClusterWalObserver>(actors)), actors);
+}
 
 }  // namespace
 
@@ -172,9 +139,8 @@ ActorStorage::Impl::Impl(const WorkerFactory& factory,
                        .orDefault([&]() {
                          return kj::newInMemoryDirectory(kj::systemPreciseCalendarClock());
                        })),
-      sqliteDirectory(actors->replicated()
-              ? kj::heap<ClusterDirectory>(vfsDirectory->clone(), *actors)
-              : vfsDirectory->clone()),
+      sqliteDirectory(actors->replicated() ? newClusterDirectory(vfsDirectory->clone(), *actors)
+                                           : vfsDirectory->clone()),
       vfs(*sqliteDirectory, {.sync = factory.getImpl().options->syncStorage}),
       uniqueKey(kj::mv(uniqueKey)),
       alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),

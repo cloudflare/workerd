@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use std::rc::Rc;
+
 use sqlite_rs_testing::checked;
 use sqlite_rs_testing::temp_dir;
 
@@ -186,5 +188,70 @@ fn vfs_without_sync_persists_across_reopening() {
         let vfs = Vfs::in_memory_with(options).unwrap();
         write_row(&vfs, "db.sqlite");
         assert_eq!(read_row(&vfs, "db.sqlite"), "persisted");
+    });
+}
+
+/// Every WAL write an observed VFS reported, as the file it adds up to.
+#[derive(Clone, Default)]
+struct Wals(Rc<std::cell::RefCell<std::collections::BTreeMap<String, Vec<u8>>>>);
+
+impl WalObserver for Wals {
+    fn wal_write(&self, path: &str, offset: u64, data: &[u8]) {
+        let mut wals = self.0.borrow_mut();
+        let wal = wals.entry(path.to_owned()).or_default();
+        let offset = usize::try_from(offset).unwrap();
+        let end = offset + data.len();
+        if wal.len() < end {
+            wal.resize(end, 0);
+        }
+        wal[offset..end].copy_from_slice(data);
+    }
+}
+
+#[test]
+fn on_disk_observed_reports_each_wal_write() {
+    checked(|| {
+        let dir = temp_dir("observed");
+        let wals = Wals::default();
+        let vfs =
+            Vfs::on_disk_observed(dir.to_str().unwrap(), VfsOptions::new(), wals.clone()).unwrap();
+        let db = Database::open(&vfs, "sub/db.sqlite", OpenMode::CreateWithParents).unwrap();
+        db.run(
+            "PRAGMA journal_mode=WAL; CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('persisted');",
+            &[],
+        )
+        .unwrap();
+        // Only the WAL is reported, and its writes add up to what the file holds.
+        let reported = wals.0.borrow().clone();
+        assert_eq!(reported.keys().collect::<Vec<_>>(), ["sub/db.sqlite-wal"]);
+        let on_disk = std::fs::read(dir.join("sub/db.sqlite-wal")).unwrap();
+        assert!(!on_disk.is_empty());
+        assert_eq!(reported["sub/db.sqlite-wal"], on_disk);
+        drop(db);
+        assert_eq!(read_row(&vfs, "sub/db.sqlite"), "persisted");
+    });
+}
+
+#[test]
+fn on_disk_observed_keeps_its_observer_while_a_database_is_open() {
+    checked(|| {
+        let dir = temp_dir("observed-lifetime");
+        let wals = Wals::default();
+        let vfs =
+            Vfs::on_disk_observed(dir.to_str().unwrap(), VfsOptions::new(), wals.clone()).unwrap();
+        let db = Database::open(&vfs, "db.sqlite", OpenMode::Create).unwrap();
+        drop(vfs);
+        db.run(
+            "PRAGMA journal_mode=WAL; CREATE TABLE t (v); INSERT INTO t VALUES (1);",
+            &[],
+        )
+        .unwrap()
+        .finish()
+        .unwrap();
+        assert!(wals.0.borrow().contains_key("db.sqlite-wal"));
+        // The VFS's last handle holds the observer's last clone but this one.
+        assert_eq!(Rc::strong_count(&wals.0), 2);
+        drop(db);
+        assert_eq!(Rc::strong_count(&wals.0), 1);
     });
 }
