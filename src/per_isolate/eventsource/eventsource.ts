@@ -40,6 +40,7 @@
 // and a JavaScript stream's chunks are enqueued under it already.
 
 import type { EventTargetInternals } from '../events/event-target-internals';
+import type { MimeTypeModule } from '../mime/mime-type';
 import type { RuntimeClassHelpers } from '../runtime-class';
 import type {
   EventSource as PublishedEventSource,
@@ -89,7 +90,6 @@ const {
   isDataView,
   isFetcher,
   markPromiseHandled,
-  mimeTypeEssence,
   parseUrl,
   readableStreamState,
 } = utils;
@@ -106,6 +106,8 @@ const {
 } = require('events/event-target-internals') as EventTargetInternals;
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
+
+const { MimeType } = require('mime/mime-type') as MimeTypeModule;
 
 // Whichever streams implementation main.ts installed before loading this
 // module; a Response body and anything EventSource.from() accepts are its
@@ -597,7 +599,7 @@ class EventSource extends EventTarget {
       fail('No content type header was present in the response.');
       return;
     }
-    if (mimeTypeEssence(contentType) !== kEventStreamMimeType) {
+    if (MimeType.tryParse(contentType)?.essence !== kEventStreamMimeType) {
       fail(`The content type '${contentType}' is invalid.`);
       return;
     }

@@ -495,6 +495,24 @@ KJ_TEST("Backslash escaping in serialization round-trips") {
   KJ_ASSERT(val == "a\\;b");
 }
 
+KJ_TEST("MimeType validates tokens and parameter values") {
+  KJ_EXPECT(MimeType::isToken("text"_kj));
+  KJ_EXPECT(MimeType::isToken("vnd.a+b-c_d!#$%&'*^`|~\\"_kj));
+  KJ_EXPECT(!MimeType::isToken(""_kj));
+  KJ_EXPECT(!MimeType::isToken("a b"_kj));
+  KJ_EXPECT(!MimeType::isToken("a/b"_kj));
+  KJ_EXPECT(!MimeType::isToken("\xc3\xa9"_kj));
+  KJ_EXPECT(!MimeType::isToken(kj::StringPtr("a\0b", 3)));
+
+  KJ_EXPECT(MimeType::isParamValue(""_kj));
+  KJ_EXPECT(MimeType::isParamValue("a b\t\"\\;=~"_kj));
+  KJ_EXPECT(MimeType::isParamValue("\xc3\xa9"_kj));
+  KJ_EXPECT(!MimeType::isParamValue("a\nb"_kj));
+  KJ_EXPECT(!MimeType::isParamValue("\x7f"_kj));
+  KJ_EXPECT(!MimeType::isParamValue("\xff"_kj));
+  KJ_EXPECT(!MimeType::isParamValue(kj::StringPtr("a\0b", 3)));
+}
+
 KJ_TEST("Extract Mime Type") {
   // These are taken from the fetch spec
   // https://fetch.spec.whatwg.org/#concept-header-extract-mime-type

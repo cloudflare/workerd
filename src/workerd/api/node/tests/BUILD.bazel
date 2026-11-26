@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_bench.bzl", "wd_bench")
 load("//:build/wd_sh_test.bzl", "wd_sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -194,6 +195,11 @@ wd_test(
     src = "mimetype-test.wd-test",
     args = ["--experimental"],
     data = ["mimetype-test.js"],
+)
+
+wd_bench(
+    src = "mimetype-bench.wd-bench",
+    data = ["mimetype-bench.js"],
 )
 
 wd_test(

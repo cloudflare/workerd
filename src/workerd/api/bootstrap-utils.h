@@ -21,10 +21,15 @@ class BootstrapUtils {
   // TypeError if `input` is not a string.
   static jsg::JsValue parseUrl(jsg::Lock& js, jsg::JsValue input);
 
-  // The essence (the lowercased type and subtype, as `type/subtype`) of `input` (a string) parsed
-  // as a MIME type, or undefined if it does not parse as one. Throws a TypeError if `input` is not
+  // Parses `input` (a string) as a MIME type. Returns `[type, subtype, name0, value0, ...]`, or
+  // undefined if it does not parse as one; see mimetype-js.h. Throws a TypeError if `input` is not
   // a string.
-  static jsg::JsValue mimeTypeEssence(jsg::Lock& js, jsg::JsValue input);
+  static jsg::JsValue mimeTypeParse(jsg::Lock& js, jsg::JsValue input);
+
+  // Serializes a MIME type of `type` and `subtype` (strings) and `params` (an array of names and
+  // values, as mimeTypeParse() returns after the subtype). Throws a TypeError for other arguments.
+  static jsg::JsValue mimeTypeSerialize(
+      jsg::Lock& js, jsg::JsValue type, jsg::JsValue subtype, jsg::JsValue params);
 
   // Undefined if `value` is not a ReadableStream of either implementation, else "locked",
   // "disturbed" (unlocked, but read from) or "readable".

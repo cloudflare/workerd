@@ -165,7 +165,10 @@ namespace workerd::util {
      reports it to the tracer, delivers it, starts the handler in a waitUntil task and waits for   \
      the request to finish, rather than doing all of that in C++. The handler is still started by  \
      C++ ServiceWorkerGlobalScope::startScheduled(). */                                            \
-  V(RUST_ENTRYPOINT_SCHEDULED)
+  V(RUST_ENTRYPOINT_SCHEDULED)                                                                     \
+  /* MIME types are parsed and serialized by the Rust crate in util/mimetype/ rather than the      \
+     C++ code in util/mimetype-legacy.c++. See util/mimetype.c++. */                               \
+  V(RUST_MIMETYPE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
