@@ -93,6 +93,7 @@ wd_cc_library(
     # TODO(cleanup): Fix this.
     srcs = [
         "async-trace-promises.c++",
+        "entrypoint-invocation.c++",
         "features.c++",
         "hibernation-manager.c++",
         "io-channels.c++",
@@ -109,6 +110,7 @@ wd_cc_library(
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "async-trace-promises.h",
+        "entrypoint-invocation.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -522,6 +524,9 @@ wd_cc_library(
     srcs = ["worker-entrypoint.c++"],
     hdrs = ["worker-entrypoint.h"],
     implementation_deps = [
+        "//src/workerd/io/entrypoint",
+        "//src/workerd/io/entrypoint:ffi",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:strings",
     ],

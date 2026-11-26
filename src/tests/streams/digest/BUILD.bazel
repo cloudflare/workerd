@@ -4,7 +4,10 @@ load("//:build/wd_test.bzl", "wd_test")
 # digest-cpp against the C++ implementation, digest-ts against the
 # TypeScript implementation.
 
-digest_suite_srcs = glob(["*.js"]) + ["digest-modules.capnp"]
+digest_suite_srcs = glob(
+    ["*.js"],
+    exclude = ["gc-pressure.js"],
+) + ["digest-modules.capnp"]
 
 wd_test(
     size = "large",
@@ -35,4 +38,17 @@ wd_test(
     src = "digest-cpp-legacy.wd-test",
     data = digest_suite_srcs,
     generate_all_compat_flags_variant = False,
+)
+
+# gcDuringCloseOfDroppedStream, under the V8 flags that make a GC finish
+# inside a sink call. Apart from the suite so that only it runs with them.
+wd_test(
+    src = "digest-gc-pressure-cpp.wd-test",
+    data = ["gc-pressure.js"],
+)
+
+wd_test(
+    src = "digest-gc-pressure-ts.wd-test",
+    args = ["--experimental"],
+    data = ["gc-pressure.js"],
 )

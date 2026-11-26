@@ -491,7 +491,12 @@ RunResult runScenario(TestFixture& fixture, uint index, uint64_t terminateAt) {
   return result;
 }
 
-KJ_TEST("streams survive termination at every call into JavaScript") {
+// The scenarios are independent, and together take too long under sanitizers for one test case,
+// so they are split between GROUPS cases, which Bazel runs in separate shards (`shard_count` in
+// BUILD.bazel). Group `group` runs every GROUPS-th scenario, starting at `group`.
+constexpr uint GROUPS = 7;
+
+void testScenarioGroup(uint group) {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   SimpleWorkerErrorReporter errorReporter;
@@ -515,7 +520,7 @@ KJ_TEST("streams survive termination at every call into JavaScript") {
     });
   }
 
-  for (uint index: kj::zeroTo(scenarioCount)) {
+  for (uint index = group; index < scenarioCount; index += GROUPS) {
     TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = SCENARIOS});
     kj::String name;
     fixture.runInIoContext([&](const TestFixture::Environment& env) {
@@ -547,6 +552,29 @@ KJ_TEST("streams survive termination at every call into JavaScript") {
   if (!failures.empty()) {
     KJ_FAIL_EXPECT(failures.size(), kj::strArray(failures, "\n"));
   }
+}
+
+// One case per group.
+KJ_TEST("streams survive termination at every call into JavaScript, group 1 of 7") {
+  testScenarioGroup(0);
+}
+KJ_TEST("streams survive termination at every call into JavaScript, group 2 of 7") {
+  testScenarioGroup(1);
+}
+KJ_TEST("streams survive termination at every call into JavaScript, group 3 of 7") {
+  testScenarioGroup(2);
+}
+KJ_TEST("streams survive termination at every call into JavaScript, group 4 of 7") {
+  testScenarioGroup(3);
+}
+KJ_TEST("streams survive termination at every call into JavaScript, group 5 of 7") {
+  testScenarioGroup(4);
+}
+KJ_TEST("streams survive termination at every call into JavaScript, group 6 of 7") {
+  testScenarioGroup(5);
+}
+KJ_TEST("streams survive termination at every call into JavaScript, group 7 of 7") {
+  testScenarioGroup(6);
 }
 
 }  // namespace

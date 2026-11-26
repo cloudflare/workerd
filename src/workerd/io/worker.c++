@@ -1171,7 +1171,7 @@ void messageCallback(v8::Local<v8::Message> msg, v8::Local<v8::Value>) {
   KJ_LOG(ERROR, "NOSENTRY V8 message callback", message, scriptLocation, kj::getStackTrace());
 }
 
-// The console methods wrapped by setupContext (debug, error, info, log, warn).
+// The console methods setupContext routes through handleLog (debug, error, info, log, warn).
 struct ConsoleMethod {
   const char* name;
   v8::FunctionCallback callback;
@@ -1198,6 +1198,37 @@ static_assert(static_cast<int>(jsg::ContextDataSlot::CONSOLE_ORIGINAL_WARN) -
             static_cast<int>(jsg::ContextDataSlot::CONSOLE_ORIGINAL_DEBUG) + 1 ==
         static_cast<int>(kConsoleMethodsCount),
     "kConsoleMethods must have one entry per CONSOLE_ORIGINAL_* embedder-data slot, in slot order");
+
+// The console methods that take a label, which setupContext wraps with consoleLabelDecorator.
+constexpr const char* kConsoleLabelMethods[] = {
+  "count", "countReset", "time", "timeLog", "timeEnd"};
+
+// V8's builtins for kConsoleLabelMethods read the label only through the inspector's console
+// delegate, and drop any error converting it. The Console spec converts the label to a string
+// first and rethrows. The original builtin is the function's data.
+void consoleLabelDecorator(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  auto isolate = info.GetIsolate();
+  auto context = isolate->GetCurrentContext();
+  v8::LocalVector<v8::Value> args(isolate, info.Length());
+  for (int i = 0; i < info.Length(); ++i) {
+    args[i] = info[i];
+  }
+  if (info.Length() > 0 && !info[0]->IsUndefined()) {
+    v8::Local<v8::String> label;
+    if (!info[0]->ToString(context).ToLocal(&label)) {
+      return;
+    }
+    args[0] = label;
+  }
+  v8::Local<v8::Value> result;
+  if (info.DataV2()
+          .As<v8::Value>()
+          .As<v8::Function>()
+          ->Call(context, info.This(), args.size(), args.data())
+          .ToLocal(&result)) {
+    info.GetReturnValue().Set(result);
+  }
+}
 
 }  // namespace
 
@@ -1268,6 +1299,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       jsg::isolateRegisterExternalReference(
           lock->v8Isolate, reinterpret_cast<intptr_t>(m.callback));
     }
+    jsg::isolateRegisterExternalReference(
+        lock->v8Isolate, reinterpret_cast<intptr_t>(&consoleLabelDecorator));
     jsg::isolateRegisterExternalReference(lock->v8Isolate, jsg::getSyntheticModuleEvalRef());
     jsg::isolateRegisterExternalReference(
         lock->v8Isolate, jsg::modules::getSyntheticModuleEvaluationStepsRef());
@@ -2282,6 +2315,14 @@ void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
     auto original = jsg::check(console->Get(context, methodStr)).As<v8::Function>();
     jsg::setContextDataSlot(context, jsg::consoleOriginalSlot(i), original);
     auto decorator = jsg::check(v8::Function::New(context, kConsoleMethods[i].callback));
+    jsg::check(console->Set(context, methodStr, decorator));
+  }
+
+  for (auto name: kConsoleLabelMethods) {
+    auto methodStr = lock.strIntern(name);
+    auto original = jsg::check(console->Get(context, methodStr)).As<v8::Function>();
+    auto decorator = jsg::check(v8::Function::New(context, &consoleLabelDecorator, original));
+    decorator->SetName(methodStr);
     jsg::check(console->Set(context, methodStr, decorator));
   }
 }
@@ -4204,10 +4245,14 @@ struct Worker::Actor::Impl {
                          public ActorCache::Hooks,
                          private kj::TaskSet::ErrorHandler {
    public:
-    HooksImpl(kj::Own<Loopback> loopback, TimerChannel& timerChannel, ActorObserver& metrics)
+    HooksImpl(kj::Own<Loopback> loopback,
+        TimerChannel& timerChannel,
+        ActorObserver& metrics,
+        kj::Duration outputGateTimeout)
         : loopback(kj::mv(loopback)),
           timerChannel(timerChannel),
-          metrics(metrics) {}
+          metrics(metrics),
+          outputGateTimeout(outputGateTimeout) {}
 
     void inputGateLocked() override {
       metrics.inputGateLocked();
@@ -4224,11 +4269,8 @@ struct Worker::Actor::Impl {
     // Implements InputGate::Hooks.
 
     kj::Promise<void> makeTimeoutPromise() override {
-      // This really only protects against total hangs. Lowering the timeout drastically is risky,
-      // since low timeouts can spuriously fire when under heavy CPU load, failing requests that
-      // would otherwise succeed.
-      auto timeout = 30 * kj::SECONDS;
-      co_await timerChannel.afterLimitTimeout(timeout);
+      // See IsolateLimitEnforcer::getOutputGateTimeout() for why this is long.
+      co_await timerChannel.afterLimitTimeout(outputGateTimeout);
 
       auto e = KJ_EXCEPTION(OVERLOADED,
           "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
@@ -4270,6 +4312,7 @@ struct Worker::Actor::Impl {
     kj::Own<Loopback> loopback;  // only for updateAlarmInMemory()
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
+    kj::Duration outputGateTimeout;
 
     kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
 
@@ -4372,7 +4415,10 @@ struct Worker::Actor::Impl {
         container(kj::mv(container)),
         containerImages(kj::mv(containerImages)),
         facetManager(facetManager),
-        hooks(loopback->addRef(), timerChannel, *metrics),
+        hooks(loopback->addRef(),
+            timerChannel,
+            *metrics,
+            self.worker->getIsolate().getLimitEnforcer().getOutputGateTimeout()),
         inputGate(hooks),
         outputGate(hooks),
         loopback(kj::mv(loopback)),

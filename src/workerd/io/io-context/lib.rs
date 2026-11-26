@@ -7,6 +7,10 @@
 //! `IoContext` (`src/workerd/io/io-context.h`) holds the state of the request that JavaScript is
 //! running on behalf of. This crate is a package of its own because `//src/workerd/io` depends on
 //! `jsg`.
+//!
+//! It also binds `IoContext::IncomingRequest` ([`IncomingRequest`]), for the code that delivers an
+//! event: [`incoming_request_delivered`], [`incoming_request_finish_scheduled`] and
+//! [`incoming_request_set_scheduled_event_info`] are the calls on it, made as C++ makes them.
 
 mod ffi;
 mod trace;
@@ -29,7 +33,12 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+pub use ffi::DeliveredLocation;
 use ffi::bridge;
+pub use ffi::bridge::IncomingRequest;
+pub use ffi::bridge::incoming_request_finish_scheduled;
+pub use ffi::bridge::incoming_request_set_scheduled_event_info;
+pub use ffi::incoming_request_delivered;
 use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;

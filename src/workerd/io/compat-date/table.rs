@@ -100,12 +100,16 @@ impl FlagInfo {
     pub fn flags_in_match_order(&self) -> impl Iterator<Item = (&'static str, FlagKind)> {
         let enable = self.enable_flag.map(|f| (f, FlagKind::Enable));
         let disable = self.disable_flag.map(|f| (f, FlagKind::Disable));
-        let (first, second) = if self.disable_flag_first {
-            (disable, enable)
+        // An array, not `first.into_iter().chain(second)`: with `-Zsanitizer=address` at
+        // opt-level 3, rustc compiled that chain, inlined into `FlagTable::read`, to yield
+        // nothing for a field that has only an enable flag. `maps_every_flag_to_its_slot`
+        // catches it.
+        let flags = if self.disable_flag_first {
+            [disable, enable]
         } else {
-            (enable, disable)
+            [enable, disable]
         };
-        first.into_iter().chain(second)
+        flags.into_iter().flatten()
     }
 
     /// The last `$compatEnableDate` date, which a warning about a redundant flag names.

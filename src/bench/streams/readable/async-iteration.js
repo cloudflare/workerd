@@ -5,7 +5,13 @@
 // for await over a stream, compared with read-loop.js's reader loop over the
 // same sources, and breaking out of the loop, which cancels the stream.
 
-import { CHUNK, enqueuedStream, expectEqual, pullStream } from 'helpers';
+import {
+  CHUNK,
+  enqueuedStream,
+  expectEqual,
+  pullStream,
+  scaled,
+} from 'helpers';
 
 async function iterate(stream) {
   let count = 0;
@@ -15,13 +21,14 @@ async function iterate(stream) {
 
 export const asyncIteration = {
   bench(b) {
-    for (const count of [16, 256]) {
+    for (const count of [16, 256].map((count) => scaled(b, count))) {
       b.run(`enqueued in start() x${count}`, async () => {
         expectEqual(await iterate(enqueuedStream(count)), count, 'chunks');
       });
     }
-    b.run('pull() x256', async () => {
-      expectEqual(await iterate(pullStream(256)), 256, 'chunks');
+    const many = scaled(b, 256);
+    b.run(`pull() x${many}`, async () => {
+      expectEqual(await iterate(pullStream(many)), many, 'chunks');
     });
     // The break cancels the stream, which the source's cancel() records. The
     // source doesn't close: once it has called close(), C++ cancels without

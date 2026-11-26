@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "fb001bc3f2609661f1a6a340a4c5c64cd2c15ad3e0cf738fe9794030279c5430",
+  "checksum": "415e593a094a7e225411c7fd1521ea3684e0ef44090c3dc0f21002c307797ac9",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -2800,6 +2800,10 @@
           {
             "id": "lol_html_c_api 1.4.0",
             "target": "lolhtml"
+          },
+          {
+            "id": "memchr 2.8.3",
+            "target": "memchr"
           },
           {
             "id": "nix 0.32.0",
@@ -15225,6 +15229,7 @@
     "libm 0.2.16",
     "libz-rs-sys 0.6.8",
     "lol_html_c_api 1.4.0",
+    "memchr 2.8.3",
     "nix 0.32.0",
     "notify 8.2.2",
     "percent-encoding 2.3.2",

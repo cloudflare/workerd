@@ -1,0 +1,58 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Delivers scheduled events through service bindings, in the cases http-test does not cover, and
+# checks their results and what a tail worker and a streaming tail worker receive for them.
+const unitTests :Workerd.Config = (
+  services = [
+    # Runs first: scheduled-test-tail's test waits for the events this sends.
+    ( name = "scheduled-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "scheduled-test.js" )
+        ],
+        bindings = [
+          ( name = "HANDLER", service = "scheduled-test-handler" ),
+          ( name = "NO_HANDLER",
+            service = ( name = "scheduled-test-handler", entrypoint = "noHandler" ) ),
+          ( name = "LISTENER", service = "scheduled-test-listener" ),
+          ( name = "NO_LISTENER", service = "scheduled-test-no-listener" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+      )
+    ),
+    ( name = "scheduled-test-handler",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "scheduled-test-handler.js" )
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        tails = ["scheduled-test-tail"],
+        streamingTails = ["scheduled-test-tail"],
+      )
+    ),
+    ( name = "scheduled-test-listener",
+      worker = (
+        serviceWorkerScript = embed "scheduled-test-listener.js",
+        compatibilityFlags = ["nodejs_compat"],
+        tails = ["scheduled-test-tail"],
+        streamingTails = ["scheduled-test-tail"],
+      )
+    ),
+    ( name = "scheduled-test-no-listener",
+      worker = (
+        serviceWorkerScript = embed "scheduled-test-no-listener.js",
+        compatibilityFlags = ["nodejs_compat"],
+        tails = ["scheduled-test-tail"],
+        streamingTails = ["scheduled-test-tail"],
+      )
+    ),
+    ( name = "scheduled-test-tail",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "scheduled-test-tail.js" )
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

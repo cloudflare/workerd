@@ -318,14 +318,14 @@ kj::Own<kj::AsyncInputStream> new_body_stream(::rust::Box<RustBody> body) {
 }
 
 kj::Own<kj::HttpService::Response> new_server_response(::rust::Box<ServerResponse> response,
-    kj::HttpMethod method,
+    kj::HttpMethod::Known method,
     const kj::HttpHeaders& headers,
     WebSocketCompression compression,
     kj::Maybe<const kj::WebSocketErrorHandler&> errors) {
   kj::Maybe<WebSocketRequest> webSocketRequest;
   if (headers.isWebSocket()) {
     webSocketRequest = WebSocketRequest{
-      .refusal = websocketRefusal(method, headers),
+      .refusal = websocketRefusal(kj::HttpMethod(method), headers),
       .offers =
           headers.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS).map([](kj::StringPtr offers) {
       return kj::str(offers);

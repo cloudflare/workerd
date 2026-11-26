@@ -36,6 +36,7 @@ def _py_wd_test_helper(
         *,
         make_snapshot,
         use_snapshot,
+        create_baseline_snapshot,
         args,
         feature_flags,
         data = [],
@@ -51,8 +52,15 @@ def _py_wd_test_helper(
     snapshot_args = []
     snapshot_feature_flags = []
     if use_snapshot == "stacked":
-        if pyodide_version == "0.26.0a2":
+        if create_baseline_snapshot:
+            # Start Pyodide from scratch, and save a baseline snapshot rather than a dedicated one.
             use_snapshot = None
+        elif pyodide_version == "0.26.0a2":
+            # 0.26.0a2 can't stack a snapshot on the baseline one. Creating a snapshot from scratch
+            # instead takes over 10 CPU-seconds in debug builds, so its variants just load the
+            # baseline snapshot.
+            use_snapshot = "baseline"
+            make_snapshot = False
         else:
             use_snapshot = "baseline"
             if make_snapshot:
@@ -68,7 +76,7 @@ def _py_wd_test_helper(
         snapshot = version_info[use_snapshot + "_snapshot"]
         snapshot_data = [":python_snapshots"]
         load_snapshot = snapshot or None
-    if make_snapshot and pyodide_version != "0.26.0a2":
+    if make_snapshot and pyodide_version != "0.26.0a2" and not create_baseline_snapshot:
         snapshot_feature_flags.append("python_dedicated_snapshot")
 
     if load_snapshot and not make_snapshot:
@@ -174,6 +182,15 @@ def _capnp_bundles_file_group():
 def _capnp_rules():
     return ["//src/pyodide/tests:pyodide_%s.capnp.bin@rule" % info["id"] for info in BUNDLE_VERSION_INFO.values()]
 
+# workerd arguments that make it read Pyodide bundles from the directory that `PYODIDE_BUNDLE_DATA`
+# puts in a test's runfiles, rather than download them.
+PYODIDE_BUNDLE_ARGS = [
+    "--pyodide-bundle-disk-cache-dir",
+    "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)/..",
+]
+
+PYODIDE_BUNDLE_DATA = _capnp_rules()
+
 def python_test_setup():
     _capnp_bundles_file_group()
     _snapshot_file_group()
@@ -198,8 +215,16 @@ def py_wd_test(
         tags = [],
         make_snapshot = True,
         use_snapshot = "stacked",
+        create_baseline_snapshot = False,
         skip_default_data = False,
         **kwargs):
+    """A wd_test of a Python worker for each Pyodide version in `python_flags`.
+
+    Args:
+      create_baseline_snapshot: with the default `use_snapshot` and `make_snapshot`, each variant
+        starts Pyodide from scratch, creates a baseline snapshot and then restores it, rather than
+        stacking a dedicated snapshot on the released baseline snapshot.
+    """
     python_flags = compute_python_flags(python_flags, skip_python_flags)
     if data == None:
         data = []
@@ -216,10 +241,8 @@ def py_wd_test(
         name = directory
     elif name == None:
         name = src.removesuffix(".wd-test")
-    data += _capnp_rules()
-    args = args + [
-        "--pyodide-bundle-disk-cache-dir",
-        "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)/..",
+    data += PYODIDE_BUNDLE_DATA
+    args = args + PYODIDE_BUNDLE_ARGS + [
         "--experimental",
         "--python-snapshot-dir",
         ".",
@@ -235,6 +258,7 @@ def py_wd_test(
             python_flag,
             make_snapshot = make_snapshot,
             use_snapshot = use_snapshot,
+            create_baseline_snapshot = create_baseline_snapshot,
             feature_flags = feature_flags,
             data = data,
             args = args,

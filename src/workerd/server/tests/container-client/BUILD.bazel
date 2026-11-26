@@ -1,12 +1,16 @@
 load("//:build/wd_test.bzl", "wd_test")
 load("//images/container-client-test:images.bzl", "CONTAINER_TEST_IMAGES")
 
+# Each case starts containers, about two seconds' worth: the 61 cases took 110 s in all on
+# bazelflare, so they run in shards.
 wd_test(
     size = "enormous",
     src = "container-client.wd-test",
     args = ["--experimental"],
     container_images = CONTAINER_TEST_IMAGES,
     data = ["test.js"],
+    shard_count = 8,
+    supports_sharding = True,
     tags = [
         "requires-container-engine",
         "requires-network",  # Accesses unix://var/run/docker.sock

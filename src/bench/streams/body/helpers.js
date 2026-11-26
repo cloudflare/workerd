@@ -29,6 +29,16 @@ export function shapeLabel(count, size) {
   return `${count} x ${sizeLabel(size)}`;
 }
 
+// Under --quick, which only checks that each case runs, the cases below
+// move a sixteenth as many bytes, so that the @smoke tests stay fast in
+// sanitizer and debug builds. Labels show the sizes a run used.
+const QUICK_DIVISOR = 16;
+
+// `amount`, a size in bytes or a count of chunks, cut down under --quick.
+export function scaled(b, amount) {
+  return b.options.quick ? Math.max(1, amount / QUICK_DIVISOR) : amount;
+}
+
 // Bodies and writes copy their bytes, so one buffer of each size serves as
 // every body and every value stream chunk.
 const buffers = new Map();

@@ -57,8 +57,10 @@ impl<'s> From<JsString<'s>> for v8::Local<'s, v8::Value> {
 impl Type for JsString<'_> {
     const UNION_TYPES: UnionTypes = UnionTypes::STRING;
 
+    /// `String`, as C++ JSG names a `jsg::JsString`; a `String` parameter is a `string`, as C++
+    /// JSG names a `kj::String`.
     fn class_name() -> &'static str {
-        "string"
+        "String"
     }
 }
 
@@ -68,7 +70,7 @@ impl<'s> FromJS<'s> for JsString<'s> {
     const UNION_MEMBER: UnionMember = UnionMember::String;
 
     fn type_name() -> String {
-        "string".to_owned()
+        Self::class_name().to_owned()
     }
 
     fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
