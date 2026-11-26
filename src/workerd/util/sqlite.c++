@@ -656,9 +656,13 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
 
     KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
       // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
-      // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
+      // TODO(bug): This honors only `sync` of vfs.options. (This branch is only used on Windows.)
       SQLITE_CALL_NODB(
           sqlite3_open_v2(rootedPath.toNativeString(true).cStr(), &db, flags, nullptr));
+      if (!vfs.options.sync) {
+        // The system's VFS syncs whenever SQLite asks it to, so ask it never to.
+        SQLITE_CALL_NODB(sqlite3_exec(db, "PRAGMA synchronous=OFF;", nullptr, nullptr, nullptr));
+      }
     } else {
       SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db, flags, vfs.getName().cStr()));
     }
