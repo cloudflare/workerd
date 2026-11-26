@@ -97,6 +97,7 @@ wd_cc_library(
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:sentry",
         "//src/workerd/util:sqlite",
+        "//src/workerd/util:wal-reporting-directory",
         "//src/workerd/util:websocket-error-handler",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:json",

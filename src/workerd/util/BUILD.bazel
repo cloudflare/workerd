@@ -298,6 +298,18 @@ wd_cc_library(
     ],
 )
 
+# A directory that reports SQLite's WAL writes, for a clustered namespace's storage and the
+# tests that drive the same write path.
+wd_cc_library(
+    name = "wal-reporting-directory",
+    srcs = ["wal-reporting-directory.c++"],
+    hdrs = ["wal-reporting-directory.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
 wd_cc_library(
     name = "sqlite-metering",
     srcs = ["sqlite-metering.c++"],
