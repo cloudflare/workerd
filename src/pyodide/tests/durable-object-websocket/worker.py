@@ -22,6 +22,7 @@ class DurableObjectWebSocket(DurableObject):
 
     async def webSocketClose(self, ws, code, reason, wasClean):
         print("Closed in Python DO WS")
+        ws.close(code, reason)
 
 
 class Default(WorkerEntrypoint):

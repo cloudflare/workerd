@@ -5,7 +5,7 @@
 // ReadableStream.from() over an array and over sync and async generators,
 // read to the end.
 
-import { CHUNK, drainReader, expectEqual } from 'helpers';
+import { CHUNK, drainReader, expectEqual, scaled } from 'helpers';
 
 function* syncChunks(count) {
   for (let i = 0; i < count; i++) yield CHUNK;
@@ -21,15 +21,16 @@ async function drain(stream, count) {
 
 export const from = {
   bench(b) {
-    for (const count of [16, 256]) {
+    for (const count of [16, 256].map((count) => scaled(b, count))) {
       const array = new Array(count).fill(CHUNK);
       b.run(`array x${count}`, () => drain(ReadableStream.from(array), count));
     }
-    b.run('sync generator x256', () =>
-      drain(ReadableStream.from(syncChunks(256)), 256)
+    const many = scaled(b, 256);
+    b.run(`sync generator x${many}`, () =>
+      drain(ReadableStream.from(syncChunks(many)), many)
     );
-    b.run('async generator x256', () =>
-      drain(ReadableStream.from(asyncChunks(256)), 256)
+    b.run(`async generator x${many}`, () =>
+      drain(ReadableStream.from(asyncChunks(many)), many)
     );
   },
 };

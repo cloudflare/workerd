@@ -1,0 +1,56 @@
+using Workerd = import "/workerd/workerd.capnp";
+using Services = import "startup-snapshot-globals-services.capnp";
+
+# Top-level code that touches what V8 adds to a context only when it is not building a startup
+# snapshot (RESTORE_TIME_GLOBALS in jsg/setup.h), for the cases whose top level fails the zygote:
+# they are always started as plain Workers. The runner's test() fetches every case service and
+# asserts its report; see startup-snapshot-globals-test.js. The cases the zygote can run are in
+# the transferable-v8 and transferable-runtime configs, so that each config starts only a few
+# Workers and the configs run in parallel. The @all-autogates variant turns the startup-snapshot
+# autogate on, so every service here goes through the zygote; the @ variant runs them as plain
+# Workers.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = Services.compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"runner\""),
+          (name = "GROUP", json = "\"fallback\""),
+          (name = "stl-nonconfigurable", service = "stl-nonconfigurable"),
+          (name = "error-frozen", service = "error-frozen"),
+          (name = "iter-assign", service = "iter-assign"),
+          (name = "iter-define", service = "iter-define"),
+          (name = "wasm-probe", service = "wasm-probe"),
+          (name = "wasm-probe-caught", service = "wasm-probe-caught"),
+          (name = "wasm-assign", service = "wasm-assign"),
+          (name = "wasm-assign-caught", service = "wasm-assign-caught"),
+          (name = "iter-polyfill-caught", service = "iter-polyfill-caught"),
+          (name = "wasm-use", service = "wasm-use"),
+          (name = "sab-probe", service = "sab-probe"),
+          (name = "temporal-polyfill", service = "temporal-polyfill"),
+          (name = "temporal-on-probe", service = "temporal-on-probe"),
+          (name = "date-frozen", service = "date-frozen"),
+        ],
+      )
+    ),
+    Services.stlNonconfigurable,
+    Services.errorFrozen,
+    Services.iterAssign,
+    Services.iterDefine,
+    Services.wasmProbe,
+    Services.wasmProbeCaught,
+    Services.wasmAssign,
+    Services.wasmAssignCaught,
+    Services.iterPolyfillCaught,
+    Services.wasmUse,
+    Services.sabProbe,
+    Services.temporalPolyfill,
+    Services.temporalOnProbe,
+    Services.dateFrozen,
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+);

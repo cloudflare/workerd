@@ -1,6 +1,8 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
+  # Tiering Pyodide up to TurboFan costs these short tests more CPU than it saves.
+  v8Flags = ["--liftoff-only"],
   services = [
     ( name = "stdlib-zip",
       worker = (

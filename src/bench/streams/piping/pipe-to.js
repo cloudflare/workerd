@@ -11,6 +11,7 @@ import {
   enqueuedStream,
   expectEqual,
   pullStream,
+  scaled,
 } from 'helpers';
 
 async function pipe(source, count, sinkOptions) {
@@ -21,15 +22,16 @@ async function pipe(source, count, sinkOptions) {
 
 export const pipeTo = {
   bench(b) {
-    for (const count of [16, 256]) {
+    for (const count of [16, 256].map((count) => scaled(b, count))) {
       b.run(`sync sink x${count}`, () => pipe(enqueuedStream(count), count));
     }
-    b.run('async sink x256', () =>
-      pipe(enqueuedStream(256), 256, { async: true })
+    const many = scaled(b, 256);
+    b.run(`async sink x${many}`, () =>
+      pipe(enqueuedStream(many), many, { async: true })
     );
-    b.run('async sink, highWaterMark 16 x256', () =>
-      pipe(enqueuedStream(256), 256, { async: true, highWaterMark: 16 })
+    b.run(`async sink, highWaterMark 16 x${many}`, () =>
+      pipe(enqueuedStream(many), many, { async: true, highWaterMark: 16 })
     );
-    b.run('pull() source x256', () => pipe(pullStream(256), 256));
+    b.run(`pull() source x${many}`, () => pipe(pullStream(many), many));
   },
 };

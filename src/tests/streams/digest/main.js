@@ -91,7 +91,6 @@ export { largeChunksDigest } from 'large-payload';
 export {
   abandonedDigestNotSettledByGc,
   writerRemainsOperableAcrossGc,
-  gcDuringCloseOfDroppedStream,
 } from 'gc-interplay';
 
 export {

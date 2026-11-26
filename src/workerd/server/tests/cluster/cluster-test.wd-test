@@ -71,7 +71,7 @@ const cache :Workerd.Config = (
 );
 
 # As `config`, with a tenth of the default lease rather than a quarter: a node whose event loop
-# makes no progress fences within seconds.
+# makes no progress fences within seconds, and a turn of the loop that outlasts the lease is short.
 const shortLease :Workerd.Config = (
   services = .services,
   sockets = .sockets,

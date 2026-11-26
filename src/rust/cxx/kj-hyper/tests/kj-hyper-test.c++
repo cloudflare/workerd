@@ -273,7 +273,7 @@ class RustClientService final: public kj::HttpService {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
-    return client->request(method, slice(url), headers, requestBody, response);
+    return client->request(method.known(), slice(url), headers, requestBody, response);
   }
 
   kj::Promise<void> connect(kj::StringPtr host,

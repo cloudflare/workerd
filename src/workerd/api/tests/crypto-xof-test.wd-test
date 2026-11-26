@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-xof-enabled-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "crypto-xof-test.js")],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms"],
+        bindings = [(name = "ENABLED", json = "true")],
+      )
+    ),
+    ( name = "crypto-xof-disabled-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "crypto-xof-test.js")],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "ENABLED", json = "false")],
+      )
+    ),
+  ],
+);

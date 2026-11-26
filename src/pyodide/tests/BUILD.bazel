@@ -37,6 +37,15 @@ py_wd_test(
     make_snapshot = False,
 )
 
+# The one test that creates a baseline snapshot from scratch and then restores it, in every Pyodide
+# version; the other tests load the released baseline snapshots. As in `top-level-entropy-baseline`,
+# the top level runs after the restore.
+py_wd_test(
+    "top-level-entropy",
+    name = "top-level-entropy-create-baseline",
+    create_baseline_snapshot = True,
+)
+
 py_wd_test("subdirectory")
 
 py_wd_test(
