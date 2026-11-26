@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "connect-handler-starttls-lifetime-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "connect-handler-starttls-lifetime-test.js"),
+        ],
+        # connect_handler_starttls is experimental.
+        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls", "experimental"],
+        durableObjectNamespaces = [
+          (className = "Target", uniqueKey = "3f1c9a2e7b5d4e6f8a0b1c2d3e4f5a6b"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "TARGET", durableObjectNamespace = "Target"),
+          (name = "CALLER", service = (
+            name = "connect-handler-starttls-lifetime-test",
+            entrypoint = "Caller")),
+        ],
+      )
+    ),
+  ],
+);

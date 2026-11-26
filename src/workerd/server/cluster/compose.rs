@@ -8,10 +8,10 @@
 //! deployment in catalog order. [`merge`] skips a deployment as a whole when it breaks a rule.
 //!
 //! - A deployment holds only `services`. Every other field of `Config` (sockets, the cluster
-//!   block, extensions, V8 flags, autogates, logging) is the node's, and a deployment that sets
-//!   one is skipped rather than trimmed. So is one that defines a `disk` service, whose path is
-//!   the node's, or a service named `internet`, which would replace the node's implicit one for
-//!   every worker.
+//!   block, extensions, V8 flags, autogates, logging, the shutdown delay) is the node's, and a
+//!   deployment that sets one is skipped rather than trimmed. So is one that defines a `disk`
+//!   service, whose path is the node's, or a service named `internet`, which would replace the
+//!   node's implicit one for every worker.
 //! - Service names are unique across the node's config and every deployment, and so are the keys
 //!   of actor namespaces: Durable Object `uniqueKey`s and the key of each Workflow's namespace
 //!   (`workflow_namespace_key`). A deployment refers to what the node provides, such as the disk
@@ -350,6 +350,7 @@ fn check_deployment(
         ("structuredLogging", config.get_structured_logging()),
         ("logging", config.has_logging()),
         ("cluster", config.has_cluster()),
+        ("shutdownDelayMs", config.get_shutdown_delay_ms() != 0),
     ];
     let set: Vec<_> = node_fields
         .iter()

@@ -16,8 +16,6 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/rust/jsg-cpp/jsg-cpp.h>
 
-#include <rust/cxx.h>
-
 namespace workerd::frankenvalue {
 
 namespace jsg_cpp = ::workerd::rust::jsg_cpp;

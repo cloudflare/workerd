@@ -92,6 +92,11 @@ Unlike identity/compression, DigestStream's sink converts exceptions to
 rejected promises directly, so `capture_async_api_throws` has no effect and
 is not pinned.
 
+`digest-gc-pressure-cpp.wd-test` and `digest-gc-pressure-ts.wd-test` run
+`gc-pressure.js` alone, under V8's `--stress-incremental-marking`, which keeps
+marking in progress so that an allocation inside a sink often finishes a
+major GC; the main configs run without that flag.
+
 `digest-cpp-pedantic.wd-test` runs the full module set with the dateless
 opt-in `pedantic_wpt` added, pinning the ABSENCE of pedantic effects
 (the implementation consults the flag nowhere; the reachable
@@ -121,7 +126,8 @@ standard-streams machinery changes nothing the suite pins).
 | `buffer-lifecycle.js` | consume-at-write: post-write mutation/detach invisible; detached/out-of-bounds typed-array and DataView views hash as empty; lying metadata getters never consulted |
 | `pipe-integration.js` | pipeTo from user streams; TransformStream chain; Response body |
 | `large-payload.js` | 1MB+ chunk digesting |
-| `gc-interplay.js` | GC never settles an abandoned digest; writer remains operable across GC; a GC inside the close sink of a dropped stream is safe |
+| `gc-interplay.js` | GC never settles an abandoned digest; writer remains operable across GC |
+| `gc-pressure.js` | a GC that finishes inside the close sink of a dropped stream is safe (run alone by `digest-gc-pressure-{cpp,ts}.wd-test`, under `--stress-incremental-marking`) |
 | `reentrancy.js` | staged thenable-check matrix (ledger #3); write issued from a write continuation preserves accumulation order; options-bag getter re-entering the constructor is safe and its value is honored |
 | `backpressure.js` | desiredSize counts and recovers (parity); ready settled |
 | `legacy-shape.js` | unflagged era: `[object Object]`; digest as own instance property (no prototype accessor); bytesWritten stays a bigint prototype accessor; flow unchanged |

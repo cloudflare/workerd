@@ -115,9 +115,16 @@ globalThis.subsetTest = (
   testFunc: (...args: unknown[]) => void,
   ...args: unknown[]
 ): void => {
-  // This function is designed to allow selecting only certain tests when
-  // running in a browser, by changing the query string. We'll always run
-  // all the tests.
+  // Runs the call only if it is in the range that the test's variant selects (e.g. `?1-10`), as
+  // /common/subset-tests.js does. A test without such a variant runs all of them.
+  const state = globalThis.state;
+  state.subsetTestCount++;
+  if (
+    state.subsetTestCount < state.subsetRange.start ||
+    state.subsetTestCount > state.subsetRange.end
+  ) {
+    return;
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -- We are emulating WPT's existing interface which always passes through the returned value
   return testFunc(...args);

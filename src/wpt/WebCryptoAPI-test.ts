@@ -27,13 +27,7 @@ export default {
   'derive_bits_keys/derive.js': {},
   'derive_bits_keys/derive_key_and_encrypt.https.any.js': {},
   'derive_bits_keys/derive_key_and_encrypt.js': supportFile,
-  'derive_bits_keys/derived_bits_length.https.any.js': {
-    comment:
-      'deriveBits converts non-finite lengths to zero instead of enforcing [EnforceRange]',
-    expectedFailures: [
-      /^(HKDF|PBKDF2|ECDH|X25519) derivation with (NaN|Infinity) as 'length' parameter$/,
-    ],
-  },
+  'derive_bits_keys/derived_bits_length.https.any.js': {},
   'derive_bits_keys/derived_bits_length.js': {},
   'derive_bits_keys/derived_bits_length_testcases.js': {
     comment:
@@ -86,16 +80,7 @@ export default {
   'encrypt_decrypt/rsa.js': supportFile,
   'encrypt_decrypt/rsa_oaep.https.any.js': {},
   'encrypt_decrypt/rsa_vectors.js': {},
-  'export-key-error-order.https.any.js': {
-    comment:
-      'exportKey() and wrapKey() check extractable before export support, so HKDF and PBKDF2 keys throw InvalidAccessError instead of NotSupportedError',
-    expectedFailures: [
-      'exportKey() with a HKDF key throws NotSupportedError',
-      'wrapKey() with a HKDF key throws NotSupportedError',
-      'exportKey() with a PBKDF2 key throws NotSupportedError',
-      'wrapKey() with a PBKDF2 key throws NotSupportedError',
-    ],
-  },
+  'export-key-error-order.https.any.js': {},
   'generateKey/algorithm_registry.js': {},
   'generateKey/failures.js': {},
   'generateKey/failures_AES-CBC.https.any.js': {},
@@ -163,10 +148,9 @@ export default {
   'import_export/ec_importKey.https.any.js': {},
   'import_export/ec_importKey_failures_ECDH.https.any.js': {
     comment:
-      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+      'EC JWK import does not check the "crv" field, so a missing or mismatched crv is accepted when the coordinates fit namedCurve',
     expectedFailures: [
-      /^Bad key length:/,
-      /^Missing JWK 'crv' parameter:/,
+      /^Missing JWK 'crv' parameter: importKey\(jwk\(private\), \{name: ECDH, namedCurve: P-521\}/,
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-256}, true, [deriveKey, deriveBits])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-384}, true, [deriveKey, deriveBits])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-521}, true, [deriveKey, deriveBits])",
@@ -174,10 +158,9 @@ export default {
   },
   'import_export/ec_importKey_failures_ECDSA.https.any.js': {
     comment:
-      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+      'EC JWK import does not check the "crv" field, so a missing or mismatched crv is accepted when the coordinates fit namedCurve',
     expectedFailures: [
-      /^Bad key length:/,
-      /^Missing JWK 'crv' parameter:/,
+      /^Missing JWK 'crv' parameter: importKey\(jwk\(private\), \{name: ECDSA, namedCurve: P-521\}/,
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-256}, true, [sign])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-384}, true, [sign])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-521}, true, [sign])",
@@ -216,24 +199,20 @@ export default {
   'import_export/okp_importKey_X25519.https.any.js': {},
   'import_export/okp_importKey_failures_Ed25519.https.any.js': {
     comment:
-      'To be investigated - workerd does not reject these invalid key pairs',
+      'Private JWK import ignores "x", so a key pair whose "x" does not match "d" is accepted',
     expectedFailures: [
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[sign\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[sign, sign\]\)/,
-      /Invalid 'crv' field: importKey\(jwk\(private\), .*, true, \[sign\]\)/,
-      /Invalid 'crv' field: importKey\(jwk \(public\) , .*, true, \[verify\]\)/,
     ],
   },
   'import_export/okp_importKey_failures_X25519.https.any.js': {
     comment:
-      'To be investigated - workerd does not reject these invalid key pairs',
+      'Private JWK import ignores "x", so a key pair whose "x" does not match "d" is accepted',
     expectedFailures: [
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveKey\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveBits, deriveKey\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveBits\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveKey, deriveBits, deriveKey, deriveBits\]\)/,
-      /Invalid 'crv' field: importKey\(jwk\(private\), .*, true, \[deriveKey, deriveBits\]\)/,
-      /Invalid 'crv' field: importKey\(jwk \(public\) , .*, true, \[\]\)/,
     ],
   },
   'import_export/okp_importKey_failures_fixtures.js': {},
@@ -255,11 +234,18 @@ export default {
     comment: 'Argon2 is not supported',
     omittedTests: true,
   },
-  'modern-algos/digest/cshake.https.any.js': unsupported('cSHAKE'),
+  'modern-algos/digest/cshake.https.any.js': {
+    comment: 'cSHAKE128 is not supported',
+    expectedFailures: [/^cSHAKE128 /],
+  },
   'modern-algos/digest/kangarootwelve.https.any.js':
     unsupported('KangarooTwelve'),
   'modern-algos/digest/sha3.https.any.js': {},
-  'modern-algos/digest/turboshake.https.any.js': unsupported('TurboSHAKE'),
+  'modern-algos/digest/turboshake.https.any.js': {
+    comment:
+      'TurboSHAKE128 and non-default domain separation are not supported',
+    expectedFailures: [/^TurboSHAKE128 /, /^TurboSHAKE256.*D=0x/],
+  },
   'modern-algos/digest/xof_digest.js': {},
   'modern-algos/encap_decap/encap_decap_bits.https.any.js': {
     comment: 'ML-KEM-512 and the P-256/P-384 hybrid KEMs are not supported',
@@ -378,13 +364,7 @@ export default {
   },
   'modern-algos/util/mldsa_key_fixtures.js': {},
   'modern-algos/util/supports.js': {},
-  'normalize-algorithm-name.https.any.js': {
-    comment: 'Wrong error type - DOMException code mismatch',
-    expectedFailures: [
-      '"H<U+212A>DF" does not match "HKDF"',
-      '"PB<U+212A>DF2" does not match "PBKDF2"',
-    ],
-  },
+  'normalize-algorithm-name.https.any.js': {},
   'randomUUID.https.any.js': {},
   'secure-curves/derive_bits_keys/cfrg_curves_bits_curve448.https.any.js':
     unsupported('X448'),
@@ -458,16 +438,7 @@ export default {
     comment: 'CryptoKey does not support structured cloning',
     expectedFailures: true,
   },
-  'sharedarraybuffer.https.any.js': {
-    comment:
-      'SubtleCrypto BufferSource arguments accept views backed by a SharedArrayBuffer instead of throwing TypeError',
-    expectedFailures: [
-      'digest() data is a Uint8Array(SharedArrayBuffer)',
-      'encrypt() data is a Uint8Array(SharedArrayBuffer)',
-      'encrypt() AesGcmParams.iv is a Uint8Array(SharedArrayBuffer)',
-      'encrypt() AesGcmParams.additionalData is a Uint8Array(SharedArrayBuffer)',
-    ],
-  },
+  'sharedarraybuffer.https.any.js': {},
   'sign_verify/ecdsa.https.any.js': {},
   'sign_verify/ecdsa.js': supportFile,
   'sign_verify/ecdsa_vectors.js': supportFile,

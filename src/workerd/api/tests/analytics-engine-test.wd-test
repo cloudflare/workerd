@@ -1,17 +1,13 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# Receives the data points that `aebinding` writes, as the JSON encoding of their messages, and
+# passes them on to the main worker, which checks them.
 const analyticsWorker :Workerd.Worker = (
   modules  = [
     (name = "worker", esModule =
-      `import * as assert from 'node:assert';
       `export default {
       `  async fetch(request, env, ctx) {
-      `    let val = await request.json();
-      `    console.log(JSON.stringify(val));
-      `    assert.deepStrictEqual(val['dataset'], [97,110,97,108,121,116,105,99,115]);
-      `    assert.deepStrictEqual(val['double1'], 25);
-      `    assert.deepStrictEqual(val['blob1'], [84,101,115,116,66,108,111,98]);
-      `    await env.main.fetch("http://w/");
+      `    await env.main.fetch("http://w/", {method: "POST", body: await request.text()});
       `    return new Response('');
       `  },
       `};
@@ -25,9 +21,18 @@ const mainWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "analytics-engine-test.js"),
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  # The fetch handler settles promises that the tests created.
+  compatibilityFlags = ["experimental", "nodejs_compat", "handle_cross_request_promise_resolution"],
 
-  bindings = [ ( name = "aebinding", analyticsEngine = "analytics") ]
+  durableObjectNamespaces = [
+    (className = "Writer", uniqueKey = "analytics-engine-test-writer"),
+  ],
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    ( name = "aebinding", analyticsEngine = "analytics"),
+    ( name = "writer", durableObjectNamespace = "Writer"),
+  ]
 );
 
 const unitTests :Workerd.Config = (

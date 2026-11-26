@@ -4,6 +4,9 @@
 
 #include "worker-interface.h"
 
+#include <workerd/rust/worker/bridge.h>
+#include <workerd/rust/worker/failure.rs.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
 
 #include <kj/debug.h>
@@ -412,6 +415,9 @@ class ErrorWorkerInterface final: public WorkerInterface {
 }  // namespace
 
 kj::Own<WorkerInterface> WorkerInterface::fromException(kj::Exception&& e) {
+  if (util::Autogate::isEnabled(util::AutogateKey::RUST_FAILURE_WORKER_INTERFACE)) {
+    return kj::from<kj_rs::Rust>(rust::worker::new_failure_worker(kj::mv(e)));
+  }
   return kj::heap<ErrorWorkerInterface>(kj::mv(e));
 }
 

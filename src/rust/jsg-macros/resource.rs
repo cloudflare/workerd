@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use proc_macro::TokenStream;
-use quote::ToTokens;
 use quote::quote;
 use syn::FnArg;
 use syn::ItemImpl;
@@ -79,12 +78,8 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
     let traced_impl = generate_traced_impl(&name, &trace_statements, custom_trace);
 
-    let gc_impl = generate_gc_impl(
-        &name,
-        &name_str,
-        &memory_info.gc_fn,
-        &drop_detach_types(custom_trace, &fields),
-    );
+    let gc_impl = generate_gc_impl(&name, &name_str, &memory_info.gc_fn);
+    let drop_check = generate_drop_check(&name, &fields);
     let snapshot_transfer_impl = snapshot_stateless_impl(&name, snapshot_stateless);
     let visit_for_memory_info_impl = &memory_info.visit_impl;
 
@@ -149,6 +144,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #traced_impl
         #gc_impl
+        #drop_check
 
         #snapshot_transfer_impl
         #visit_for_memory_info_impl
@@ -171,7 +167,16 @@ struct MemberRegistration {
     /// declaration.
     description: Option<proc_macro2::TokenStream>,
     automatic: proc_macro2::TokenStream,
+    /// The JavaScript name of a member installed on the constructor: a static method or a
+    /// static constant.
+    static_name: Option<String>,
 }
+
+/// Own properties that every JavaScript function already has. A release build of V8 aborts the
+/// process when it instantiates a constructor template that has a property with one of these
+/// names, or two properties with the same name. `jsg::resource` keeps the same list to check
+/// members registered by hand at runtime; change both together.
+const RESERVED_STATIC_NAMES: [&str; 3] = ["length", "name", "prototype"];
 
 fn member_factory_name(rust_name: &syn::Ident) -> syn::Ident {
     syn::Ident::new(&format!("{rust_name}_member"), rust_name.span())
@@ -204,6 +209,7 @@ impl MemberRegistration {
             description,
             source_name: rust_name.clone(),
             factory_name,
+            static_name: None,
         }
     }
 
@@ -235,6 +241,12 @@ impl MemberRegistration {
                 #definition
             }
         }
+    }
+
+    /// Marks the member as installed on the constructor under `js_name`.
+    fn on_constructor(mut self, js_name: String) -> Self {
+        self.static_name = Some(js_name);
+        self
     }
 }
 
@@ -307,11 +319,12 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration
                     is_static: #is_static,
                 }
             };
-            Some(MemberRegistration::new(
-                rust_method_name,
-                member,
-                Some(description),
-            ))
+            let registration = MemberRegistration::new(rust_method_name, member, Some(description));
+            Some(if has_self {
+                registration
+            } else {
+                registration.on_constructor(js_name)
+            })
         })
         .collect()
 }
@@ -565,22 +578,25 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistrati
 
             let factory_base =
                 syn::Ident::new(&rust_name.to_string().to_lowercase(), rust_name.span());
-            Some(MemberRegistration::with_factory_name(
-                rust_name,
-                member_factory_name(&factory_base),
-                quote! {
-                    jsg::Member::StaticConstant {
-                        name: #js_name.to_owned(),
-                        value: jsg::ConstantValue::from(Self::#rust_name),
-                    }
-                },
-                Some(quote! {
-                    jsg::rtti::Member::Constant {
-                        name: #js_name,
-                        value: jsg::ConstantValue::from(Self::#rust_name),
-                    }
-                }),
-            ))
+            Some(
+                MemberRegistration::with_factory_name(
+                    rust_name,
+                    member_factory_name(&factory_base),
+                    quote! {
+                        jsg::Member::StaticConstant {
+                            name: #js_name.to_owned(),
+                            value: jsg::ConstantValue::from(Self::#rust_name),
+                        }
+                    },
+                    Some(quote! {
+                        jsg::rtti::Member::Constant {
+                            name: #js_name,
+                            value: jsg::ConstantValue::from(Self::#rust_name),
+                        }
+                    }),
+                )
+                .on_constructor(js_name),
+            )
         })
         .collect()
 }
@@ -596,7 +612,6 @@ fn generate_traced_impl(
         // `custom_trace` suppresses the generated `Traced` impl — the user will write their own.
         quote! {}
     } else {
-        let drop_probe = drop_probe_items();
         quote! {
             #[automatically_derived]
             impl jsg::Traced for #name {
@@ -605,48 +620,41 @@ fn generate_traced_impl(
                     let _ = visitor;
                     #(#trace_statements)*
                 }
-
-                // For a resource held inline in another. Its fields aren't asked, which a
-                // recursive type would make loop forever.
-                fn needs_drop_detach() -> bool {
-                    #drop_probe
-                    __JsgDropProbe::<Self>(::std::marker::PhantomData).has_drop_impl()
-                }
             }
         }
     }
 }
 
-/// The items of the probes that `__JsgDropProbe::<T>(PhantomData)` answers: `has_drop_impl`,
-/// whether `T` implements `Drop` itself, and `needs_drop_detach`, `T`'s
-/// `Traced::needs_drop_detach`, or `false` for a type that isn't `Traced`, so that such a field
-/// reports its error once, from the `Traced` impl.
-fn drop_probe_items() -> proc_macro2::TokenStream {
+/// A check, evaluated at compile time, that a resource named `name` with `fields` implements
+/// `Drop` only if every field's type is `jsg::HoldsNoGcReferences`. `Drop` has `&mut self`, so it
+/// could move a `jsg::Rc` or `TracedGlobal` out of a field that the garbage collector made weak,
+/// and nothing would make it strong again. Only the resource's own `Drop` is checked: `Vec`,
+/// `Box` and `jsg::Rc` implement `Drop` too, so asking the fields' types would reject almost
+/// every resource.
+fn generate_drop_check(
+    name: &syn::Ident,
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> proc_macro2::TokenStream {
+    let field_types = fields.iter().map(|field| &field.ty);
+    let message = format!(
+        "`{name}` may hold GC references (a field's type isn't `jsg::HoldsNoGcReferences`), \
+         so it must not implement `Drop`; see src/rust/jsg/README.md, \"Safety rules\""
+    );
+    // An associated const, so that a field's type may name `Self`, which the `const _` item
+    // evaluates.
     quote! {
-        // A method of an inherent impl whose bound holds is picked over a trait's. The items are
-        // named so that they don't shadow a field's type.
-        struct __JsgDropProbe<T>(::std::marker::PhantomData<T>);
-        trait __JsgDropProbeFallback {
-            fn has_drop_impl(&self) -> bool {
-                false
-            }
-            fn needs_drop_detach(&self) -> bool {
-                false
-            }
+        #[automatically_derived]
+        impl #name {
+            #[doc(hidden)]
+            const __JSG_DROP_CHECK: () = {
+                use jsg::DropCheckFallback as _;
+                let holds_gc_references =
+                    false #(|| !jsg::DropCheck::<#field_types>::HOLDS_NO_GC_REFERENCES)*;
+                ::std::assert!(!(jsg::DropCheck::<Self>::HAS_DROP && holds_gc_references), #message);
+            };
         }
-        impl<T> __JsgDropProbeFallback for __JsgDropProbe<T> {}
-        #[allow(drop_bounds, reason = "detects an explicit `Drop` impl")]
-        impl<T: ::std::ops::Drop> __JsgDropProbe<T> {
-            fn has_drop_impl(&self) -> bool {
-                true
-            }
-        }
-        #[allow(dead_code, reason = "not every caller asks a field")]
-        impl<T: jsg::Traced> __JsgDropProbe<T> {
-            fn needs_drop_detach(&self) -> bool {
-                T::needs_drop_detach()
-            }
-        }
+
+        const _: () = #name::__JSG_DROP_CHECK;
     }
 }
 
@@ -674,33 +682,13 @@ fn snapshot_stateless_impl(
     }
 }
 
-/// The types whose `Traced::needs_drop_detach` makes a resource with `fields` detach its
-/// references before it is dropped. A `custom_trace` resource's own `Traced` impl answers for
-/// its fields, which need not be `Traced`.
-fn drop_detach_types(
-    custom_trace: bool,
-    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
-) -> Vec<proc_macro2::TokenStream> {
-    if custom_trace {
-        vec![quote! { Self }]
-    } else {
-        fields
-            .iter()
-            .map(|field| field.ty.to_token_stream())
-            .collect()
-    }
-}
-
 /// The `jsg::GarbageCollected` impl of a resource named `name`, with `memory_info_fn`, its
-/// `memory_info` method or nothing, and `drop_detach_types`, the types whose
-/// `Traced::needs_drop_detach` makes the resource detach its references before it is dropped.
+/// `memory_info` method or nothing.
 fn generate_gc_impl(
     name: &syn::Ident,
     name_str: &str,
     memory_info_fn: &proc_macro2::TokenStream,
-    drop_detach_types: &[proc_macro2::TokenStream],
 ) -> proc_macro2::TokenStream {
-    let drop_probe = drop_probe_items();
     quote! {
         #[automatically_derived]
         impl jsg::GarbageCollected for #name {
@@ -716,16 +704,10 @@ fn generate_gc_impl(
 
             #memory_info_fn
 
-            fn detach_before_drop(&self) -> bool {
-                #drop_probe
-                __JsgDropProbe::<Self>(::std::marker::PhantomData).has_drop_impl()
-                    #(|| __JsgDropProbe::<#drop_detach_types>(::std::marker::PhantomData)
-                        .needs_drop_detach())*
-            }
-
             fn snapshot_transfer(&self) -> ::std::option::Option<&dyn jsg::ErasedSnapshotTransfer> {
-                // As in `has_drop_impl`: the inherent method applies exactly when the resource
-                // implements `jsg::SnapshotTransfer`.
+                // A method of an inherent impl whose bound holds is picked over a trait's, so the
+                // inherent method applies exactly when the resource implements
+                // `jsg::SnapshotTransfer`.
                 struct Probe<'a, T>(&'a T);
                 trait NoSnapshotTransfer<'a> {
                     fn snapshot_transfer(&self) -> ::std::option::Option<&'a dyn jsg::ErasedSnapshotTransfer> {
@@ -883,6 +865,50 @@ fn validate_factory_names(
                 source,
                 format!(
                     "member factory `{name}` generated by `{source}` conflicts with {kind} `{other}`"
+                ),
+            );
+            error.combine(syn::Error::new_spanned(
+                other,
+                format!("`{other}` declared here"),
+            ));
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+/// Check the JavaScript names of the members installed on the constructor. A reserved name
+/// (see [`RESERVED_STATIC_NAMES`]) is an error in either mode, since such a member can never be
+/// registered. Two members with the same name are an error with automatic registration; custom
+/// registration may choose between them by compatibility flag, and registering both at once
+/// fails at runtime.
+fn validate_static_names(
+    registrations: &[MemberRegistration],
+    mode: RegistrationMode,
+) -> syn::Result<()> {
+    let mut seen = HashMap::new();
+    for registration in registrations {
+        let Some(name) = &registration.static_name else {
+            continue;
+        };
+        let source = &registration.source_name;
+        if RESERVED_STATIC_NAMES.contains(&name.as_str()) {
+            return Err(syn::Error::new_spanned(
+                source,
+                format!(
+                    "static member `{source}` cannot be named \"{name}\", which every \
+                     JavaScript function already has; choose another JavaScript name with \
+                     `name = \"...\"`"
+                ),
+            ));
+        }
+        if mode == RegistrationMode::Automatic
+            && let Some(other) = seen.insert(name.as_str(), source)
+        {
+            let mut error = syn::Error::new_spanned(
+                source,
+                format!(
+                    "static member `{source}` has the same JavaScript name \"{name}\" as `{other}`"
                 ),
             );
             error.combine(syn::Error::new_spanned(
@@ -1091,6 +1117,11 @@ fn generate_resource_bindings(
     let (iterable, iterable_error) = collect_iterable_registrations(impl_block, mode);
     registrations.extend(iterable);
     validate_factory_names(impl_block, &registrations).map_err(|err| err.to_compile_error())?;
+    // Reported alongside the registrations, like `wildcard_error`, so that the type is still
+    // registered and adds no errors of its own.
+    let static_names_error = validate_static_names(&registrations, mode)
+        .err()
+        .map(|err| err.to_compile_error());
     let factories = registrations.iter().map(MemberRegistration::factory);
     let automatic = registrations.iter().map(|r| &r.automatic);
     let nested_type_registrations = nested_types.iter().map(nested_type_registration);
@@ -1122,6 +1153,7 @@ fn generate_resource_bindings(
         #(#dispose_errors)*
         #callable_error
         #iterable_error
+        #static_names_error
 
         #[automatically_derived]
         impl #self_ty {
@@ -1517,6 +1549,7 @@ fn emit_property_group(
         automatic: quote! { Self::#factory_name(#placement) },
         source_name: getter_name,
         factory_name,
+        static_name: None,
     })
 }
 

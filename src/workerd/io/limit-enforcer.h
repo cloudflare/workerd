@@ -9,7 +9,6 @@
 #include <v8-isolate.h>
 
 #include <kj/async.h>   // For Promise
-#include <kj/debug.h>   // For KJ_REQUIRE
 #include <kj/memory.h>  // for Own
 #include <kj/one-of.h>  // for OneOf
 #include <kj/time.h>    // for Duration
@@ -107,6 +106,14 @@ class IsolateLimitEnforcer: public kj::Refcounted {
   // Called when a Blob is being created to determine the maximum allowed size of the Blob.
   virtual size_t getBlobSizeLimit() const {
     return 128 * 1024 * 1024;  // 128 MB
+  }
+
+  // How long a Durable Object storage operation may hold the output gate before the gate breaks
+  // and the object is reset. This only protects against total hangs. Lowering it much in
+  // production is risky, since a low timeout can fire spuriously under heavy CPU load and fail
+  // requests that would otherwise succeed; tests lower it to exercise the timeout quickly.
+  virtual kj::Duration getOutputGateTimeout() const {
+    return 30 * kj::SECONDS;
   }
 
   // IoContext::awaitJs() calls this when the promise it waits for is never settled, which can be

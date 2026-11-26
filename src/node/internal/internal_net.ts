@@ -99,7 +99,10 @@ import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
 import { default as urlUtil } from 'node-internal:url';
 
 import { inspect } from 'node-internal:internal_inspect';
+import { isIP, isIPv4, isIPv6 } from 'node-internal:internal_net_ip';
 import type { FixedLengthArray } from 'node-internal:internal_utils';
+
+export { isIP, isIPv4, isIPv6 };
 
 const kInspect = inspect.custom;
 
@@ -173,26 +176,6 @@ function releaseBoundSource(socket: Socket): void {
   }
   socket[kBoundSource] = null;
 }
-
-// IPv4 Segment
-const v4Seg = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])';
-const v4Str = `(?:${v4Seg}\\.){3}${v4Seg}`;
-const IPv4Reg = new RegExp(`^${v4Str}$`);
-
-// IPv6 Segment
-const v6Seg = '(?:[0-9a-fA-F]{1,4})';
-const IPv6Reg = new RegExp(
-  '^(?:' +
-    `(?:${v6Seg}:){7}(?:${v6Seg}|:)|` +
-    `(?:${v6Seg}:){6}(?:${v4Str}|:${v6Seg}|:)|` +
-    `(?:${v6Seg}:){5}(?::${v4Str}|(?::${v6Seg}){1,2}|:)|` +
-    `(?:${v6Seg}:){4}(?:(?::${v6Seg}){0,1}:${v4Str}|(?::${v6Seg}){1,3}|:)|` +
-    `(?:${v6Seg}:){3}(?:(?::${v6Seg}){0,2}:${v4Str}|(?::${v6Seg}){1,4}|:)|` +
-    `(?:${v6Seg}:){2}(?:(?::${v6Seg}){0,3}:${v4Str}|(?::${v6Seg}){1,5}|:)|` +
-    `(?:${v6Seg}:){1}(?:(?::${v6Seg}){0,4}:${v4Str}|(?::${v6Seg}){1,6}|:)|` +
-    `(?::(?:(?::${v6Seg}){0,5}:${v4Str}|(?::${v6Seg}){1,7}|:))` +
-    ')(?:%[0-9a-zA-Z-.:]{1,})?$'
-);
 
 const TIMEOUT_MAX = 2 ** 31 - 1;
 
@@ -751,10 +734,11 @@ export declare class Socket extends _Socket {
     // upgrade) never run two loops - and thus two BYOB reads - against the
     // same reader at once.
     readLoopActive?: boolean;
-    // Set by a TLS upgrade before it releases this handle's reader and
-    // writer and carries the connection over to a new handle: the read
-    // loop's pending read then rejects, which is not a failure.
-    handedOver?: boolean;
+    // Set when the read loop's pending read is about to reject and that is
+    // not a failure: a TLS upgrade releases this handle's reader and carries
+    // the connection over to a new handle, or a JSStreamSocket's Duplex
+    // closes before its end, which errors the handle's readable.
+    readRejectionExpected?: boolean;
     bytesRead: number;
     bytesWritten: number;
     socket: ReturnType<typeof inner.connect>;
@@ -2188,12 +2172,16 @@ async function startRead(socket: Socket): Promise<void> {
     }
   } catch (err) {
     // A pending read rejects when the socket is destroyed (its stream is
-    // closing) or when a TLS upgrade releases this loop's reader (the
-    // handle is handed over; the parent socket keeps pointing at it):
-    // neither is news. Anything else - a failing generator or buffer
-    // (above), a read the runtime refuses - destroys the socket with the
-    // error rather than leaving it open and silent.
-    if (socket._handle === handle && !handle.handedOver && !socket.destroyed) {
+    // closing) or when the handle expects it (a TLS upgrade released this
+    // loop's reader, or a JSStreamSocket's Duplex closed): neither is news.
+    // Anything else - a failing generator or buffer (above), a read the
+    // runtime refuses - destroys the socket with the error rather than
+    // leaving it open and silent.
+    if (
+      socket._handle === handle &&
+      !handle.readRejectionExpected &&
+      !socket.destroyed
+    ) {
       socket.destroy(streamFailureError(handle.socket, 'read', err as Error));
     }
   } finally {
@@ -2408,22 +2396,6 @@ export function setDefaultAutoSelectFamilyAttemptTimeout(val: unknown): void {
   validateInt32(val, 'val', 1);
   if (val < 10) val = 10;
   autoSelectFamilyAttemptTimeout = val as number;
-}
-
-export function isIP(input: unknown): number {
-  if (isIPv4(input)) return 4;
-  if (isIPv6(input)) return 6;
-  return 0;
-}
-
-export function isIPv4(input: unknown): boolean {
-  input = typeof input !== 'string' ? `${input}` : input;
-  return IPv4Reg.test(input as string);
-}
-
-export function isIPv6(input: unknown): boolean {
-  input = typeof input !== 'string' ? `${input}` : input;
-  return IPv6Reg.test(input as string);
 }
 
 // ======================================================================================

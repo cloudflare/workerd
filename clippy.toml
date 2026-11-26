@@ -4,3 +4,7 @@ allow-panic-in-tests = true
 max-fn-params-bools = 2
 # Proper nouns beyond clippy's default list, so doc comments need not backtick them.
 doc-valid-idents = ["SQLite", "WebSockets", ".."]
+# A thread-track slice open across an `.await` gets the wrong extent; see src/workerd/util/perfetto/lib.rs.
+await-holding-invalid-types = [
+  { path = "perfetto::ScopedSlice", reason = "use perfetto::trace_event_async! (an AsyncSlice) for a slice that spans an .await" },
+]

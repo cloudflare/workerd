@@ -4,6 +4,7 @@
 
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use jsg::FromJS;
@@ -150,6 +151,10 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
 
+        /// `v8::HandleScope::NumberOfHandles()`: the local handles alive in the isolate's
+        /// handle scopes.
+        pub unsafe fn number_of_handles(isolate: *mut Isolate) -> i32;
+
         /// The external memory that embedders have attributed to the isolate; see
         /// `external_memory` in `ffi.h`.
         pub unsafe fn external_memory(isolate: *mut Isolate) -> i64;
@@ -240,30 +245,6 @@ mod ffi {
         pub unsafe fn wasm_module_object_from_compiled_module(
             isolate: *mut Isolate,
             module: KjOwn<CompiledWasmModule>,
-        ) -> Result<Local>;
-
-        /// Gives `object` `name` and `message` as an error implemented in the per-isolate
-        /// bootstrap holds them. Fails if it is not an object.
-        #[expect(clippy::allow_attributes)]
-        #[allow(dead_code)]
-        pub unsafe fn set_error_slots(
-            isolate: *mut Isolate,
-            object: Local,
-            name: &str,
-            message: &str,
-        ) -> Result<()>;
-
-        /// Creates an instance of the per-isolate bootstrap's `DOMException`, as
-        /// `jsg::newBootstrapDomException()` does, whose prototype is `prototype`, with `name`,
-        /// `message` and `stack`. Fails if `prototype` is not an object.
-        #[expect(clippy::allow_attributes)]
-        #[allow(dead_code)]
-        pub unsafe fn new_bootstrap_dom_exception(
-            isolate: *mut Isolate,
-            prototype: Local,
-            name: &str,
-            message: &str,
-            stack: &str,
         ) -> Result<Local>;
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
@@ -797,6 +778,14 @@ impl Harness {
         unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
     }
 
+    /// The local handles alive in all of the isolate's open handle scopes. Tests compare it with
+    /// counts taken earlier.
+    #[must_use]
+    pub fn number_of_handles(lock: &mut jsg::Lock<'_>) -> i32 {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::number_of_handles(lock.isolate().as_ffi()) }
+    }
+
     /// The external memory that `jsg::ExternalMemoryAdjustment`s, of Rust or C++, have
     /// attributed to the isolate and that has reached V8. Tests compare it with amounts taken
     /// earlier.
@@ -898,58 +887,6 @@ impl Harness {
         local
             .try_into()
             .expect("the result should be a WebAssembly.Module")
-    }
-
-    /// Gives `object` `name` and `message` as an error implemented in the per-isolate bootstrap,
-    /// whose `name` and `message` are accessors, holds them: under the private symbols that C++
-    /// JSG's `ERROR_NAME_KEY` and `ERROR_MESSAGE_KEY` name, which
-    /// [`v8::Local::<v8::Value>::to_detail_string`] reads.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `object` is not an object.
-    pub fn set_error_slots<'s>(
-        lock: &mut jsg::Lock<'s>,
-        object: v8::Local<'s, v8::Value>,
-        name: &str,
-        message: &str,
-    ) {
-        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
-        // open, which `object` belongs to.
-        unsafe { ffi::set_error_slots(lock.isolate().as_ffi(), object.into_ffi(), name, message) }
-            .expect("the value should be an object");
-    }
-
-    /// An instance of the per-isolate bootstrap's `DOMException`, as C++ JSG's
-    /// `jsg::newBootstrapDomException()` creates one: an API wrapper object without internal
-    /// fields, which holds its brand, `name` and `message` under private symbols, with `stack` as
-    /// an own data property. Its prototype is `prototype`. The harness has no bootstrap, so this
-    /// stands in for one, and C++ JSG reads a serialized one as its own `DOMException`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `prototype` is not an object.
-    pub fn new_bootstrap_dom_exception<'s>(
-        lock: &mut jsg::Lock<'s>,
-        prototype: v8::Local<'s, v8::Value>,
-        name: &str,
-        message: &str,
-        stack: &str,
-    ) -> v8::Local<'s, v8::Value> {
-        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
-        // open, which `prototype` and the result belong to.
-        unsafe {
-            v8::Local::from_ffi(
-                ffi::new_bootstrap_dom_exception(
-                    lock.isolate().as_ffi(),
-                    prototype.into_ffi(),
-                    name,
-                    message,
-                    stack,
-                )
-                .expect("the prototype should be an object"),
-            )
-        }
     }
 
     /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a
@@ -1149,6 +1086,17 @@ impl Harness {
     pub fn cpp_sees_root_frame(lock: &mut jsg::Lock<'_>) -> bool {
         // SAFETY: the lock keeps the isolate locked.
         unsafe { ffi::cpp_sees_root_frame(lock.isolate().as_ffi()) }
+    }
+}
+
+/// A field that adds one to its counter when it is dropped, for a test resource that counts its
+/// drops. A resource that holds GC references can't implement `Drop` itself.
+#[jsg_macros::jsg_traced]
+pub struct DropCounter(pub &'static AtomicUsize);
+
+impl Drop for DropCounter {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
 

@@ -129,13 +129,7 @@ export default {
     disabledTests: true,
   },
   'Create-protocol-with-space.any.js': {},
-  'Create-protocols-repeated-case-insensitive.any.js': {
-    comment:
-      'workerd does not throw for case-insensitive duplicate protocols (allows "Echo" and "echo")',
-    expectedFailures: [
-      'Create WebSocket - Pass a valid URL and an array of protocol strings with repeated values but different case - SYNTAX_ERR is thrown',
-    ],
-  },
+  'Create-protocols-repeated-case-insensitive.any.js': {},
   'Create-protocols-repeated.any.js': {},
   'Create-url-with-space.any.js': {},
   'Create-valid-url-array-protocols.any.js': {
@@ -160,20 +154,12 @@ export default {
     replace: removeUseCapture,
   },
   'Send-0byte-data.any.js': {
-    comment:
-      'workerd returns 0 instead of undefined for empty message data; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-65K-data.any.js': {
     replace: removeUseCapture,
   },
-  'Send-before-open.any.js': {
-    comment:
-      'workerd throws TypeError instead of InvalidStateError DOMException for send() before open',
-    expectedFailures: [
-      'Send data on a WebSocket before connection is opened - INVALID_STATE_ERR is returned',
-    ],
-  },
+  'Send-before-open.any.js': {},
   'Send-binary-65K-arraybuffer.any.js': {
     replace: removeUseCapture,
   },
@@ -211,9 +197,7 @@ export default {
     replace: removeUseCapture,
   },
   'Send-binary-blob.any.js': {
-    comment:
-      'workerd send() does not accept a Blob, so no message is received and the test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-data.any.js': {
     replace: removeUseCapture,
@@ -289,28 +273,12 @@ export default {
     comment: 'Cookie support helper, not an actual test',
     omittedTests: true,
   },
-  'eventhandlers.any.js': {
-    comment: 'TreatNonCallableAsNull behavior differs from spec',
-    expectedFailures: [
-      'Event handler for open should have [TreatNonCallableAsNull]',
-      'Event handler for error should have [TreatNonCallableAsNull]',
-      'Event handler for close should have [TreatNonCallableAsNull]',
-      'Event handler for message should have [TreatNonCallableAsNull]',
-    ],
-  },
+  'eventhandlers.any.js': {},
   'idlharness.any.js': {
     comment:
-      'Some interface/attribute tests still fail due to event handler and inherited property checks',
+      'Some interface/attribute tests still fail due to inherited property checks',
     expectedFailures: [
       'WebSocket interface: existence and properties of interface object',
-      'WebSocket interface: attribute onopen',
-      'WebSocket interface: attribute onerror',
-      'WebSocket interface: attribute onclose',
-      'WebSocket interface: attribute onmessage',
-      'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onopen" with the proper type',
-      'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onerror" with the proper type',
-      'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onclose" with the proper type',
-      'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onmessage" with the proper type',
       'CloseEvent interface: existence and properties of interface object',
       'CloseEvent interface: attribute wasClean',
       'CloseEvent interface: attribute code',
@@ -335,10 +303,7 @@ export default {
     comment: 'importScripts is not available in Workers',
     omittedTests: true,
   },
-  'referrer.any.js': {
-    comment: 'Referrer behavior is different in workers',
-    disabledTests: true,
-  },
+  'referrer.any.js': {},
   'remove-own-iframe-during-onerror.window.js': {
     comment: 'iframe tests are browser-specific',
     omittedTests: true,

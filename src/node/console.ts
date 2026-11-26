@@ -6,6 +6,7 @@
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:public_process';
 import { Console } from 'node-internal:internal_console';
+import { kNullProtoObject } from 'node-internal:internal_utils';
 
 const noop: VoidFunction = () => {};
 
@@ -27,9 +28,24 @@ globalConsole._ignoreErrors = true;
 globalConsole._stderrErrorHandler = noop;
 globalConsole._stdoutErrorHandler = noop;
 
-// We have this assertion because node-internal:public_process has undefined as the type
-globalConsole._stderr = processImpl.stderr as unknown as NodeJS.WritableStream;
-globalConsole._stdout = processImpl.stdout as unknown as NodeJS.WritableStream;
+// process.stdout and process.stderr load the fs streams on first access, so they are bound
+// lazily, as Node.js does for its global console. The stream is read once and then kept.
+for (const name of ['stdout', 'stderr'] as const) {
+  let stream: NodeJS.WritableStream | undefined;
+  Object.defineProperty(globalConsole, `_${name}`, {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
+    configurable: true,
+    enumerable: true,
+    get(): NodeJS.WritableStream {
+      // public_process types the stdio streams as undefined, hence the cast.
+      return (stream ??= processImpl[name] as unknown as NodeJS.WritableStream);
+    },
+    set(value: NodeJS.WritableStream): void {
+      stream = value;
+    },
+  });
+}
 
 export { Console };
 // We want to make sure the following works:

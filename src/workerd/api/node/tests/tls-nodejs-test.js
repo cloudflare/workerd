@@ -1028,6 +1028,33 @@ export const testTlsDuplexEndsFirst = {
   },
 };
 
+// A TLSSocket over a Duplex closes without an error when the Duplex is
+// destroyed first, as in Node.
+export const testTlsDuplexDestroyedFirst = {
+  async test() {
+    // Collects the socket's 'error' events and the global ones. An exception
+    // thrown inside the socket's own callbacks (a listener or a microtask)
+    // reaches no socket listener: the runtime reports it as an 'error' event
+    // on globalThis instead.
+    const errors = [];
+    const onError = (event) => errors.push(event.error);
+    globalThis.addEventListener('error', onError);
+    try {
+      const [a] = stream.duplexPair();
+      const client = tls.connect({ socket: a });
+      client.on('error', (err) => errors.push(err));
+      const closed = new Promise((resolve) => client.once('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      a.destroy();
+      strictEqual(await closed, false);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } finally {
+      globalThis.removeEventListener('error', onError);
+    }
+    deepStrictEqual(errors, []);
+  },
+};
+
 // Tests are taken from:
 // https://github.com/nodejs/node/blob/52d95f53e466016120048fb43b3732ff9089ecd7/test/parallel/test-tls-streamwrap-buffersize.js
 export const testTlsStreamwrapBuffersize = {

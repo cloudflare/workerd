@@ -82,17 +82,14 @@ class PerformanceEntry: public jsg::Object {
 
 class PerformanceMark: public PerformanceEntry {
  public:
-  friend class Performance;
-
   struct Options {
-    jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
     jsg::Optional<double> startTime;
 
     JSG_STRUCT(detail, startTime);
   };
 
-  PerformanceMark(
-      kj::String name, jsg::Optional<jsg::JsRef<jsg::JsObject>> detail, double startTime)
+  PerformanceMark(kj::String name, jsg::Optional<jsg::JsRef<jsg::JsValue>> detail, double startTime)
       : PerformanceEntry(kj::mv(name), "mark"_kjc, startTime, 0),
         detail(kj::mv(detail)) {}
 
@@ -119,7 +116,7 @@ class PerformanceMark: public PerformanceEntry {
   }
 
  private:
-  jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(detail);
@@ -208,23 +205,25 @@ class PerformanceNodeTiming: public PerformanceEntry {
 
 class PerformanceMeasure: public PerformanceEntry {
  public:
-  PerformanceMeasure(kj::String name, double startTime, double duration)
-      : PerformanceEntry(kj::mv(name), "measure"_kjc, startTime, duration) {}
-
-  friend class Performance;
+  PerformanceMeasure(kj::String name,
+      jsg::Optional<jsg::JsRef<jsg::JsValue>> detail,
+      double startTime,
+      double duration)
+      : PerformanceEntry(kj::mv(name), "measure"_kjc, startTime, duration),
+        detail(kj::mv(detail)) {}
 
   struct Entry {
     kj::String entryType;
     kj::String name;
     kj::OneOf<kj::Date, double> startTime;
     double duration;
-    jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
 
     JSG_STRUCT(entryType, name, startTime, duration, detail);
   };
 
   struct Options {
-    jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
     jsg::Optional<double> start;
     jsg::Optional<double> duration;
     jsg::Optional<double> end;
@@ -252,7 +251,7 @@ class PerformanceMeasure: public PerformanceEntry {
   }
 
  private:
-  jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(detail);
@@ -631,6 +630,12 @@ class Performance: public EventTarget {
  private:
   const IsolateLimitEnforcer& isolateLimitEnforcer;
   kj::Vector<jsg::Ref<PerformanceEntry>> entries;
+
+  // Returns the start time of the first mark named `name`.
+  kj::Maybe<double> findMarkTime(kj::StringPtr name);
+
+  // The spec's "convert a mark to a timestamp" for a mark name.
+  double convertMarkToTimestamp(kj::StringPtr mark);
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visitAll(entries);

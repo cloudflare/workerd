@@ -319,9 +319,10 @@ export const dh_padding_test = {
 
 export const dhKeygenTest = {
   test() {
-    // FIPS-mode BoringSSL mandates keys of at least 1024 bits. RFC 8270 recommends that sizes of
-    // at least 2048 bits should be used, 1024-bit primes are sufficient for these tests though.
-    const size = 1024;
+    // The time to generate a safe prime grows steeply with its size and varies widely from one
+    // run to the next, so the test generates a small one. Real use needs at least 2048 bits
+    // (RFC 8270).
+    const size = 512;
     const dh1 = crypto.createDiffieHellman(size);
     const p1 = dh1.getPrime('buffer');
     const dh2 = crypto.createDiffieHellman(p1, 'buffer');
@@ -573,9 +574,10 @@ export const DhLargeGeneratorParam = {
 // Test that invalid public keys are rejected by setPublicKey and computeSecret.
 export const dhPubKeyValidation = {
   test() {
-    const dh = crypto.createDiffieHellman(1024);
+    // A fixed prime, since dhKeygenTest already covers generating one.
+    const prime = crypto.getDiffieHellman('modp14').getPrime();
+    const dh = crypto.createDiffieHellman(prime);
     dh.generateKeys();
-    const prime = dh.getPrime();
 
     // Public key of 0 should be rejected (too small)
     const dh2 = crypto.createDiffieHellman(prime);

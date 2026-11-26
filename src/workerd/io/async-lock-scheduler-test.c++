@@ -35,6 +35,10 @@ class FakeResource: public kj::AtomicRefcounted {
     return queue.lock(kj::atomicAddRef(*this), hooks);
   }
 
+  kj::Maybe<AsyncLockQueue<FakeResource>::Lock> tryLock() const {
+    return queue.tryLock(kj::atomicAddRef(*this));
+  }
+
   uint getCurrentLoad() const {
     return queue.getCurrentLoad();
   }
@@ -214,6 +218,37 @@ KJ_TEST("AsyncLockQueue: whenThreadIdle waits for the held lock") {
   idle.wait(ws);
 }
 
+KJ_TEST("AsyncLockQueue: tryLock takes a free resource only if the thread holds no lock") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto a = kj::atomicRefcounted<FakeResource>("a"_kj);
+  auto b = kj::atomicRefcounted<FakeResource>("b"_kj);
+
+  auto lockA = kj::heap(KJ_ASSERT_NONNULL(a->tryLock()));
+  KJ_EXPECT(&lockA->getResource() == a.get());
+  KJ_EXPECT(a->getCurrentLoad() == 1);
+
+  // The thread holds a lock, so it gets neither a second turn on the same resource nor a
+  // different resource, and joins no queue.
+  KJ_EXPECT(a->tryLock() == kj::none);
+  KJ_EXPECT(b->tryLock() == kj::none);
+  KJ_EXPECT(a->getCurrentLoad() == 1);
+  KJ_EXPECT(b->getCurrentLoad() == 0);
+
+  // A lock taken with tryLock() holds up the thread's other locks like any other lock.
+  auto promiseB = b->lock();
+  KJ_EXPECT(!promiseB.poll(ws));
+  lockA = nullptr;
+  KJ_EXPECT(a->getCurrentLoad() == 0);
+  auto lockB = kj::heap(promiseB.wait(ws));
+  KJ_EXPECT(a->tryLock() == kj::none);
+
+  lockB = nullptr;
+  KJ_EXPECT(a->tryLock() != kj::none);
+  KJ_EXPECT(a->getCurrentLoad() == 0, "dropping the lock should drain the queue");
+}
+
 // =======================================================================================
 // Cross-thread behaviour
 
@@ -262,6 +297,52 @@ KJ_TEST("AsyncLockQueue: turns are granted across threads in the order they were
   KJ_EXPECT(lockedState->granted[0] == 'B', "FIFO: the earlier waiter should win");
   KJ_EXPECT(lockedState->granted[1] == 'C');
   KJ_EXPECT(resource->getCurrentLoad() == 0);
+}
+
+KJ_TEST("AsyncLockQueue: tryLock neither takes nor queues for a resource another thread uses") {
+  struct State {
+    bool firstHolds = false;
+    bool releaseFirst = false;
+    bool secondGranted = false;
+  };
+  kj::MutexGuarded<State> state;
+
+  auto resource = kj::atomicRefcounted<FakeResource>("r"_kj);
+
+  kj::EventLoop mainLoop;
+  kj::WaitScope mainWs(mainLoop);
+
+  {
+    kj::Thread first([&]() {
+      kj::EventLoop loop;
+      kj::WaitScope ws(loop);
+      auto lock = resource->lock().wait(ws);
+      state.lockExclusive()->firstHolds = true;
+      state.when([](const State& s) { return s.releaseFirst; }, [](State&) {});
+    });
+    state.when([](const State& s) { return s.firstHolds; }, [](State&) {});
+
+    KJ_EXPECT(resource->tryLock() == kj::none);
+    KJ_EXPECT(resource->getCurrentLoad() == 1);
+
+    kj::Thread second([&]() {
+      kj::EventLoop loop;
+      kj::WaitScope ws(loop);
+      auto lock = resource->lock().wait(ws);
+      state.lockExclusive()->secondGranted = true;
+    });
+    waitForLoad(*resource, 2);
+
+    KJ_EXPECT(resource->tryLock() == kj::none);
+    KJ_EXPECT(resource->getCurrentLoad() == 2);
+
+    // The failed attempts left the queue intact: the turn still passes to the second thread.
+    state.lockExclusive()->releaseFirst = true;
+  }  // joins both threads
+
+  KJ_EXPECT(state.lockExclusive()->secondGranted);
+  KJ_EXPECT(resource->getCurrentLoad() == 0);
+  KJ_EXPECT(resource->tryLock() != kj::none);
 }
 
 KJ_TEST("AsyncLockQueue: only one thread holds a resource at a time") {

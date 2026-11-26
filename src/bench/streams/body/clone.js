@@ -10,6 +10,7 @@ import {
   bytesOf,
   drainBytes,
   expectEqual,
+  scaled,
   shapeLabel,
   sizeLabel,
   valueStream,
@@ -27,13 +28,14 @@ async function readBoth(response, size) {
 
 export const clone = {
   bench(b) {
-    for (const size of [65536, 1048576]) {
+    const sizes = [65536, 1048576].map((size) => scaled(b, size));
+    for (const size of sizes) {
       const bytes = bytesOf(size);
       b.run(`clone(), both read, ${sizeLabel(size)}`, () =>
         readBoth(new Response(bytes), size)
       );
     }
-    for (const size of [65536, 1048576]) {
+    for (const size of sizes) {
       const bytes = bytesOf(size);
       b.run(`body.tee(), both read, ${sizeLabel(size)}`, async () => {
         const [left, right] = new Response(bytes).body.tee();
@@ -45,7 +47,7 @@ export const clone = {
         expectEqual(c, size, 'bytes read from the second branch');
       });
     }
-    const [count, size] = SHAPES[1];
+    const [count, size] = [scaled(b, SHAPES[1][0]), SHAPES[1][1]];
     b.run(
       `clone() of a value stream body, both read, ${shapeLabel(count, size)}`,
       () => readBoth(new Response(valueStream(count, size)), count * size)

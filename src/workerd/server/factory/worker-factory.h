@@ -16,7 +16,6 @@
 // fallible in the bridge, where a C++ exception becomes a `Result` error on the Rust side; the rest
 // do not throw.
 
-#include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/io-channels.h>
@@ -25,14 +24,9 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/rust/kj/ffi.h>
-#include <workerd/rust/worker/bridge.h>
+#include <workerd/rust/worker/ffi.rs.h>
 #include <workerd/server/channel-token.h>
-#include <workerd/server/workerd.capnp.h>
 
-#include <kj-rs/kj-rs.h>
-
-#include <capnp/compat/byte-stream.h>
-#include <capnp/compat/http-over-capnp.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/filesystem.h>
@@ -103,7 +97,6 @@ struct WorkerStartupTiming;
 struct ActorStorageSpec;
 struct HeaderEdit;
 struct UdpDatagram;
-enum class AlarmElsewhere : uint8_t;
 
 // How the config message is read: configs can legitimately be very large and are not malicious.
 constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {.traversalLimitInWords = kj::maxValue};
@@ -145,6 +138,10 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     uint32_t asyncTraceStackDepth = 0;
     // Traces JavaScript promises too (--async-trace-promises), for every async trace output.
     bool asyncTracePromises = false;
+    // The header table of the program that runs the server in-process and calls into it, which
+    // must outlive the factory. The `host_*` shims rekey headers between it and the factory's own
+    // table.
+    kj::Maybe<const kj::HttpHeaderTable&> hostHeaderTable;
   };
 
   // `config` is the encoded config message; the factory owns it for the run and reads it with an
@@ -315,6 +312,8 @@ kj::Own<ActorIdHandle> actor_id_clone(const ActorIdHandle& id);
 ::rust::String actor_id_key(const ActorIdHandle& id);
 kj::Own<ActorIdHandle> actor_id_from_name(::rust::Str name);
 kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex);
+kj::Own<ActorIdHandle> actor_id_from_durable_name(::rust::Str uniqueKey, ::rust::Str name);
+kj::Own<ActorIdHandle> actor_id_from_durable_string(::rust::Str uniqueKey, ::rust::Str hex);
 
 // The storage of one Durable Object namespace: its directory (or none, for in-memory storage),
 // the SQLite VFS over it, and the alarm scheduler.
@@ -337,7 +336,6 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
     ::rust::Box<ActorNamespaceHandle> actors);
 void actor_storage_set_alarm(
     const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs);
-kj::Own<WorkerInterface> alarm_owned_elsewhere(AlarmElsewhere then);
 void actor_storage_delete_all(const ActorStorage& storage);
 // Facets have numbers only in a directory (SQLite storage). In-memory storage is an ActorCache per
 // actor, in which they have none, and nothing to delete or clone.
@@ -470,7 +468,7 @@ struct HttpCall {
   kj::HttpClient::Request request;
 };
 kj::Own<HttpCall> http_call(kj::Own<WorkerInterface> interface,
-    kj::HttpMethod method,
+    kj::HttpMethod::Known method,
     ::rust::Str url,
     const kj::HttpHeaders& headers,
     uint64_t length);
@@ -503,6 +501,12 @@ kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Respo
 kj::Own<kj::HttpService::Response> new_image_filter_response(kj::HttpService::Response& inner);
 kj::Promise<void> image_filter_finish(kj::HttpService::Response& response);
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response();
+kj::Own<kj::HttpHeaders> host_request_headers(
+    const WorkerFactory& factory, const kj::HttpHeaders& headers);
+kj::Own<kj::HttpService::Response> new_host_response(
+    const WorkerFactory& factory, kj::HttpService::Response& inner);
+kj::Own<kj::HttpService::ConnectResponse> new_host_connect_response(
+    const WorkerFactory& factory, kj::HttpService::ConnectResponse& inner);
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors();
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(
     ::rust::Str address, ::rust::Box<UdpFlow> flow);

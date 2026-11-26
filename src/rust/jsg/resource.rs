@@ -80,10 +80,9 @@ use crate::v8::ffi::Wrappable;
 /// `jsg::Ref`, whose move constructor makes it strong again. So a field that an `Rc` is moved
 /// out of is a [`crate::Cell`] or [`crate::RefCell`], which make it strong before it leaves
 /// the cell, as [`v8::GcVisitor::is_detaching`] describes; `std::cell::Cell` and
-/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. A `Drop` impl of a
-/// resource or of a field's type may move an `Rc` out of a plain field (see
-/// [`crate::GarbageCollected::detach_before_drop`]). See `README.md` §Safety rules, rule 2, and
-/// <https://github.com/cloudflare/workerd/issues/7976>.
+/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. A resource that holds an
+/// `Rc` can't implement `Drop`, which could move it out of a plain field. See `README.md`
+/// §Safety rules, rule 2, and <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Owned, reference-counted handle to the C++ Wrappable. Taken by `Drop`.
     wrappable: ManuallyDrop<v8::WrappableRc>,
@@ -858,7 +857,43 @@ fn get_resource_descriptor<R: Resource>(
         }
     }
 
+    check_static_names(R::class_name(), &descriptor);
     (descriptor, nested_types)
+}
+
+/// Own properties that every JavaScript function already has. `jsg-macros` keeps the same list
+/// for its compile-time check, since a proc-macro crate cannot depend on this one; change both
+/// together.
+const RESERVED_STATIC_NAMES: [&str; 3] = ["length", "name", "prototype"];
+
+/// Panics if a static method or static constant of `class_name` is named after a property that
+/// every function already has, or shares its name with another one. V8 adds the constructor's
+/// properties without checking for an existing one, so either would otherwise abort the process
+/// without a message when the template is first instantiated. `#[jsg_resource]` rejects both at
+/// compile time with automatic registration; this catches members registered by hand.
+fn check_static_names(class_name: &str, descriptor: &v8::ffi::ResourceDescriptor) {
+    let names = descriptor
+        .static_methods
+        .iter()
+        .map(|method| method.name.as_str())
+        .chain(
+            descriptor
+                .static_constants
+                .iter()
+                .map(|constant| constant.name.as_str()),
+        );
+    let mut seen = std::collections::HashSet::new();
+    for name in names {
+        assert!(
+            !RESERVED_STATIC_NAMES.contains(&name),
+            "{class_name} has a static member named \"{name}\", which every JavaScript function \
+             already has"
+        );
+        assert!(
+            seen.insert(name),
+            "{class_name} has more than one static member named \"{name}\""
+        );
+    }
 }
 
 /// The descriptor of a [`Member::LazyInstanceProperty`].

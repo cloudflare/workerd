@@ -255,7 +255,7 @@ export const test = {
     assert.notStrictEqual(webSocket, null);
     // The server-side WebSocketPair socket's binaryType depends on the compat flag.
     const bt = new WebSocketPair()[0].binaryType;
-    const wsStr = `WebSocket {\n    readyState: 1,\n    bufferedAmount: 0,\n    url: null,\n    protocol: '',\n    extensions: '',\n    binaryType: '${bt}'\n  }`;
+    const wsStr = `WebSocket {\n    readyState: 1,\n    bufferedAmount: 0,\n    url: null,\n    protocol: '',\n    extensions: '',\n    binaryType: '${bt}',\n    onopen: null,\n    onmessage: null,\n    onclose: null,\n    onerror: null\n  }`;
     const messagePromise = new Promise((resolve) => {
       webSocket.addEventListener('message', (event) => {
         assert.strictEqual(

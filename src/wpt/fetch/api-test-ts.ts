@@ -18,11 +18,7 @@ export default {
   'abort/general.any.js': {
     comment: 'See individual tests',
     disabledTests: [
-      // Flaky since 2025-06-09. To be investigated.
-      'Stream errors once aborted, after reading. Underlying connection closed.',
-      // Flaky since 2025-07-25. To be investigated.
-      'Stream errors once aborted. Underlying connection closed.',
-      // Flaky since 2026-08-07. To be investigated.
+      // Flaky on macOS since 2026-08-07. To be investigated.
       'Underlying connection is closed when aborting after receiving response',
     ],
     expectedFailures: [
@@ -208,11 +204,7 @@ export default {
     comment: 'Enable if HTTP/2 is implemented',
     disabledTests: true,
   },
-  'basic/response-null-body.any.js': {
-    comment:
-      'Response begins with hello-worldHTTP/1.1 which will lead to invalid protocol errors coming up on other tests later on',
-    disabledTests: true,
-  },
+  'basic/response-null-body.any.js': {},
   'basic/response-url.sub.any.js': {},
   'basic/scheme-about.any.js': {},
   'basic/scheme-blob.sub.any.js': {

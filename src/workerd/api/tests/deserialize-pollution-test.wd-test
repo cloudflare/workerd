@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "deserialize-pollution-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "deserialize-pollution-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "enable_abortsignal_rpc", "enhanced_error_serialization", "experimental"],
+        bindings = [
+          (name = "Echo", service = (name = "deserialize-pollution-test", entrypoint = "Echo")),
+        ]
+      )
+    ),
+  ],
+);

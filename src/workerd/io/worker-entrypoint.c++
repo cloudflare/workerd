@@ -8,11 +8,14 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/util.h>
 #include <workerd/io/access-info.h>
+#include <workerd/io/entrypoint-invocation.h>
+#include <workerd/io/entrypoint/ffi.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
@@ -20,15 +23,12 @@
 #include <workerd/util/use-perfetto-categories.h>
 
 #include <capnp/message.h>
+#include <capnp/serialize.h>
 #include <kj/compat/http.h>
 
 namespace workerd {
 
 namespace {
-
-kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
-  return value.map([](kj::String& text) -> kj::StringPtr { return text; });
-}
 
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
@@ -107,7 +107,6 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
   Frankenvalue props;
   kj::Maybe<kj::String> cfBlobJson;
   kj::Maybe<Worker::VersionInfo> versionInfo;
-  kj::Maybe<kj::String> clientAddress;
 
   // Hacky members used to hold some temporary state while processing a request.
   // See gory details in WorkerEntrypoint::request().
@@ -126,7 +125,8 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+      kj::Maybe<kj::String> clientAddress);
 
   kj::Promise<void> requestImpl(kj::HttpMethod method,
       kj::StringPtr url,
@@ -158,8 +158,7 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
       kj::Maybe<kj::String> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<Worker::VersionInfo> versionInfo,
-      kj::Maybe<kj::String> clientAddress);
+      kj::Maybe<Worker::VersionInfo> versionInfo);
 };
 
 // Simple wrapper around `HttpService::Response` to let us know if the response was sent
@@ -274,10 +273,11 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
 
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, canceler, tunnelExceptions, isDynamicDispatch, kj::mv(entrypointName),
-      kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo), kj::mv(clientAddress));
+      kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
-      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory));
+      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory),
+      kj::mv(clientAddress));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -291,8 +291,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     kj::Maybe<kj::String> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<Worker::VersionInfo> versionInfo,
-    kj::Maybe<kj::String> clientAddress)
+    kj::Maybe<Worker::VersionInfo> versionInfo)
     : threadContext(threadContext),
       waitUntilTasks(waitUntilTasks),
       canceler(canceler),
@@ -301,8 +300,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       entrypointName(kj::mv(entrypointName)),
       props(kj::mv(props)),
       cfBlobJson(kj::mv(cfBlobJson)),
-      versionInfo(kj::mv(versionInfo)),
-      clientAddress(kj::mv(clientAddress)) {}
+      versionInfo(kj::mv(versionInfo)) {}
 
 void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -313,7 +311,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    kj::Maybe<kj::String> clientAddress) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -344,7 +343,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
 
   incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::mv(context), kj::mv(ioChannelFactory),
       kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo),
-      kj::mv(selfTokenFactory))
+      kj::mv(selfTokenFactory), kj::mv(clientAddress))
                         .attach(kj::mv(actor));
 }
 
@@ -532,8 +531,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
           // Getting the handler finishes actor construction, so the claim sees a constructed actor
           // but still precedes the choice and invocation of the fetch handler.
-          auto handler = lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo),
-              kj::mv(props), context.getActor(), isDynamicDispatch);
+          auto handler = lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
+              context.getActor(), isDynamicDispatch);
           auto retryable = IsRetryableHandler::NO;
           KJ_IF_SOME(h, handler) {
             retryable = h->isFetchRetryable(lock);
@@ -805,7 +804,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
           .run([weakThis = addWeakToThis(), &headers, &connection,
                    weakResponse = wrappedResponse->addWeak(),
                    entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
-                   host = kj::str(host), clientAddress = kj::mv(clientAddress),
+                   host = kj::str(host), clientAddress = kj::mv(incomingRequestRef.clientAddress),
                    settings = kj::mv(settings)](Worker::Lock& lock, IoContext& context) mutable {
     auto traceScope = context.makeRequestTraceScope(lock);
 
@@ -813,7 +812,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     auto& response = KJ_REQUIRE_NONNULL(weakResponse.tryGet(), "response destroyed before connect");
     return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
         response, kj::mv(settings), lock,
-        lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(self.props),
+        lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(self.props),
             context.getActor(), self.isDynamicDispatch));
   })
           .then([weakContext = context.getWeakRef(), workerTracer]() {
@@ -954,6 +953,20 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   // calling context->drain(). We don't ever send scheduled events to actors. If we do, we'll have
   // to think more about this.
 
+  if (util::Autogate::isEnabled(util::AutogateKey::RUST_ENTRYPOINT_SCHEDULED)) {
+    // Not wrapped with the canceler, which is set only for an actor's events. The event is
+    // cancelled by dropping the promise: that drops the Rust future, then the promise of
+    // finishScheduled(), which owns the IncomingRequest.
+    return entrypoint::runScheduled(
+        kj::heap(entrypoint::Invocation{
+          .request = kj::mv(incomingRequest),
+          .entrypointName = entrypointName.map([](kj::String& name) { return kj::str(name); }),
+          .versionInfo = kj::mv(versionInfo),
+          .props = kj::mv(props),
+        }),
+        scheduledTime, cron);
+  }
+
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
@@ -962,18 +975,8 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
 
   incomingRequest->delivered("scheduled"_kj);
 
-  // Scheduled handlers run entirely in waitUntil() tasks.
-  context.addWaitUntil(
-      context.run([scheduledTime, cron = kj::str(cron), entrypointName = entrypointName.clone(),
-                      versionInfo = kj::mv(versionInfo),
-                      props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
-    TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() run");
-    auto traceScope = context.makeRequestTraceScope(lock);
-
-    lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
-        lock.getExportedHandler(
-            asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()));
-  }));
+  entrypoint::startScheduledInWaitUntil(context, scheduledTime, kj::str(cron),
+      entrypointName.clone(), kj::mv(versionInfo), kj::mv(props));
 
   static auto constexpr waitForFinished = [](kj::Own<IoContext::IncomingRequest> request)
       -> kj::Promise<WorkerInterface::ScheduledResult> {
@@ -1065,7 +1068,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
           }
 
           auto handler = lock.getExportedHandler(
-              asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor());
+              entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor());
           // runAlarm()'s continuation refers to the handler, which may be a per-event heap copy.
           return lock.getGlobalScope()
               .runAlarm(scheduledTime, timeout, retryCount, incomingRequest, lock, handler)
@@ -1166,10 +1169,21 @@ kj::Promise<void> WorkerEntrypoint::bench(
     return context.awaitJs(lock,
         lock.getGlobalScope().bench(lock,
             lock.getExportedHandler(
-                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()),
+                entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()),
             params));
   });
-  api::fillBenchReport(result, report);
+  // A group holds up to MAX_SAMPLES wall and CPU samples per case, which can be more than the
+  // default traversal limit.
+  capnp::FlatArrayMessageReader message(
+      result, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue});
+  auto group = message.getRoot<bench::BenchReport::Group>();
+  if (group.hasError()) {
+    report.setError(group.getError());
+  }
+  if (group.hasOverhead()) {
+    report.setOverhead(group.getOverhead());
+  }
+  report.setCases(group.getCases());
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {
@@ -1194,7 +1208,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
     return context.awaitJs(lock,
         lock.getGlobalScope().test(lock,
             lock.getExportedHandler(
-                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor())));
+                entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor())));
   }));
 
   static auto constexpr waitForFinished =
@@ -1228,11 +1242,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   }
 
   KJ_TRY {
-    return wrapWithCanceler(
-        event
-            ->run(kj::mv(incomingRequest), asPtr(entrypointName), kj::mv(versionInfo),
-                kj::mv(props), waitUntilTasks, isDynamicDispatch)
-            .attach(kj::mv(event)));
+    return wrapWithCanceler(event
+                                ->run(kj::mv(incomingRequest), entrypointName, kj::mv(versionInfo),
+                                    kj::mv(props), waitUntilTasks, isDynamicDispatch)
+                                .attach(kj::mv(event)));
   }
   KJ_CATCH(exception) {
     markExceptionAsDelivered(exception);

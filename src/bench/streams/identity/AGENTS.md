@@ -7,6 +7,10 @@ The byte shapes are `256 x 64 B`, `64 x 4 KiB` and `16 x 64 KiB`
 (`SHAPES` in `helpers.js`). Writes copy their bytes, so each size's chunk
 is one shared buffer.
 
+Under `--quick`, the `throughput` and `pipe` cases write a sixteenth as
+many chunks (`shapesFor()` in `helpers.js`), so that the `@smoke` tests
+stay fast in sanitizer and debug builds.
+
 ## Module map
 
 | Module | Group | Cases |

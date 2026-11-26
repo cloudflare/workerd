@@ -20,16 +20,19 @@ config_setting(
     ],
 )
 
+# The sanitizer configs' target platforms (.bazelrc). They inherit the cpu and os of the machines
+# that run the tests, the client or, with --config=bazelflare, bazelflare's executors, along with
+# bazelflare's constraint (see //build/bazelflare:base_target_platform.bzl): the sanitizer Rust
+# toolchains in //build/rust are defined per host (Linux x86_64 and aarch64, macOS arm64) and
+# selected by toolchain resolution.
 platform(
     name = "sanitizer_address_platform",
     constraint_values = [":sanitizer_address"],
-    parents = ["@platforms//host"],
+    parents = ["@base_target_platform//:platform"],
 )
 
-# Like the address platform, inherits the host's cpu/os: the TSan Rust toolchains in //build/rust
-# are defined per host (Linux x86_64, macOS arm64) and selected by toolchain resolution.
 platform(
     name = "sanitizer_thread_platform",
     constraint_values = [":sanitizer_thread"],
-    parents = ["@platforms//host"],
+    parents = ["@base_target_platform//:platform"],
 )

@@ -291,6 +291,71 @@ KJ_TEST("Work before poll") {
   KJ_EXPECT(val == 42);
 }
 
+// =======================================================================================
+// Panic tests
+
+// The exception that `promise` rejects with.
+template <typename T>
+kj::Exception expectRejected(kj::Promise<T> promise, kj::WaitScope& waitScope) {
+  kj::Maybe<kj::Exception> maybeException;
+  try {
+    promise.wait(waitScope);
+  } catch (...) {
+    maybeException = kj::getCaughtExceptionAsKj();
+  }
+  return kj::mv(KJ_ASSERT_NONNULL(maybeException, "should have rejected"));
+}
+
+KJ_TEST("a fallible Rust future that panics while polled rejects its promise") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto exception = expectRejected(new_panicking_future_void(), waitScope);
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED);
+  KJ_EXPECT(exception.getDescription() == "panic in Rust future: fallible future panicked",
+      exception.getDescription());
+}
+
+KJ_TEST("a Rust future whose output is not a Result rejects its promise when it panics") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto exception = expectRejected(new_panicking_future_i32(), waitScope);
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED);
+  KJ_EXPECT(
+      exception.getDescription() == "panic in Rust future: infallible future panicked with 42",
+      exception.getDescription());
+}
+
+KJ_TEST("a Rust future that panics when polled again from the event loop rejects its promise") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto promise = new_awaiting_then_panicking_future_void();
+  // The first poll leaves the future waiting for the KJ promise it awaits.
+  KJ_EXPECT(!promise.poll(waitScope));
+  fulfill_stored_promise();
+  auto exception = expectRejected(kj::mv(promise), waitScope);
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED);
+  KJ_EXPECT(exception.getDescription() == "panic in Rust future: future panicked after awaiting",
+      exception.getDescription());
+}
+
+KJ_TEST("a Rust future that panics when cancelled logs the panic") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  {
+    auto promise = new_panicking_on_drop_future_void();
+    KJ_EXPECT(!promise.poll(waitScope));
+    KJ_EXPECT_LOG(ERROR, "panic in Rust future destructor: future panicked while dropped");
+    { auto dropped = kj::mv(promise); }
+  }
+
+  // The event loop still runs futures.
+  KJ_EXPECT(new_ready_future_i32(7).wait(waitScope) == 7);
+}
+
 // TODO(someday): More test cases.
 //   - Standalone ArcWaker tests. Ensure Rust calls ArcWaker destructor when we expect.
 //   - Throwing an exception from PromiseNode functions, including destructor.

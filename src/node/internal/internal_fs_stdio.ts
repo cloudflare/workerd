@@ -84,12 +84,8 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
 
 const streams = [null, new StdioStream(1), new StdioStream(2)];
 
-const enabled = cffs.tsStdio();
-
-// When false, writes to the stdio file descriptors go to the native file
-// system, which line-buffers and logs them itself.
 export function isStdioFd(fd: number | URL): fd is number {
-  return enabled && (fd === 0 || fd === 1 || fd === 2);
+  return fd === 0 || fd === 1 || fd === 2;
 }
 
 // Returns the number of bytes accepted: each buffer is truncated to

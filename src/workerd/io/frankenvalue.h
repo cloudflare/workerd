@@ -157,8 +157,14 @@ class Frankenvalue {
   }
 
   // When deserializing a JS value, the jsg::Deserializer's ExternalHandler will have this type.
+  //
+  // Callers find it with dynamic_cast, so it and CapTableBuilder each have a destructor defined in
+  // frankenvalue.c++. That makes their type info a single definition there rather than a copy in
+  // every library that uses them, which a dynamically linked test built with LTO may not merge.
   class CapTableReader final: public jsg::Deserializer::ExternalHandler {
    public:
+    ~CapTableReader() noexcept(false);
+
     kj::Maybe<CapTableEntry&> get(uint index) {
       if (index < table.size()) {
         return *table[index];
@@ -176,6 +182,8 @@ class Frankenvalue {
   // When serializing a JS value, the jsg::Serializer's ExternalHandler will have this type.
   class CapTableBuilder final: public jsg::Serializer::ExternalHandler {
    public:
+    ~CapTableBuilder() noexcept(false);
+
     uint add(kj::Own<CapTableEntry> entry) {
       uint result = target.capTable.size();
       target.capTable.add(kj::mv(entry));

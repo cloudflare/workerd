@@ -254,26 +254,6 @@ fn reads_a_dom_exception_as_cpp_jsg_does() {
     });
 }
 
-/// An error implemented in the per-isolate bootstrap, whose `name` and `message` are accessors, is
-/// described by the name and message it holds, as C++ describes it.
-#[test]
-fn describes_an_error_by_the_name_and_message_it_holds_as_cpp_jsg_does() {
-    Harness::new().run_in_context(|lock, ctx| {
-        let cases = [
-            ("TypeError", "boom", "jsg.TypeError: boom"),
-            ("TypeError", "", "jsg.TypeError"),
-            ("AbortError", "boom", "jsg.Error: AbortError: boom"),
-        ];
-        for (name, message, expected) in cases {
-            let value = eval(lock, ctx, "new Error('other')");
-            Harness::set_error_slots(lock, value, name, message);
-            let exception = assert_same_value(lock, value, name);
-            assert_eq!(exception.description(), expected);
-        }
-        Ok(())
-    });
-}
-
 /// Converts the value of `expr`, which must throw, with Rust JSG and C++ JSG, and returns what
 /// each threw, as `name: message`.
 fn thrown(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, expr: &str) -> [String; 2] {

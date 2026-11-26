@@ -20,7 +20,7 @@ static constexpr auto ASYNC_FN_ARG_CLOSE = ") {"_kjc;
 static constexpr auto ASYNC_FN_SUFFIX = "}"_kjc;
 
 inline kj::StringPtr getName(jsg::Optional<kj::String>& name, kj::StringPtr def) {
-  return name.map([](kj::String& str) { return str.asPtr(); }).orDefault(def);
+  return kj::Maybe<kj::StringPtr>(name).orDefault(def);
 }
 
 IoChannelFactory::EvictWebSocketMode parseEvictWebSocketMode(

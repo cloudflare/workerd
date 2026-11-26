@@ -21,6 +21,7 @@
 // #include "hibernatable-adapter.h"
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/strings.h>
 
 #include <kj/compat/url.h>
 
@@ -128,12 +129,26 @@ void WebSocket::accept(jsg::Lock& js, jsg::Optional<WebSocket::AcceptOptions> op
   impl->accept(js, kj::mv(options));
 }
 
-void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message) {
+void WebSocket::send(
+    jsg::Lock& js, kj::OneOf<kj::Array<byte>, jsg::Ref<Blob>, kj::String> message) {
   // Mark the send here, at the in-scope JS call, rather than in the async output pump where the
   // observer's sentMessage() fires -- the pump runs outside a perf-counter monitor scope, so a
   // mark there would be dropped. "now" at the send() call is the send-initiation time.
   markWebSocketPerfEvent("ws_sent"_kjc);
-  impl->send(js, kj::mv(message));
+  KJ_SWITCH_ONEOF(message) {
+    KJ_CASE_ONEOF(data, kj::Array<byte>) {
+      impl->send(js, kj::mv(data));
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      // The spec reads the Blob asynchronously but sends it in order with the other send() calls.
+      // A Blob's bytes are always in memory, so copying them now and queuing them like any other
+      // binary message keeps that order.
+      impl->send(js, kj::heapArray(blob->getData(js)));
+    }
+    KJ_CASE_ONEOF(text, kj::String) {
+      impl->send(js, kj::mv(text));
+    }
+  }
 }
 
 void WebSocket::close(
@@ -506,8 +521,9 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   // Check if we have a valid URL
   constexpr auto urlOptions = kj::Url::Options{.percentDecode = false, .allowEmpty = true};
   constexpr auto wsErr = "WebSocket Constructor: "_kj;
+  bool standard = FeatureFlags::get(js).getWebsocketStandardUrlAndExtensions();
 
-  if (FeatureFlags::get(js).getWebsocketStandardUrlAndExtensions()) {
+  if (standard) {
     // https://websockets.spec.whatwg.org/#dom-websocket-websocket. A Worker has no base URL, so a
     // relative URL fails to parse. The serialized URL then takes the same path as without the flag.
     auto parsed = JSG_REQUIRE_NONNULL(
@@ -564,16 +580,18 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
         // Per the WebSocket spec, an empty protocols array is valid and equivalent to not
         // specifying any protocols - we simply don't set the Sec-WebSocket-Protocol header.
         if (protoArr.size() > 0) {
-          // Search for duplicates by checking for their presence in the set.
+          // Search for duplicates by checking for their presence in the set. The spec compares
+          // protocols case-insensitively.
           kj::HashSet<kj::String> present;
 
           for (const auto& proto: protoArr) {
             JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
                 "One of the protocol header tokens is invalid.");
-            JSG_REQUIRE(!present.contains(proto), DOMSyntaxError, wsErr,
+            auto key = standard ? toLower(proto) : kj::str(proto);
+            JSG_REQUIRE(!present.contains(key), DOMSyntaxError, wsErr,
                 "The protocols header cannot have repeating values.");
 
-            present.insert(kj::str(proto));
+            present.insert(kj::mv(key));
           }
           constexpr auto delim = ", "_kj;
           maybeProtoString = kj::str(kj::delimited(protoArr, delim));
@@ -1019,6 +1037,12 @@ void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::
     return;
   }
 
+  if (native.state.is<AwaitingConnection>() && FeatureFlags::get(js).getPedanticWpt()) {
+    // Per the WHATWG WebSocket spec, send() on a WebSocket that is still CONNECTING throws an
+    // InvalidStateError. See https://websockets.spec.whatwg.org/#dom-websocket-send step 1.
+    JSG_FAIL_REQUIRE(
+        DOMInvalidStateError, "Can't call WebSocket send() before the connection is open.");
+  }
   JSG_REQUIRE(native.state.is<Accepted>(), TypeError,
       "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "
       "messages.");
@@ -1199,15 +1223,15 @@ kj::Maybe<kj::String> LegacyWebSocketAdapter::getPreferredExtensions(
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getUrl() {
-  return url.map([](kj::StringPtr value) { return value; });
+  return url;
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getProtocol() {
-  return protocol.map([](kj::StringPtr value) { return value; });
+  return protocol;
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getExtensions() {
-  return extensions.map([](kj::StringPtr value) { return value; });
+  return extensions;
 }
 
 kj::Maybe<jsg::JsValue> LegacyWebSocketAdapter::deserializeAttachment(jsg::Lock& js) {

@@ -36,6 +36,51 @@ kj::ArrayPtr<const kj::byte> nonNullBytes(kj::ArrayPtr<kj::byte> ptr) {
   static const kj::byte DUMMY = 0;
   return ptr == nullptr ? kj::arrayPtr(&DUMMY, 0) : ptr;
 }
+
+// None of SubtleCrypto's BufferSource arguments or dictionary members are [AllowShared]. JSG
+// rejects a bare SharedArrayBuffer for them, but not a view onto one. Rejecting views is gated on
+// pedantic_wpt because Workers may already pass shared memory here.
+void requireNotShared(jsg::Lock& js, const jsg::JsBufferSource& source, kj::StringPtr what) {
+  KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+    if (!flags.getPedanticWpt()) return;
+  } else {
+    return;
+  }
+  JSG_REQUIRE(!source.isBackedBySharedArrayBuffer(), TypeError, what,
+      " must not be backed by a SharedArrayBuffer.");
+}
+
+void requireNotShared(jsg::Lock& js,
+    const jsg::Optional<jsg::JsRef<jsg::JsBufferSource>>& member,
+    kj::StringPtr what) {
+  KJ_IF_SOME(m, member) {
+    requireNotShared(js, m.getHandle(js), what);
+  }
+}
+
+void requireNotShared(jsg::Lock& js, const SubtleCrypto::EncryptAlgorithm& algorithm) {
+  requireNotShared(js, algorithm.iv, "iv");
+  requireNotShared(js, algorithm.additionalData, "additionalData");
+  requireNotShared(js, algorithm.counter, "counter");
+  requireNotShared(js, algorithm.label, "label");
+}
+
+void requireNotShared(jsg::Lock& js, const SubtleCrypto::SignAlgorithm& algorithm) {
+  KJ_IF_SOME(context, algorithm.context) {
+    KJ_IF_SOME(source, context.getHandle(js).tryCast<jsg::JsBufferSource>()) {
+      requireNotShared(js, source, "context");
+    }
+  }
+}
+
+void requireNotShared(jsg::Lock& js, const SubtleCrypto::DeriveKeyAlgorithm& algorithm) {
+  requireNotShared(js, algorithm.salt, "salt");
+  requireNotShared(js, algorithm.info, "info");
+}
+
+void requireNotShared(jsg::Lock& js, const SubtleCrypto::GenerateKeyAlgorithm& algorithm) {
+  requireNotShared(js, algorithm.publicExponent, "publicExponent");
+}
 }  // namespace
 
 kj::StringPtr CryptoKeyUsageSet::name() const {
@@ -129,6 +174,62 @@ const EVP_MD* lookupSubtleDigestAlgorithm(kj::StringPtr name) {
   return lookupDigestAlgorithm(name).second;
 }
 
+struct XofDigestAlgorithm {
+  const EVP_MD* type;
+  uint32_t outputBytes;
+};
+
+uint32_t normalizeXofInteger(double value, uint32_t maximum, kj::StringPtr field) {
+  auto integer = std::trunc(value);
+  JSG_REQUIRE(std::isfinite(integer) && integer >= 0 && integer <= maximum, TypeError, field,
+      " is outside the supported integer range.");
+  return static_cast<uint32_t>(integer);
+}
+
+kj::Maybe<XofDigestAlgorithm> lookupXofDigestAlgorithm(jsg::Lock& js,
+    kj::StringPtr name,
+    v8::Local<v8::Value> parameters,
+    const jsg::TypeHandler<SubtleCrypto::CShakeParams>& cshakeParamsHandler,
+    const jsg::TypeHandler<SubtleCrypto::TurboShakeParams>& turboShakeParamsHandler) {
+  if (!Worker::Api::current().getFeatureFlags().getWebCryptoModernAlgorithms()) return kj::none;
+
+  if (strcasecmp(name.cStr(), "cSHAKE256") == 0) {
+    auto algorithm = JSG_REQUIRE_NONNULL(cshakeParamsHandler.tryUnwrap(js, parameters), TypeError,
+        "cSHAKE256 requires an algorithm dictionary with outputLength.");
+    auto outputBits = normalizeXofInteger(
+        algorithm.outputLength, std::numeric_limits<uint32_t>::max(), "outputLength");
+    JSG_REQUIRE(outputBits % 8 == 0, DOMNotSupportedError,
+        "cSHAKE256 outputLength must be a multiple of 8 bits.");
+    KJ_IF_SOME(functionName, algorithm.functionName) {
+      JSG_REQUIRE(functionName.getHandle(js).size() == 0, DOMNotSupportedError,
+          "cSHAKE256 only supports an empty functionName.");
+    }
+    KJ_IF_SOME(customization, algorithm.customization) {
+      JSG_REQUIRE(customization.getHandle(js).size() == 0, DOMNotSupportedError,
+          "cSHAKE256 only supports an empty customization.");
+    }
+    return XofDigestAlgorithm{EVP_shake256(), outputBits / 8};
+  }
+
+  if (strcasecmp(name.cStr(), "TurboSHAKE256") == 0) {
+    auto algorithm = JSG_REQUIRE_NONNULL(turboShakeParamsHandler.tryUnwrap(js, parameters),
+        TypeError, "TurboSHAKE256 requires an algorithm dictionary with outputLength.");
+    auto domain =
+        normalizeXofInteger(algorithm.domainSeparation.orDefault(0x1f), 255, "domainSeparation");
+    auto outputBits = normalizeXofInteger(
+        algorithm.outputLength, std::numeric_limits<uint32_t>::max(), "outputLength");
+    JSG_REQUIRE(outputBits > 0 && outputBits % 8 == 0, DOMOperationError,
+        "TurboSHAKE256 outputLength must be a positive multiple of 8 bits.");
+    JSG_REQUIRE(domain >= 1 && domain <= 0x7f, DOMOperationError,
+        "TurboSHAKE256 domainSeparation must be between 1 and 127.");
+    JSG_REQUIRE(
+        domain == 0x1f, DOMNotSupportedError, "TurboSHAKE256 only supports domainSeparation 31.");
+    return XofDigestAlgorithm{EVP_turboshake256(), outputBits / 8};
+  }
+
+  return kj::none;
+}
+
 static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
   static const std::set<CryptoAlgorithm> ALGORITHMS = {
     {"AES-CTR"_kj, &CryptoKey::Impl::importAes, &CryptoKey::Impl::generateAes},
@@ -183,8 +284,8 @@ void requireModernKeyFormat(jsg::Lock& js, kj::StringPtr format) {
 // =======================================================================================
 // Helper functions
 
-// Throws InvalidAccessError if the key is incompatible with the given normalized algorithm name,
-// or if it doesn't support the given usage.
+// Throws NotSupportedError if the requested algorithm name is not a registered algorithm, and
+// InvalidAccessError if the key is incompatible with it or doesn't support the given usage.
 void validateOperation(const CryptoKey& key, kj::StringPtr requestedName, CryptoKeyUsageSet usage) {
   // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError, but
   //   Web IDL says that's deprecated.
@@ -192,6 +293,8 @@ void validateOperation(const CryptoKey& key, kj::StringPtr requestedName, Crypto
   // TODO(cleanup): Make this function go away. Maybe this can be rolled into the default
   //   implementations of the CryptoKey::Impl::<crypto operation>() functions.
 
+  JSG_REQUIRE(lookupAlgorithm(requestedName) != kj::none, DOMNotSupportedError,
+      "Unrecognized or unimplemented algorithm \"", requestedName, "\" requested.");
   JSG_REQUIRE(strcasecmp(requestedName.cStr(), key.getAlgorithmName().cStr()) == 0,
       DOMInvalidAccessError, "Requested algorithm \"", requestedName,
       "\" does not match this CryptoKey's algorithm \"", key.getAlgorithmName(), "\".");
@@ -704,6 +807,8 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::encrypt(jsg::Lock& js
     const CryptoKey& key,
     jsg::JsBufferSource plainText) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
+  requireNotShared(js, plainText, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -719,6 +824,8 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::decrypt(jsg::Lock& js
     const CryptoKey& key,
     jsg::JsBufferSource cipherText) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
+  requireNotShared(js, cipherText, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -734,6 +841,8 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::sign(jsg::Lock& js,
     const CryptoKey& key,
     jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
+  requireNotShared(js, data, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -749,6 +858,9 @@ jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
     jsg::JsBufferSource signature,
     jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
+  requireNotShared(js, signature, "signature");
+  requireNotShared(js, data, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -760,12 +872,33 @@ jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(
-    jsg::Lock& js, kj::OneOf<kj::String, HashAlgorithm> algorithmParam, jsg::JsBufferSource data) {
+    const v8::FunctionCallbackInfo<v8::Value>& args,
+    kj::OneOf<kj::String, HashAlgorithm> algorithmParam,
+    jsg::JsBufferSource data,
+    const jsg::TypeHandler<CShakeParams>& cshakeParamsHandler,
+    const jsg::TypeHandler<TurboShakeParams>& turboShakeParamsHandler) {
+  auto& js = jsg::Lock::from(args.GetIsolate());
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, data, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
+    KJ_IF_SOME(xof,
+        lookupXofDigestAlgorithm(
+            js, algorithm.name, args[0], cshakeParamsHandler, turboShakeParamsHandler)) {
+      auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
+      KJ_ASSERT(digestCtx.get() != nullptr);
+      auto ptr = nonNullBytes(data.asArrayPtr());
+      OSSLCALL(EVP_DigestInit_ex(digestCtx.get(), xof.type, nullptr));
+      OSSLCALL(EVP_DigestUpdate(digestCtx.get(), ptr.begin(), ptr.size()));
+      auto buf = jsg::JsArrayBuffer::create(js, xof.outputBytes);
+      kj::byte emptyOutput = 0;
+      auto output = buf.size() == 0 ? kj::arrayPtr(&emptyOutput, 0) : buf.asArrayPtr();
+      OSSLCALL(EVP_DigestFinalXOF(digestCtx.get(), output.begin(), output.size()));
+      return buf.addRef(js);
+    }
+
     auto type = lookupSubtleDigestAlgorithm(algorithm.name);
 
     auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
@@ -790,6 +923,7 @@ jsg::Promise<kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>> SubtleCrypto::genera
     kj::Array<kj::String> keyUsages) {
 
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -824,6 +958,7 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(jsg::Lock& js,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
   auto derivedKeyAlgorithm = interpretAlgorithmParam(kj::mv(derivedKeyAlgorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
@@ -846,17 +981,15 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(jsg::Lock& js,
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::deriveBits(jsg::Lock& js,
     kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithmParam,
     const CryptoKey& baseKey,
-    jsg::Optional<kj::Maybe<int>> lengthParam) {
+    jsg::Optional<kj::Maybe<uint32_t>> lengthParam) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   kj::Maybe<uint32_t> length = kj::none;
   KJ_IF_SOME(maybeLength, lengthParam) {
-    KJ_IF_SOME(l, maybeLength) {
-      JSG_REQUIRE(l >= 0, TypeError, "deriveBits length must be an unsigned long integer.");
-      length = static_cast<uint32_t>(l);
-    }
+    length = maybeLength;
   }
 
   return js.evalNow([&] {
@@ -877,6 +1010,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::wrapKey(jsg::Lock& js
   return js.evalNow([&] {
     requireModernKeyFormat(js, format);
     auto algorithm = interpretAlgorithmParam(kj::mv(wrapAlgorithm));
+    requireNotShared(js, algorithm);
 
     validateOperation(wrappingKey, algorithm.name, CryptoKeyUsageSet::wrapKey());
 
@@ -885,8 +1019,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::wrapKey(jsg::Lock& js
       size_t minimumLength;
     };
 
-    JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
-        key.getAlgorithmName(), " key.");
+    key.impl->requireExportable();
 
     auto exportedKey = key.impl->exportKey(js, kj::mv(format));
 
@@ -919,7 +1052,9 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js,
   auto operation = __func__;
   return js.evalNow([&]() -> jsg::Ref<CryptoKey> {
     requireModernKeyFormat(js, format);
+    requireNotShared(js, wrappedKey, "wrappedKey");
     auto normalizedAlgorithm = interpretAlgorithmParam(kj::mv(unwrapAlgorithm));
+    requireNotShared(js, normalizedAlgorithm);
     auto normalizedUnwrapAlgorithm = interpretAlgorithmParam(kj::mv(unwrappedKeyAlgorithm));
 
     // Need a copy of the algorithm name to live in this scope, because we later kj::mv() it out.
@@ -962,6 +1097,9 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::importKey(jsg::Lock& js,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  KJ_IF_SOME(bytes, keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>()) {
+    requireNotShared(js, bytes.getHandle(js), "keyData");
+  }
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm, format.asPtr());
 
@@ -1027,10 +1165,7 @@ jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
 
   return js.evalNow([&] {
     requireModernKeyFormat(js, format);
-    // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError,
-    //   but Web IDL says that's deprecated.
-    JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
-        key.getAlgorithmName(), " key.");
+    key.impl->requireExportable();
 
     return key.impl->exportKey(js, format);
   });
@@ -1081,32 +1216,34 @@ jsg::Promise<SubtleCrypto::EncapsulatedKey> SubtleCrypto::encapsulateKey(jsg::Lo
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::decapsulateBits(jsg::Lock& js,
     kj::OneOf<kj::String, ImportKeyAlgorithm> decapsulationAlgorithmParam,
     const CryptoKey& decapsulationKey,
-    kj::Array<const kj::byte> ciphertext) {
+    jsg::JsBufferSource ciphertext) {
   auto algorithm = interpretAlgorithmParam(kj::mv(decapsulationAlgorithmParam));
+  requireNotShared(js, ciphertext, "ciphertext");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
     validateOperation(decapsulationKey, algorithm.name, CryptoKeyUsageSet::decapsulateBits());
-    return decapsulationKey.impl->decapsulate(js, ciphertext).addRef(js);
+    return decapsulationKey.impl->decapsulate(js, nonNullBytes(ciphertext.asArrayPtr())).addRef(js);
   });
 }
 
 jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::decapsulateKey(jsg::Lock& js,
     kj::OneOf<kj::String, ImportKeyAlgorithm> decapsulationAlgorithmParam,
     const CryptoKey& decapsulationKey,
-    kj::Array<const kj::byte> ciphertext,
+    jsg::JsBufferSource ciphertext,
     kj::OneOf<kj::String, ImportKeyAlgorithm> sharedKeyAlgorithmParam,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
   auto algorithm = interpretAlgorithmParam(kj::mv(decapsulationAlgorithmParam));
+  requireNotShared(js, ciphertext, "ciphertext");
   auto sharedKeyAlgorithm = interpretAlgorithmParam(kj::mv(sharedKeyAlgorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
     validateOperation(decapsulationKey, algorithm.name, CryptoKeyUsageSet::decapsulateKey());
-    auto secret = decapsulationKey.impl->decapsulate(js, ciphertext);
+    auto secret = decapsulationKey.impl->decapsulate(js, nonNullBytes(ciphertext.asArrayPtr()));
     auto secretBuffer = jsg::JsUint8Array::create(js, secret.asArrayPtr());
     return importKeySync(js, "raw-secret", jsg::JsBufferSource(secretBuffer).addRef(js),
         kj::mv(sharedKeyAlgorithm), extractable, kj::mv(keyUsages));
@@ -1158,6 +1295,8 @@ bool SubtleCrypto::supports(jsg::Lock& js,
     const jsg::TypeHandler<kj::OneOf<kj::String, EncryptAlgorithm>>& encryptAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, SignAlgorithm>>& signAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, HashAlgorithm>>& digestAlgorithmHandler,
+    const jsg::TypeHandler<CShakeParams>& cshakeParamsHandler,
+    const jsg::TypeHandler<TurboShakeParams>& turboShakeParamsHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, GenerateKeyAlgorithm>>&
         generateKeyAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, DeriveKeyAlgorithm>>& deriveKeyAlgorithmHandler,
@@ -1213,6 +1352,10 @@ bool SubtleCrypto::supports(jsg::Lock& js,
           case SubtleOperation::DIGEST: {
             auto normalizedAlgorithm =
                 normalizeSupportAlgorithm(js, algorithmValue, digestAlgorithmHandler);
+            if (lookupXofDigestAlgorithm(js, normalizedAlgorithm.name, algorithmValue,
+                    cshakeParamsHandler, turboShakeParamsHandler) != kj::none) {
+              return true;
+            }
             KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
               lookupSubtleDigestAlgorithm(normalizedAlgorithm.name);
             })) {

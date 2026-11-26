@@ -5,7 +5,6 @@
 #pragma once
 
 #include "basics.h"
-#include "events.h"
 
 #include <workerd/io/io-gate.h>
 #include <workerd/io/observer.h>
@@ -17,7 +16,6 @@
 #include <kj/refcount.h>
 
 #include <cstdlib>
-#include <list>
 
 namespace workerd {
 class ActorObserver;
@@ -246,7 +244,8 @@ class WebSocket: public EventTarget {
   // so that the websocket can start processing messages once the connection has been established.
   void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs);
 
-  void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message);
+  void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, jsg::Ref<Blob>, kj::String> message);
+
   void close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<jsg::USVString> reason);
 
   // Used to get/set the attachment for hibernation.
@@ -306,6 +305,33 @@ class WebSocket: public EventTarget {
   kj::StringPtr getBinaryType();
   void setBinaryType(kj::String value);
 
+  // The onopen, onmessage, onclose and onerror event handler IDL attributes (see
+  // EventTarget::setEventHandlerAttribute).
+  kj::Maybe<jsg::JsValue> getOnOpen(jsg::Lock& js) {
+    return getEventHandlerAttribute(js, "open"_kj);
+  }
+  void setOnOpen(jsg::Lock& js, EventHandlerValue handler) {
+    setEventHandlerAttribute(js, "open"_kj, kj::mv(handler));
+  }
+  kj::Maybe<jsg::JsValue> getOnMessage(jsg::Lock& js) {
+    return getEventHandlerAttribute(js, "message"_kj);
+  }
+  void setOnMessage(jsg::Lock& js, EventHandlerValue handler) {
+    setEventHandlerAttribute(js, "message"_kj, kj::mv(handler));
+  }
+  kj::Maybe<jsg::JsValue> getOnClose(jsg::Lock& js) {
+    return getEventHandlerAttribute(js, "close"_kj);
+  }
+  void setOnClose(jsg::Lock& js, EventHandlerValue handler) {
+    setEventHandlerAttribute(js, "close"_kj, kj::mv(handler));
+  }
+  kj::Maybe<jsg::JsValue> getOnError(jsg::Lock& js) {
+    return getEventHandlerAttribute(js, "error"_kj);
+  }
+  void setOnError(jsg::Lock& js, EventHandlerValue handler) {
+    setEventHandlerAttribute(js, "error"_kj, kj::mv(handler));
+  }
+
   JSG_RESOURCE_TYPE(WebSocket, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
     JSG_METHOD(accept);
@@ -345,6 +371,10 @@ class WebSocket: public EventTarget {
       JSG_READONLY_INSTANCE_PROPERTY(extensions, getExtensions);
       JSG_INSTANCE_PROPERTY(binaryType, getBinaryType, setBinaryType);
     }
+    JSG_PROTOTYPE_PROPERTY(onopen, getOnOpen, setOnOpen);
+    JSG_PROTOTYPE_PROPERTY(onmessage, getOnMessage, setOnMessage);
+    JSG_PROTOTYPE_PROPERTY(onclose, getOnClose, setOnClose);
+    JSG_PROTOTYPE_PROPERTY(onerror, getOnError, setOnError);
 
     JSG_TS_DEFINE(type WebSocketEventMap = {
       close: CloseEvent;
@@ -355,6 +385,10 @@ class WebSocket: public EventTarget {
     JSG_TS_OVERRIDE(extends EventTarget<WebSocketEventMap> {
       get binaryType(): "blob" | "arraybuffer";
       set binaryType(value: "blob" | "arraybuffer");
+      onopen: ((ev: Event) => any) | null;
+      onmessage: ((ev: MessageEvent) => any) | null;
+      onclose: ((ev: CloseEvent) => any) | null;
+      onerror: ((ev: ErrorEvent) => any) | null;
     });
   }
 

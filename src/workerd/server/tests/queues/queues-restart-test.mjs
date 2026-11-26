@@ -94,7 +94,18 @@ function serve(dir) {
     ],
     { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }
   );
-  const port = new Promise((resolve) => {
+  const exited = new Promise((resolve) =>
+    child.once('exit', (code, signal) => resolve(code ?? signal))
+  );
+  // An exit stop() didn't ask for fails whatever waits on the server at
+  // once, rather than at the test's timeout.
+  let stopping = false;
+  const died = exited.then((how) => {
+    if (!stopping) throw new Error(`workerd exited (${how})`);
+  });
+  died.catch(() => {});
+  const port = new Promise((resolve, reject) => {
+    died.catch(reject);
     let control = '';
     child.stdio[3].setEncoding('utf8').on('data', (d) => {
       control += d;
@@ -127,9 +138,9 @@ function serve(dir) {
   };
   read(child.stdout);
   read(child.stderr);
-  const exited = new Promise((resolve) => child.once('exit', resolve));
   const until = (f, ms) =>
     new Promise((resolve, reject) => {
+      died.catch(reject);
       const timer = setTimeout(() => reject(new Error('timed out')), ms);
       const check = () => {
         if (!f()) return;
@@ -145,7 +156,7 @@ function serve(dir) {
     until,
     get,
     clock,
-    stop: (signal) => (child.kill(signal), exited),
+    stop: (signal) => ((stopping = true), child.kill(signal), exited),
   };
 }
 

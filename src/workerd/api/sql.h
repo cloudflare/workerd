@@ -8,6 +8,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sqlite.h>
 
 namespace workerd::api {
@@ -204,6 +205,8 @@ class SqlStorage::Cursor final: public jsg::Object {
     JSG_METHOD(next);
     JSG_METHOD(toArray);
     JSG_METHOD(one);
+    JSG_METHOD(close);
+    JSG_DISPOSE(close);
 
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);
@@ -211,13 +214,16 @@ class SqlStorage::Cursor final: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsRead, getRowsRead);
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
 
-    JSG_TS_DEFINE(type SqlStorageValue = ArrayBuffer | string | number | null);
+    // Extends `Disposable` because TypeScript before 5.2 has no `Symbol.dispose`.
+    JSG_TS_DEFINE(type SqlStorageValue = ArrayBuffer | string | number | null;
+      interface SqlStorageCursor<T extends Record<string, SqlStorageValue>> extends Disposable {});
     JSG_TS_OVERRIDE(<T extends Record<string, SqlStorageValue>> {
       [Symbol.iterator](): IterableIterator<T>;
       raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
       next(): IteratorResult<T, undefined>;
       toArray(): T[];
       one(): T;
+      close(): void;
       columnNames: string[];
     });
 
@@ -226,12 +232,24 @@ class SqlStorage::Cursor final: public jsg::Object {
     }
   }
 
-  JSG_ITERATOR(RowIterator, rows, jsg::JsObject, jsg::Ref<Cursor>, rowIteratorNext);
-  JSG_ITERATOR(RawIterator, raw, jsg::JsArray, jsg::Ref<Cursor>, rawIteratorNext);
+  // The state of RowIterator and RawIterator.
+  struct IteratorState {
+    jsg::Ref<Cursor> cursor;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      if (util::Autogate::isEnabled(util::AutogateKey::GC_COMPLETE_TRACING)) {
+        visitor.visit(cursor);
+      }
+    }
+  };
+
+  JSG_ITERATOR(RowIterator, rows, jsg::JsObject, IteratorState, rowIteratorNext);
+  JSG_ITERATOR(RawIterator, raw, jsg::JsArray, IteratorState, rawIteratorNext);
 
   RowIterator::Next next(jsg::Lock& js);
   jsg::JsArray toArray(jsg::Lock& js);
   jsg::JsValue one(jsg::Lock& js);
+  void close();
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     if (state != kj::none) {
@@ -303,9 +321,10 @@ class SqlStorage::Cursor final: public jsg::Object {
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<BindingValue> values);
 
-  static kj::Maybe<jsg::JsObject> rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
-  static kj::Maybe<jsg::JsArray> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
-  static kj::Maybe<v8::LocalVector<v8::Value>> iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj);
+  static kj::Maybe<jsg::JsObject> rowIteratorNext(jsg::Lock& js, IteratorState& state);
+  static kj::Maybe<jsg::JsArray> rawIteratorNext(jsg::Lock& js, IteratorState& state);
+  kj::Maybe<jsg::JsObject> nextRow(jsg::Lock& js);
+  kj::Maybe<v8::LocalVector<v8::Value>> iteratorImpl(jsg::Lock& js);
 
   friend class Statement;
 
@@ -371,12 +390,3 @@ struct SqlStorage::IngestResult {
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api
-
-namespace workerd::jsg {
-
-// An exception: a Ref is a GC handle. RowIterator and RawIterator hold their Cursor as a strong Ref
-// that is never visited, so the iterator keeps the Cursor alive until the iterator is destroyed.
-template <>
-inline constexpr bool holdsNoGcHandles<Ref<api::SqlStorage::Cursor>> = true;
-
-}  // namespace workerd::jsg

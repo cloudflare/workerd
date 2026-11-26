@@ -19,6 +19,12 @@ export const navigatorUserAgent = {
   },
 };
 
+export const cacheWithoutEmbedder = {
+  test(_controller, _env, ctx) {
+    strictEqual(ctx.cache, undefined);
+  },
+};
+
 export const timeoutClamping = {
   async test() {
     // p2 should resolve, p1 should never resolve.
@@ -131,9 +137,12 @@ export const mutableGlobals = {
   },
 };
 
-export const datagramRequiresExperimental = {
+export const datagramRequiresUdpIngress = {
   test() {
-    strictEqual(globalThis.Datagram, undefined);
+    strictEqual(
+      typeof globalThis.Datagram,
+      Cloudflare.compatibilityFlags.udp_ingress ? 'function' : 'undefined'
+    );
   },
 };
 
@@ -891,6 +900,14 @@ export const structuredCloneError = {
         return returnVal;
       },
     };
-    globalThis.structuredClone(globalProp);
+    // p2 recurses until the stack runs out, catching the overflow at each level, so it returns
+    // arrays nested about as deep as the stack allows. Cloning them may run out of stack too,
+    // depending on how much stack each level of the serializer takes in this build, and that's a
+    // RangeError rather than a crash.
+    try {
+      globalThis.structuredClone(globalProp);
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+    }
   },
 };

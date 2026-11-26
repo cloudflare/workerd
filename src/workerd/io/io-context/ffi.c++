@@ -6,8 +6,10 @@
 
 #include <workerd/io/io-context/current-with-id.h>
 #include <workerd/io/io-context/ffi.rs.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/inspector.h>
 #include <workerd/rust/jsg/ffi-inl.h>
+#include <workerd/rust/worker/bridge.h>
 
 #include <v8-inspector.h>
 
@@ -18,6 +20,50 @@
 #include <type_traits>
 
 namespace workerd::io_context {
+
+void incoming_request_delivered(IncomingRequest& request,
+    ::rust::Slice<const kj::byte> eventType,
+    ::rust::Slice<const kj::byte> file,
+    ::rust::Slice<const kj::byte> function,
+    uint32_t line,
+    uint32_t column) {
+  // kj::SourceLocation can only be constructed for its caller, so this one is the shim's location
+  // with the Rust caller's fields assigned. Rust passes static CStrs, with their NUL.
+  KJ_REQUIRE(file.size() > 0 && file.back() == '\0', "the file name is not NUL-terminated");
+  KJ_REQUIRE(
+      function.size() > 0 && function.back() == '\0', "the function name is not NUL-terminated");
+  kj::SourceLocation location;
+  location.fileName = reinterpret_cast<const char*>(file.data());
+  location.function = reinterpret_cast<const char*>(function.data());
+  location.lineNumber = line;
+  location.columnNumber = column;
+  request.delivered(kj::str(kj::from<kj_rs::Rust>(eventType).asChars()),
+      DropQueuedCrossContextActions::NO, location);
+}
+
+void incoming_request_set_scheduled_event_info(
+    IncomingRequest& request, kj::Date scheduledTime, ::rust::Slice<const kj::byte> cron) {
+  KJ_IF_SOME(tracer, request.getWorkerTracer()) {
+    double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+    tracer.setEventInfo(request,
+        tracing::ScheduledEventInfo(eventTime, kj::str(kj::from<kj_rs::Rust>(cron).asChars())));
+  }
+}
+
+kj::Promise<::workerd::rust::worker::ScheduledResult> incoming_request_finish_scheduled(
+    kj::Own<IncomingRequest> request) {
+  // kj::evalNow() makes an exception that finishScheduled() throws reject the promise: cxx has no
+  // way to carry a synchronous throw from an async function to Rust.
+  return kj::evalNow([&]() {
+    auto& self = *request;
+    return self.finishScheduled(kj::mv(request));
+  }).then([](WorkerInterface::ScheduledResult result) {
+    return ::workerd::rust::worker::ScheduledResult{
+      .retry = result.retry,
+      .outcome = ::workerd::rust::worker::toRustOutcome(result.outcome),
+    };
+  });
+}
 
 namespace {
 

@@ -4,12 +4,16 @@
 
 #pragma once
 
+#include <workerd/api/cache-context-ref.h>
 #include <workerd/api/http.h>
 #include <workerd/api/worker-rpc.h>
 
 namespace workerd::api {
 
 class CacheContext;
+namespace exportedhandler {
+class ExecutionContext;
+}  // namespace exportedhandler
 
 // Base class for exported RPC services.
 //
@@ -66,7 +70,7 @@ class DurableObjectBase: public jsg::Object {
 class WorkflowEntrypoint: public jsg::Object {
  public:
   static jsg::Ref<WorkflowEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      jsg::Ref<ExecutionContext> ctx,
+      exportedhandler::ExecutionContext ctx,
       jsg::JsObject env);
 
   JSG_RESOURCE_TYPE(WorkflowEntrypoint) {}
@@ -87,7 +91,7 @@ class EntrypointsModule final: public jsg::Object {
   // Returns the current request's CacheContext (ctx.cache), or kj::none if there is no active
   // IoContext or cache is not available. Used by the cloudflare:workers TypeScript wrapper to
   // expose an importable `cache` proxy.
-  jsg::Optional<jsg::Ref<CacheContext>> getCtxCache(jsg::Lock& js);
+  jsg::Optional<CacheContextRef> getCtxCache(jsg::Lock& js);
 
   // Equivalent of ctx.mapVirtualHost() for internal modules, which have no access to ctx. Returns
   // `host:port`. Can be called outside of a request, so bindings can map their host when they are

@@ -17,42 +17,41 @@ static void Test_JSON_ENC(benchmark::State& state) {
   capnp::JsonCodec json;
   // Perform setup here
 
+  // Google Benchmark repeats the loop body until the timing is stable, so one pass per iteration is
+  // enough; under `bazel test` it runs once.
   for (auto _: state) {
-    for (size_t i = 0; i < 10000; i++) {
-      // This code gets timed
-      KJ_EXPECT(json.encode(capnp::VOID) == "null");
-      KJ_EXPECT(json.encode(true) == "true");
-      KJ_EXPECT(json.encode(false) == "false");
-      KJ_EXPECT(json.encode(123) == "123");
-      KJ_EXPECT(json.encode(-5.5) == "-5.5");
-      KJ_EXPECT(json.encode(capnp::Text::Reader("foo")) == "\"foo\"");
-      KJ_EXPECT(json.encode(capnp::Text::Reader("ab\"cd\\ef\x03")) == "\"ab\\\"cd\\\\ef\\u0003\"");
+    // This code gets timed
+    KJ_EXPECT(json.encode(capnp::VOID) == "null");
+    KJ_EXPECT(json.encode(true) == "true");
+    KJ_EXPECT(json.encode(false) == "false");
+    KJ_EXPECT(json.encode(123) == "123");
+    KJ_EXPECT(json.encode(-5.5) == "-5.5");
+    KJ_EXPECT(json.encode(capnp::Text::Reader("foo")) == "\"foo\"");
+    KJ_EXPECT(json.encode(capnp::Text::Reader("ab\"cd\\ef\x03")) == "\"ab\\\"cd\\\\ef\\u0003\"");
 
-      json.setPrettyPrint(false);
-      kj::byte bytes[] = {12, 34, 56};
-      KJ_EXPECT(json.encode(capnp::Data::Reader(bytes, 3)) == "[12,34,56]");
+    json.setPrettyPrint(false);
+    kj::byte bytes[] = {12, 34, 56};
+    KJ_EXPECT(json.encode(capnp::Data::Reader(bytes, 3)) == "[12,34,56]");
 
-      json.setPrettyPrint(true);
-      KJ_EXPECT(json.encode(capnp::Data::Reader(bytes, 3)) == "[12, 34, 56]");
-    }
+    json.setPrettyPrint(true);
+    KJ_EXPECT(json.encode(capnp::Data::Reader(bytes, 3)) == "[12, 34, 56]");
   }
 }
 
 static void Test_JSON_DEC(benchmark::State& state) {
   //Test R2BindingRequest, a more complex example
   capnp::JsonCodec json;
-  capnp::MallocMessageBuilder responseMessage;
   json.handleByAnnotation<workerd::api::public_beta::R2BindingRequest>();
   static constexpr kj::StringPtr dummy =
       "{\"version\":1,\"method\":\"completeMultipartUpload\",\"object\":\"multipart_object_name4\",\"uploadId\":\"uploadId\",\"parts\":[{\"etag\":\"1234\",\"part\":1},{\"etag\":\"56789\",\"part\":2}]}"_kj;
 
   for (auto _: state) {
-    for (size_t i = 0; i < 100000; i++) {
-      auto responseBuilder =
-          responseMessage.initRoot<workerd::api::public_beta::R2BindingRequest>();
-      json.decode(dummy, responseBuilder);
-      benchmark::DoNotOptimize(responseBuilder);
-    }
+    // A new message each time: initRoot() on a reused builder leaves the previous root in its
+    // arena, so the message would grow with every iteration.
+    capnp::MallocMessageBuilder responseMessage;
+    auto responseBuilder = responseMessage.initRoot<workerd::api::public_beta::R2BindingRequest>();
+    json.decode(dummy, responseBuilder);
+    benchmark::DoNotOptimize(responseBuilder);
   }
 }
 

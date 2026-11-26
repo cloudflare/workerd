@@ -48,6 +48,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service as HttpService;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_rs::KjOwn;
@@ -634,12 +635,10 @@ impl BucketRequest {
         }
         Ok(())
     }
-}
 
-#[async_trait::async_trait(?Send)]
-impl HttpService for BucketRequest {
-    async fn request<'a>(
-        &'a mut self,
+    /// Answers a request on the bucket.
+    async fn respond<'a>(
+        &'a self,
         method: Method,
         url: &'a [u8],
         headers: HeadersRef<'a>,
@@ -658,6 +657,20 @@ impl HttpService for BucketRequest {
         };
         self.send(reply, response).await
     }
+}
+
+#[async_trait::async_trait(?Send)]
+impl HttpService for BucketRequest {
+    async fn request<'a>(
+        &'a mut self,
+        method: Method,
+        url: &'a [u8],
+        headers: HeadersRef<'a>,
+        body: Pin<&'a mut AsyncInputStream>,
+        response: ServiceResponse<'a>,
+    ) -> ServiceResult {
+        Ok(self.respond(method, url, headers, body, response).await?)
+    }
 
     async fn connect<'a>(
         &'a mut self,
@@ -666,19 +679,27 @@ impl HttpService for BucketRequest {
         _connection: Pin<&'a mut AsyncIoStream>,
         _response: ConnectResponse<'a>,
         _settings: ConnectSettings<'a>,
-    ) -> Result<()> {
-        Err(unsupported("Bucket services"))
+    ) -> ServiceResult {
+        Err(unsupported("Bucket services").into())
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl Interface for BucketRequest {
-    async fn run_scheduled(&mut self, _time: &SystemTime, _cron: &str) -> Result<ScheduledResult> {
-        Err(unsupported("Bucket services"))
+    async fn run_scheduled(
+        &mut self,
+        _time: &SystemTime,
+        _cron: &str,
+    ) -> worker::Result<ScheduledResult> {
+        Err(unsupported("Bucket services").into())
     }
 
-    async fn run_alarm(&mut self, _time: &SystemTime, _retry_count: u32) -> Result<AlarmResult> {
-        Err(unsupported("Bucket services"))
+    async fn run_alarm(
+        &mut self,
+        _time: &SystemTime,
+        _retry_count: u32,
+    ) -> worker::Result<AlarmResult> {
+        Err(unsupported("Bucket services").into())
     }
 }
 

@@ -98,7 +98,9 @@ v8::Local<v8::Function> AsyncLocalStorage::bind(jsg::Lock& js, v8::Local<v8::Fun
   KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
     return frame.wrap(js, fn, getValidator(js));
   } else {
-    return jsg::AsyncContextFrame::wrapRoot(js, fn);
+    // A request can run in the root frame (see IoContext::makeRequestTraceScope()). As
+    // AsyncLocalStorage.snapshot() does, tie a function bound there to the request that bound it.
+    return jsg::AsyncContextFrame::wrapRoot(js, fn, getValidator(js));
   }
 }
 
@@ -151,7 +153,8 @@ v8::Local<v8::Function> AsyncResource::bind(jsg::Lock& js,
   KJ_IF_SOME(frame, getFrame()) {
     bound = frame.wrap(js, fn, getValidator(originIoContextId), thisArg);
   } else {
-    bound = jsg::AsyncContextFrame::wrapRoot(js, fn, thisArg);
+    // The root frame holds no request's state, so the bound function can run in any request.
+    bound = jsg::AsyncContextFrame::wrapRoot(js, fn, getValidator(kj::none), thisArg);
   }
 
   // Per Node.js documentation (https://nodejs.org/dist/latest-v19.x/docs/api/async_context.html#asyncresourcebindfn-thisarg), the returned function "will have an

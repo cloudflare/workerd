@@ -3,6 +3,7 @@ load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 load("//:build/wd_test.bzl", "wd_test")
 
 # TODO(cleanup): Split up into smaller targets, although this target is already relatively small and
@@ -92,6 +93,7 @@ wd_cc_library(
     # TODO(cleanup): Fix this.
     srcs = [
         "async-trace-promises.c++",
+        "entrypoint-invocation.c++",
         "features.c++",
         "hibernation-manager.c++",
         "io-channels.c++",
@@ -108,6 +110,7 @@ wd_cc_library(
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "async-trace-promises.h",
+        "entrypoint-invocation.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -132,8 +135,7 @@ wd_cc_library(
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:crypto-endianness",
         "//src/workerd/api:data-url",
-        "//src/workerd/api/bench-core",
-        "//src/workerd/api/bench-core:ffi.rs@cxx",
+        "//src/workerd/api:mimetype-js",
         "//src/workerd/api/node:exceptions",
         "//src/workerd/util:abortable",
         "//src/workerd/util:completion-membrane",
@@ -175,6 +177,7 @@ wd_cc_library(
         ":worker-source",
         ":worker-source-stats",
         "//src/rust/cxx-integration",
+        "//src/rust/jsg-cpp:ffi",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:cf-property",
         "//src/workerd/api:deferred-proxy",
@@ -210,10 +213,20 @@ wd_cc_library(
 
 wd_cc_library(
     name = "compatibility-date",
-    srcs = ["compatibility-date.c++"],
+    srcs = [
+        "compatibility-date.c++",
+        # The C++ compiler, used unless the RUST_COMPAT_DATE autogate is on.
+        "compatibility-date-legacy.c++",
+    ],
     hdrs = [
         "compatibility-date.h",
+        "compatibility-date-legacy.h",
         "validation.h",
+    ],
+    implementation_deps = [
+        ":compat-date",
+        ":compat-date/bridge.rs@cxx",
+        "//src/workerd/util:autogate",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -224,6 +237,30 @@ wd_cc_library(
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
     ],
+)
+
+# The Rust compiler behind compatibility-date.h, under the RUST_COMPAT_DATE autogate.
+wd_rust_crate(
+    name = "compat-date",
+    srcs = glob(["compat-date/**/*.rs"]) + [":compat-date/maximum_date.rs"],
+    crate_root = "compat-date/lib.rs",
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "compat-date/bridge.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compatibility-date_capnp_rust",
+        "@crates_vendor//capnp",
+        "@crates_vendor//thiserror",
+    ],
+)
+
+# maximum-compatibility-date.txt as a Rust string literal, which compat-date/compile.rs include!s.
+genrule(
+    name = "compat-date-maximum-date-rs",
+    srcs = [":trimmed-maximum-compatibility-date.txt"],
+    outs = ["compat-date/maximum_date.rs"],
+    cmd = "echo \"\\\"$$(cat $<)\\\"\" > $@",
+    cmd_ps = "'\"' + (Get-Content $< -Raw -Encoding Ascii) + '\"' | Set-Content $@ -Encoding Ascii",
 )
 
 wd_cc_library(
@@ -404,10 +441,11 @@ wd_cc_library(
     name = "async-trace-perfetto",
     srcs = ["async-trace-perfetto.c++"],
     hdrs = ["async-trace-perfetto.h"],
+    implementation_deps = ["//src/workerd/util:perfetto"],
     visibility = ["//visibility:public"],
     deps = [
-        ":async-trace",
-        "//src/workerd/util:perfetto",
+        "//src/rust/async-trace",
+        "@capnp-cpp//src/kj",
     ],
 )
 
@@ -486,6 +524,9 @@ wd_cc_library(
     srcs = ["worker-entrypoint.c++"],
     hdrs = ["worker-entrypoint.h"],
     implementation_deps = [
+        "//src/workerd/io/entrypoint",
+        "//src/workerd/io/entrypoint:ffi",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:strings",
     ],
@@ -513,13 +554,11 @@ wd_cc_library(
     ],
 )
 
+# The WorkerInterface declarations alone. Header-only: the Rust worker crate depends on it, and
+# :worker-interface depends on the crate, so the two cannot be one target.
 wd_cc_library(
-    name = "worker-interface",
-    srcs = ["worker-interface.c++"],
+    name = "worker-interface-hdrs",
     hdrs = ["worker-interface.h"],
-    implementation_deps = [
-        "//src/workerd/util:stream-utils",
-    ],
     visibility = ["//visibility:public"],
     deps = [
         ":bench_capnp",
@@ -529,6 +568,23 @@ wd_cc_library(
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
+    ],
+)
+
+wd_cc_library(
+    name = "worker-interface",
+    srcs = ["worker-interface.c++"],
+    hdrs = ["worker-interface.h"],
+    implementation_deps = [
+        "//src/workerd/util:stream-utils",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":worker-interface-hdrs",
+        "//src/rust/worker",
+        "//src/rust/worker:bridge",
+        "//src/rust/worker:failure.rs@cxx",
+        "//src/workerd/util:autogate",
     ],
 )
 
@@ -714,6 +770,21 @@ kj_test(
     ],
 )
 
+# Checks that the Rust compiler agrees with the C++ one in compatibility-date-legacy.c++.
+# It compiles about 5,400 configurations twice, which takes 10-25 s in a fastbuild and longer in
+# some debug builds, more than the 15 s .bazelrc gives a medium test.
+kj_test(
+    size = "large",
+    src = "compatibility-date-legacy-test.c++",
+    # The test turns RUST_COMPAT_DATE on itself.
+    generate_all_autogates_variant = False,
+    deps = [
+        ":compatibility-date",
+        ":maximum-compatibility-date",
+        "//src/workerd/util:autogate",
+    ],
+)
+
 kj_test(
     src = "features-test.c++",
     deps = [
@@ -785,6 +856,25 @@ wd_test(
     src = "caught-exception-reset-test.wd-test",
     data = ["caught-exception-reset-test.js"],
 )
+
+# These tests assert when full GCs run. --gc-stress forces them, and so does predictable mode,
+# after every request in KJ_DEBUG builds (see maybeAddGcPassForTest). Each test sets the autogates
+# it expects, which are kill switches.
+[wd_test(
+    src = src,
+    data = [
+        "gc-when-idle-test.js",
+        "gc-when-idle-test-target.js",
+    ],
+    generate_all_autogates_variant = False,
+    generate_gc_stress_variant = False,
+    predictable = False,
+) for src in [
+    "gc-when-idle-test.wd-test",
+    "gc-when-idle-disabled-test.wd-test",
+    "gc-when-idle-no-idle-gc-test.wd-test",
+    "gc-when-idle-no-loading-test.wd-test",
+]]
 
 wd_test(
     src = "io-context-test.wd-test",

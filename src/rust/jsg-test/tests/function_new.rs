@@ -15,7 +15,8 @@ use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
-use jsg_macros::jsg_traced;
+
+use crate::DropCounter;
 
 /// Creates a function whose data is `greeting` and stores it as the global `greet`.
 fn install_greet(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, greeting: &str) {
@@ -154,16 +155,6 @@ fn data_of_cpp_wrapped_function_is_not_taken_for_rust_data() {
 // Garbage collection
 // =============================================================================
 
-/// Counts its drops in the counter it points to.
-#[jsg_traced]
-struct DropCounter(&'static AtomicUsize);
-
-impl Drop for DropCounter {
-    fn drop(&mut self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
-    }
-}
-
 static UNREACHABLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
@@ -258,6 +249,11 @@ impl ThrowingCreator {
         let throws: v8::Local<v8::Function> = throws.try_into().unwrap();
         let err = throws.call(lock, None, &[]).unwrap_err();
         assert!(err.is_pending());
+        assert!(
+            v8::Function::from_callback(lock, empty_callback)
+                .unwrap_err()
+                .is_pending()
+        );
         let err = v8::Function::new(lock, (), |lock, (), _args| Ok(lock.undefined())).unwrap_err();
         self.saw_pending.set(err.is_pending());
         Err(err)
@@ -446,4 +442,85 @@ fn data_of_reachable_function_is_dropped_with_its_isolate() {
     drop(harness);
     assert_eq!(TEARDOWN_DATA_DROPS.load(Ordering::SeqCst), 1);
     assert_eq!(TEARDOWN_LEAF_DROPS.load(Ordering::SeqCst), 1);
+}
+
+/// A V8 function callback that does nothing.
+#[expect(
+    unsafe_code,
+    reason = "a V8 function callback, which reads nothing of its arguments"
+)]
+unsafe extern "C" fn empty_callback(_info: *mut v8::ffi::FunctionCallbackInfo) {}
+
+#[test]
+fn function_from_an_extern_callback_returns_undefined() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let empty = v8::Function::from_callback(lock, empty_callback).unwrap();
+        ctx.set_global(lock, "empty", v8::Local::<v8::Value>::from(empty));
+        assert_eq!(
+            ctx.eval::<String>(lock, "String(empty(1, 2))").unwrap(),
+            "undefined"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn function_from_a_closure_callback_gets_its_arguments() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let second = v8::Function::from_callback(
+            lock,
+            jsg::function_callback(|_lock, args| {
+                let value = args.get(1);
+                args.set_return_value(value);
+            }),
+        )
+        .unwrap();
+        ctx.set_global(lock, "second", v8::Local::<v8::Value>::from(second));
+        assert_eq!(
+            ctx.eval::<String>(lock, "second('a', 'b', 'c')").unwrap(),
+            "b"
+        );
+        Ok(())
+    });
+}
+
+/// The function has no signature and an empty name and `length`, and `new` calls it too.
+#[test]
+fn function_from_a_callback_has_the_shape_of_a_plain_v8_function() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let empty = v8::Function::from_callback(lock, empty_callback).unwrap();
+        ctx.set_global(lock, "empty", v8::Local::<v8::Value>::from(empty));
+        let code = "[typeof empty, JSON.stringify(empty.name), empty.length, \
+                    typeof new empty(), String(empty.call(42))].join()";
+        assert_eq!(
+            ctx.eval::<String>(lock, code).unwrap(),
+            "function,\"\",0,object,undefined"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn panic_in_a_from_callback_closure_is_an_internal_error() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let panics = v8::Function::from_callback(
+            lock,
+            jsg::function_callback(|_lock, _args| {
+                panic!("intentional panic in a function callback");
+            }),
+        )
+        .unwrap();
+        ctx.set_global(lock, "panics", v8::Local::<v8::Value>::from(panics));
+        let err = ctx
+            .eval::<bool>(lock, "panics()")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert!(err.message.contains("internal error"), "{}", err.message);
+        assert!(
+            !err.message.contains("intentional panic"),
+            "{}",
+            err.message
+        );
+        Ok(())
+    });
 }

@@ -528,3 +528,27 @@ export const promisifiedTimers = {
     strictEqual(promisify(timers.setImmediate), timersPromises.setImmediate);
   },
 };
+
+export const testInvalidCallback = {
+  test() {
+    class Foo {}
+    const cases = [
+      [undefined, 'undefined'],
+      [null, 'null'],
+      [1, 'type number (1)'],
+      ['x', "type string ('x')"],
+      [{}, 'an instance of Object'],
+      [new Foo(), 'an instance of Foo'],
+      [Object.create(null), '[Object: null prototype] {}'],
+    ];
+    for (const fn of [timers.setTimeout, timers.setInterval]) {
+      for (const [value, received] of cases) {
+        throws(() => fn(value, 1), {
+          name: 'TypeError',
+          code: 'ERR_INVALID_ARG_TYPE',
+          message: `The "callback" argument must be of type function. Received ${received}`,
+        });
+      }
+    }
+  },
+};

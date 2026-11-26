@@ -420,7 +420,27 @@ function referenceEncodeInto(input) {
   return { bytes, ends };
 }
 
-// Every buffer size, across string lengths that are converted in one piece and in several.
+// Buffer sizes to check for an input of `length` code units that encodes to `byteLength` bytes.
+// A bounded conversion converts chunks that shrink with the space left, then finishes the last
+// few code points one at a time, so every size up to 1024 covers each way a chunk can end, and
+// every size near the end covers the last code points. Between those, a stride that is coprime
+// with every UTF-8 sequence length still ends some buffers inside each kind of sequence; checking
+// every size there would make the test quadratic in the input length. The largest two cover both
+// sides of the size above which any input fits.
+function encodeIntoSizes(length, byteLength) {
+  const sizes = new Set();
+  for (let size = 0; size <= byteLength + 2; size++) {
+    if (size <= 1024 || size >= byteLength - 64 || size % 61 === 0) {
+      sizes.add(size);
+    }
+  }
+  sizes.add(length * 3 - 1);
+  sizes.add(length * 3);
+  return [...sizes].sort((a, b) => a - b);
+}
+
+// encodeInto() at the sizes from encodeIntoSizes(), across string lengths that are converted in
+// one chunk and in several.
 export const encodeIntoMatchesTheStandard = {
   test() {
     const enc = new TextEncoder();
@@ -447,11 +467,8 @@ export const encodeIntoMatchesTheStandard = {
       )) {
         const input = pattern.repeat(repeats);
         const { bytes, ends } = referenceEncodeInto(input);
-        const sizes = [];
-        for (let size = 0; size <= bytes.length + 2; size++) sizes.push(size);
-        sizes.push(input.length * 3);
         let fit = 0;
-        for (const size of sizes) {
+        for (const size of encodeIntoSizes(input.length, bytes.length)) {
           while (fit + 1 < ends.length && ends[fit + 1].written <= size) fit++;
           while (ends[fit].written > size) fit--;
           const buffer = new Uint8Array(size + 8).fill(SENTINEL);

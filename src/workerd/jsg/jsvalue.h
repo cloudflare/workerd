@@ -588,6 +588,8 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
   bool isIntegerType() const;
 
   bool isSharedArrayBuffer() const;
+  // True for a SharedArrayBuffer or for a view onto one.
+  bool isBackedBySharedArrayBuffer() const;
   bool isArrayBuffer() const;
   bool isArrayBufferView() const;
   bool isResizable() const;

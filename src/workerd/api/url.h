@@ -183,7 +183,7 @@ class URL: public jsg::Object {
     JSG_METHOD(toString);
     JSG_METHOD(toJSON);
 
-    // Declared in types/defines/url.d.ts, the same at every compatibility date.
+    // Declared in src/per_isolate/url/url.ts, the same at every compatibility date.
     JSG_TS_OVERRIDE(type URL = never);
   }
 
@@ -276,7 +276,7 @@ class URLSearchParams: public jsg::Object {
 
     JSG_METHOD(toString);
 
-    // Declared in types/defines/url.d.ts, the same at every compatibility date.
+    // Declared in src/per_isolate/url/url.ts, the same at every compatibility date.
     JSG_TS_OVERRIDE(type URLSearchParams = never);
   }
 

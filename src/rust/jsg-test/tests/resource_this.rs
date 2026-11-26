@@ -28,12 +28,7 @@ struct Task {
     /// The wrapper of the queue this task is in, which the task keeps as a resource keeps a
     /// callback it registered: through a `TracedGlobal`, so that GC can collect the cycle.
     queue: jsg::Cell<Option<v8::TracedGlobal<v8::Value>>>,
-}
-
-impl Drop for Task {
-    fn drop(&mut self) {
-        TASK_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -44,6 +39,7 @@ impl Task {
             name,
             label: RefCell::new(String::new()),
             queue: jsg::Cell::new(None),
+            drops: crate::DropCounter(&TASK_DROPS),
         }
     }
 
@@ -308,17 +304,19 @@ fn cycle_through_this_and_a_traced_global_is_collected() {
     });
 }
 
-/// Asserts that `code` throws a `TypeError` about an illegal invocation.
+/// Asserts that `code` throws the `TypeError` that C++ JSG throws for an illegal invocation.
 fn assert_illegal_invocation(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str) {
     let err = ctx
         .eval::<String>(lock, code)
         .unwrap_err()
         .unwrap_jsg_err(lock);
     assert_eq!(err.name, ExceptionType::TypeError, "{code}");
-    assert!(
-        err.message.contains("Illegal invocation"),
-        "{code}: {}",
-        err.message
+    assert_eq!(
+        err.message,
+        "Illegal invocation: function called with incorrect `this` reference. See \
+         https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors \
+         for details.",
+        "{code}"
     );
 }
 

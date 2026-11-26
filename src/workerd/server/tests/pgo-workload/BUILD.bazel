@@ -1,0 +1,22 @@
+load("//:build/wd_js_test.bzl", "wd_js_test")
+
+# The serving workload that trains the PGO profile (build/pgo/README.md). Outside training it sends
+# only a few requests, checking that the workload still works.
+wd_js_test(
+    name = "pgo-workload-test",
+    data = [
+        ":config.capnp",
+        ":hello.js",
+        ":hello-async.js",
+        ":mixed.js",
+        ":upstream.js",
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:server-harness_js_lib",
+    ],
+    entry_point = "pgo-workload-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_CONFIG": "$(rootpath :config.capnp)",
+    },
+    tags = ["js-test"],
+)

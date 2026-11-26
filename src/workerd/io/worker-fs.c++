@@ -5,7 +5,7 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/weak-refs.h>
 
-#include <v8-microtask-queue.h>
+#include <kj/encoding.h>
 
 #include <algorithm>
 
@@ -960,8 +960,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(
       jsg::Lock& js, const jsg::Url& url, OpenOptions opts) const override {
 
-    kj::Path root{};
-    auto str = kj::str(url.getPathname().slice(1));
+    auto path = KJ_UNWRAP_OR(fileUrlToPath(url), return FsError::INVALID_PATH);
 
     // We will impose an absolute max number of total file descriptors to
     // max int... in practice, the production system should condemn the
@@ -975,7 +974,6 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     }
 
     auto rootDir = getRoot(js);
-    auto path = root.eval(str);
 
     // open(2) never creates intermediate directories.
     if (path.size() > 0) {
@@ -1392,8 +1390,12 @@ Stat SymbolicLink::stat(jsg::Lock& js) {
 }
 
 jsg::Url SymbolicLink::getTargetUrl() const {
-  auto path = getTargetPath().toString(false);
-  return KJ_ASSERT_NONNULL(jsg::Url::tryParse(path, "file:///"_kj));
+  kj::Vector<kj::String> parts;
+  for (auto& part: getTargetPath()) {
+    parts.add(kj::encodeUriPath(part));
+  }
+  return KJ_ASSERT_NONNULL(
+      jsg::Url::tryParse(kj::str("/", kj::strArray(parts, "/")), "file:///"_kj));
 }
 
 kj::String SymbolicLink::getRawTarget() const {
@@ -1450,6 +1452,45 @@ kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func) {
   return kj::rc<LazyDirectory>(kj::mv(func));
 }
 
+kj::Maybe<kj::String> decodeFileName(kj::ArrayPtr<const char> name) {
+  kj::String str;
+  if (name.findFirst('%') == kj::none) {
+    str = kj::str(name);
+  } else {
+    auto decoded = jsg::Url::percentDecode(name.asBytes());
+    for (auto c: decoded) {
+      if (c == '/' || c == '\0') return kj::none;
+    }
+    str = kj::str(decoded.asChars());
+  }
+  if (str == "."_kj || str == ".."_kj) return kj::none;
+  return kj::mv(str);
+}
+
+kj::Maybe<kj::Path> fileUrlToPath(const jsg::Url& url) {
+  auto pathname = url.getPathname();
+  kj::Vector<kj::String> parts(pathname.size() / 2);
+  size_t start = 0;
+  for (size_t i = 0; i <= pathname.size(); i++) {
+    if (i == pathname.size() || pathname[i] == '/') {
+      if (i > start) {
+        parts.add(KJ_UNWRAP_OR_RETURN(decodeFileName(pathname.slice(start, i)), kj::none));
+      }
+      start = i + 1;
+    }
+  }
+  return kj::Path(parts.releaseAsArray());
+}
+
+kj::String fileUrlToPathString(const jsg::Url& url) {
+  return kj::str(jsg::Url::percentDecode(url.getPathname().asBytes()).asChars());
+}
+
+kj::String encodeFileName(kj::StringPtr name) {
+  // The "./" prefix keeps a name like "a:b" from parsing as a URL with a scheme.
+  return kj::str("./", kj::encodeUriPath(name));
+}
+
 const VirtualFileSystem& VirtualFileSystem::current(jsg::Lock& js) {
   // The VFS is stored in an embedder data slot in the v8::Context associated with
   // the current jsg::Lock. The actual instance is kept alive using a kj::Own held
@@ -1464,13 +1505,13 @@ kj::Maybe<FsNodeWithError> VirtualFileSystem::resolve(
     // We only accept file URLs.
     return kj::none;
   }
-  // We want to strip the leading slash from the path.
-  auto path = kj::str(url.getPathname().slice(1));
-  kj::Path root{};
-  return getRoot(js)->tryOpen(js, root.eval(path),
-      Directory::OpenOptions{
-        .followLinks = options.followLinks,
-      });
+  KJ_IF_SOME(path, fileUrlToPath(url)) {
+    return getRoot(js)->tryOpen(js, path,
+        Directory::OpenOptions{
+          .followLinks = options.followLinks,
+        });
+  }
+  return FsNodeWithError(FsError::INVALID_PATH);
 }
 
 kj::Maybe<kj::OneOf<FsError, Stat>> VirtualFileSystem::resolveStat(
@@ -1479,18 +1520,17 @@ kj::Maybe<kj::OneOf<FsError, Stat>> VirtualFileSystem::resolveStat(
     // We only accept file URLs.
     return kj::none;
   }
-  // We want to strip the leading slash from the path.
-  auto path = kj::str(url.getPathname().slice(1));
-  kj::Path root{};
-  return getRoot(js)->stat(js, root.eval(path));
+  KJ_IF_SOME(path, fileUrlToPath(url)) {
+    return getRoot(js)->stat(js, path);
+  }
+  return kj::OneOf<FsError, Stat>(FsError::INVALID_PATH);
 }
 
 kj::Rc<SymbolicLink> VirtualFileSystem::newSymbolicLink(
     jsg::Lock& js, const jsg::Url& url, kj::Maybe<kj::String> rawTarget) const {
   KJ_REQUIRE(url.getProtocol() == "file:"_kj);
-  auto path = kj::str(url.getPathname().slice(1));
-  kj::Path root{};
-  return kj::rc<SymbolicLink>(getRoot(js), root.eval(path), kj::mv(rawTarget));
+  auto path = KJ_REQUIRE_NONNULL(fileUrlToPath(url), "invalid symbolic link target");
+  return kj::rc<SymbolicLink>(getRoot(js), kj::mv(path), kj::mv(rawTarget));
 }
 
 SymbolicLinkRecursionGuardScope::SymbolicLinkRecursionGuardScope() {
@@ -1825,60 +1865,12 @@ class DevRandomFile final: public File {
   mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
-// Write stdio via console.log. Somewhat convoluted, but this then supports:
-// - inspector reporting
-// - structured logging
-// - stdio output otherwise
-//
-// SECURITY: The `bytes` parameter may alias mutable state (e.g. StdioFile::lineBuffer's
-// heap backing store). We MUST copy the bytes into an owned kj::String before any JS
-// property access, because property getters on globalThis.console / console.log can run
-// arbitrary user code that may re-enter StdioFile::write and invalidate the buffer.
-void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const kj::byte> bytes) {
-  auto chars = bytes.asChars();
-  size_t endPos = chars.size();
-  if (endPos > 0 && chars[endPos - 1] == '\n') endPos--;
-
-  // Own the line text up-front so that `bytes`/`chars` are no longer used after this point.
-  // This prevents use-after-free if a JS getter re-enters and reallocates the caller's buffer.
-  kj::String line = kj::str(chars.first(endPos));
-
-  KJ_IF_SOME(console, js.global().get(js, "console"_kj).tryCast<jsg::JsObject>()) {
-    auto method = console.get(js, "log"_kj);
-    if (method.isFunction()) {
-      v8::Local<v8::Value> methodVal(method);
-      auto methodFunc = jsg::JsFunction(methodVal.As<v8::Function>());
-
-      auto isolate = &Worker::Isolate::from(js);
-      auto prefix = type == VirtualFileSystem::Stdio::OUT ? isolate->getStdoutPrefix()
-                                                          : isolate->getStderrPrefix();
-      if (line.size() == 0) {
-        methodFunc.call(js, console, js.str(prefix));
-      } else if (prefix.size() > 0) {
-        methodFunc.call(js, console, js.str(kj::str(prefix, " "_kj, line)));
-      } else {
-        methodFunc.call(js, console, js.str(line));
-      }
-      return;
-    }
-  }
-  KJ_LOG(WARNING, "No console.log implementation available for stdio logging");
-}
-
 // An StdioFile is a special file implementation used to represent stdin,
-// stdout, and stderr outputs. Writes are always forwarded to the underlying
-// logging mechanisms. Reads always return EOF (0-byte reads).
+// stdout, and stderr. node:fs sends writes to them to internal_fs_stdio.ts,
+// which line-buffers and logs them, so writes here are discarded. Reads
+// always return EOF (0-byte reads).
 class StdioFile final: public File {
  public:
-  StdioFile(VirtualFileSystem::Stdio type)
-      : type(type),
-        // TODO(sometime): Investigate if we can refactor out the weakref here?
-        weakThis(kj::rc<WeakRef<StdioFile>>(kj::Badge<StdioFile>(), *this)) {}
-
-  ~StdioFile() noexcept(false) override {
-    weakThis->invalidate();
-  }
-
   Stat stat(jsg::Lock& js) override {
     return Stat{
       .type = FsType::FILE,
@@ -1921,78 +1913,7 @@ class StdioFile final: public File {
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {}
 
   kj::OneOf<FsError, uint32_t> write(
-      jsg::Lock& js, uint32_t, kj::ArrayPtr<const kj::byte> buffer) override {
-    if (buffer.size() > MAX_WRITE_SIZE) {
-      buffer = buffer.first(MAX_WRITE_SIZE);
-    }
-
-    if (buffer.size() == 0) return static_cast<uint32_t>(0);
-
-    // We ignore the offset here. All writes are assumed to be appends.
-    if (type != VirtualFileSystem::Stdio::IN) {
-      // SECURITY: writeStdio() calls console.log, which can run user code that detaches,
-      // transfers or shrinks the ArrayBuffer behind `buffer`. Copy the bytes first so that
-      // the loop below never reads the caller's memory after JavaScript has run.
-      auto ownedBuffer = kj::heapArray(buffer);
-      buffer = ownedBuffer;
-
-      size_t pos = 0;
-
-      // Newline-based buffering
-      while (pos < buffer.size()) {
-        size_t newlinePos = pos;
-        while (newlinePos < buffer.size() && buffer[newlinePos] != '\n') {
-          newlinePos++;
-        }
-
-        if (newlinePos < buffer.size()) {
-          auto lineData = buffer.slice(pos, newlinePos + 1);
-
-          if (!lineBuffer.empty()) {
-            // We have buffered data - append the line data to it.
-            // SECURITY: Move lineBuffer into a local before calling writeStdio so that
-            // re-entrant writes (via JS getters on console/console.log) operate on a
-            // fresh buffer and cannot free the backing store we pass to writeStdio.
-            lineBuffer.addAll(lineData);
-            auto toFlush = kj::mv(lineBuffer);
-            lineBuffer = kj::Vector<kj::byte>();
-            writeStdio(js, type, toFlush.asPtr());
-          } else {
-            // No buffered data - log this line directly
-            writeStdio(js, type, lineData);
-          }
-
-          pos = newlinePos + 1;
-        } else {
-          // No newlines -> append to line buffer
-          auto remaining = buffer.slice(pos);
-          auto totalSize = lineBuffer.size() + remaining.size();
-
-          if (totalSize <= MAX_LINE_BUFFER_SIZE) {
-            lineBuffer.addAll(remaining);
-          } else {
-            // New data alone exceeds limit, replace entire line buffer
-            if (remaining.size() >= MAX_LINE_BUFFER_SIZE) {
-              lineBuffer.clear();
-              lineBuffer.addAll(remaining.slice(remaining.size() - MAX_LINE_BUFFER_SIZE));
-            } else {
-              // Combined size exceeds limit, remove oldest data
-              auto toRemove = totalSize - MAX_LINE_BUFFER_SIZE;
-              kj::Vector<kj::byte> newBuffer(MAX_LINE_BUFFER_SIZE);
-              newBuffer.addAll(lineBuffer.slice(toRemove, lineBuffer.size()));
-              newBuffer.addAll(remaining);
-              lineBuffer = kj::mv(newBuffer);
-            }
-          }
-
-          // Schedule a microtask to flush the lineBuffer
-          // this way synchronous writes join the line, but async writes will be on a new line
-          scheduleFlushMicrotask(js);
-
-          break;
-        }
-      }
-    }
+      jsg::Lock&, uint32_t, kj::ArrayPtr<const kj::byte> buffer) override {
     return static_cast<uint32_t>(buffer.size());
   }
 
@@ -2012,39 +1933,7 @@ class StdioFile final: public File {
   }
 
  private:
-  VirtualFileSystem::Stdio type;
   mutable kj::Maybe<kj::String> maybeUniqueId;
-
-  static constexpr size_t MAX_LINE_BUFFER_SIZE = 4096;
-  static constexpr size_t MAX_WRITE_SIZE = 16 * 1024;
-  mutable kj::Vector<kj::byte> lineBuffer;
-  mutable bool microtaskScheduled = false;
-
-  kj::Rc<WeakRef<StdioFile>> weakThis;
-
-  void scheduleFlushMicrotask(jsg::Lock& js) {
-    if (microtaskScheduled) return;
-    microtaskScheduled = true;
-
-    // Create ephemeral callback with weak reference for safety
-    auto callback = js.wrapSimpleFunction(js.v8Context(),
-        [weakThis = weakThis->addRef()](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) {
-      weakThis->runIfAlive([&](StdioFile& self) {
-        self.microtaskScheduled = false;
-
-        if (!self.lineBuffer.empty()) {
-          // SECURITY: Move lineBuffer into a local before calling writeStdio so that
-          // re-entrant writes cannot free the backing store during the call.
-          auto toFlush = kj::mv(self.lineBuffer);
-          self.lineBuffer = kj::Vector<kj::byte>();
-          if (IoContext::hasCurrent()) {
-            writeStdio(js, self.type, toFlush.asPtr());
-          }
-        }
-      });
-    }, jsg::Once::YES);
-    js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, callback);
-  }
 };
 
 }  // namespace
@@ -2080,7 +1969,7 @@ kj::Rc<VirtualFileSystem::OpenedFile> VirtualFileSystemImpl::getStdio(
   KJ_IF_SOME(existing, openedFiles.find(n)) {
     return existing.addRef();
   }
-  auto stdioFile = kj::rc<StdioFile>(stdio);
+  auto stdioFile = kj::rc<StdioFile>();
   kj::Rc<workerd::File> file = kj::mv(stdioFile);
   auto opened = kj::rc<VirtualFileSystem::OpenedFile>(n, true, true, true, kj::mv(file));
   openedFiles.insert(n, opened.addRef());

@@ -8,9 +8,8 @@
 #include <workerd/rust/jsg/ffi.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
-#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
-#include <v8.h>
+#include <v8-isolate.h>
 
 #include <kj/function.h>
 #include <kj/memory.h>
@@ -126,6 +125,9 @@ void fail_with_kj_exception(::rust::Str description);
 // v8::HeapStatistics::used_global_handles_size() of the isolate.
 size_t used_global_handles_size(Isolate* isolate);
 
+// v8::HandleScope::NumberOfHandles() of the isolate.
+int number_of_handles(Isolate* isolate);
+
 // The external memory that embedders have attributed to the isolate: the total V8 keeps of
 // AdjustAmountOfExternalAllocatedMemory() calls, which v8::HeapStatistics does not report.
 int64_t external_memory(Isolate* isolate);
@@ -184,21 +186,6 @@ void set_allow_eval(Isolate* isolate, bool allow);
 // compiled module to does. Throws a KJ exception if V8 creates none.
 ::workerd::rust::jsg::Local wasm_module_object_from_compiled_module(
     Isolate* isolate, kj::Own<::workerd::rust::jsg::CompiledWasmModule> module);
-
-// Gives `object` `name` and `message` under jsg::ERROR_NAME_KEY and jsg::ERROR_MESSAGE_KEY, as an
-// error implemented in the per-isolate bootstrap holds them. Throws a KJ exception if it is not
-// an object.
-void set_error_slots(
-    Isolate* isolate, ::workerd::rust::jsg::Local object, ::rust::Str name, ::rust::Str message);
-
-// Creates an instance of the per-isolate bootstrap's DOMException, as
-// jsg::newBootstrapDomException() does, whose prototype is `prototype`, with `name`, `message` and
-// `stack`. Throws a KJ exception if `prototype` is not an object.
-::workerd::rust::jsg::Local new_bootstrap_dom_exception(Isolate* isolate,
-    ::workerd::rust::jsg::Local prototype,
-    ::rust::Str name,
-    ::rust::Str message,
-    ::rust::Str stack);
 
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);

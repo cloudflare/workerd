@@ -469,7 +469,7 @@ kj::String JsDate::toISOString(jsg::Lock& js) const {
 }
 
 JsDate::operator kj::Date() const {
-  return kj::UNIX_EPOCH + (int64_t(inner->ValueOf()) * kj::MILLISECONDS);
+  return kj::UNIX_EPOCH + (static_cast<int64_t>(inner->ValueOf()) * kj::MILLISECONDS);
 }
 
 JsRegExp Lock::regexp(kj::StringPtr str, RegExpFlags flags, kj::Maybe<uint32_t> backtrackLimit) {
@@ -750,7 +750,7 @@ kj::ArrayPtr<const kj::byte> JsArrayBuffer::asArrayPtr() const {
 JsArrayBuffer JsArrayBuffer::slice(Lock& js, size_t newLength) const {
   JSG_REQUIRE(newLength <= size(), RangeError, "New length exceeds buffer length");
   auto dest = create(js, newLength);
-  dest.asArrayPtr().copyFrom(asArrayPtr().slice(0, newLength));
+  dest.asArrayPtr().copyFrom(asArrayPtr().first(newLength));
   return dest;
 }
 
@@ -940,7 +940,7 @@ kj::ArrayPtr<const kj::byte> JsSharedArrayBuffer::asArrayPtr() const {
 JsSharedArrayBuffer JsSharedArrayBuffer::slice(Lock& js, size_t newLength) const {
   JSG_REQUIRE(newLength <= size(), RangeError, "New length exceeds buffer length");
   auto dest = create(js, newLength);
-  dest.asArrayPtr().copyFrom(asArrayPtr().slice(0, newLength));
+  dest.asArrayPtr().copyFrom(asArrayPtr().first(newLength));
   return dest;
 }
 
@@ -1393,6 +1393,20 @@ bool JsBufferSource::isIntegerType() const {
 bool JsBufferSource::isSharedArrayBuffer() const {
   v8::Local<v8::Value> inner = *this;
   return inner->IsSharedArrayBuffer();
+}
+
+bool JsBufferSource::isBackedBySharedArrayBuffer() const {
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsSharedArrayBuffer()) return true;
+  if (!inner->IsArrayBufferView()) return false;
+  auto view = inner.As<v8::ArrayBufferView>();
+  // A view with no buffer allocated yet keeps its bytes on the V8 heap, so it isn't shared.
+  if (!view->HasBuffer()) return false;
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+  return view->GetBuffer()->IsSharedArrayBuffer();
+#else
+  return view->Buffer()->IsSharedArrayBuffer();
+#endif
 }
 
 bool JsBufferSource::isArrayBuffer() const {

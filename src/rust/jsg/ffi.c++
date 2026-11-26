@@ -648,24 +648,33 @@ MaybeLocal local_function_call(
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
   auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
-
-  v8::LocalVector<v8::Value> v8Args(isolate, args.size());
-  for (size_t i = 0; i < args.size(); i++) {
-    v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
-  }
+  // A Local has the layout of a v8::Local (see ffi-inl.h), so the arguments pass as they are,
+  // without a copy. V8 takes them as non-const but only reads them.
+  KJ_REQUIRE(args.size() <= INT_MAX, "too many arguments for a JavaScript call", args.size());
+  auto* v8Args = const_cast<v8::Local<v8::Value>*>(
+      args.empty() ? nullptr : &local_as_ref_from_ffi<v8::Value>(args[0]));
 
   // No TryCatch: what the function throws stays pending and propagates once the Rust caller
   // returns to JavaScript, as with C++ JSG. V8 then still reports it where it was thrown, and
   // predicts whether JavaScript catches it (which DevTools' "pause on uncaught exceptions" uses)
   // by walking the whole stack.
-  return maybe_local_to_ffi(fn->Call(context, receiver, v8Args.size(), v8Args.data()));
+  return maybe_local_to_ffi(fn->Call(context, receiver, static_cast<int>(args.size()), v8Args));
 }
 
-MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
+static_assert(static_cast<int>(ConstructorBehavior::Throw) ==
+    static_cast<int>(v8::ConstructorBehavior::kThrow));
+static_assert(static_cast<int>(ConstructorBehavior::Allow) ==
+    static_cast<int>(v8::ConstructorBehavior::kAllow));
+
+MaybeLocal function_new(
+    Isolate* isolate, size_t callback, const Local& data, ConstructorBehavior behavior) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  // The callback ends up in the heap as the function's C++ callback; a startup snapshot can only
+  // serialize it if it is in the isolate's external-reference table.
+  workerd::jsg::isolateRegisterExternalReference(isolate, static_cast<intptr_t>(callback));
   return maybe_local_to_ffi(v8::Function::New(isolate->GetCurrentContext(),
       reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
-      local_as_ref_from_ffi<v8::Value>(data)));
+      local_as_ref_from_ffi<v8::Value>(data), 0, static_cast<v8::ConstructorBehavior>(behavior)));
 }
 
 // Local<Object>
@@ -730,6 +739,19 @@ bool local_object_set_property_by_global_name(
       ->Set(context, global_as_ref_from_ffi<v8::Name>(name).Get(isolate),
           local_from_ffi<v8::Value>(kj::mv(value)))
       .IsJust();
+}
+
+kj::Maybe<bool> local_object_set_prototype(Isolate* isolate, const Local& object, Local prototype) {
+  if (exceptionPending(isolate)) return kj::none;
+  if (local_as_ref_from_ffi<v8::Object>(object)
+          ->SetPrototype(isolate->GetCurrentContext(), local_from_ffi<v8::Value>(kj::mv(prototype)))
+          .IsJust()) {
+    return true;
+  }
+  // V8 reports a refused change as Nothing without an exception, and swallows a Proxy trap's
+  // exception, so Nothing with no exception pending means the object refused the change.
+  if (exceptionPending(isolate)) return kj::none;
+  return false;
 }
 
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has) {
@@ -819,6 +841,20 @@ MaybeLocal local_promise_then_or_catch(
   return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(
       isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_fulfilled),
       local_as_ref_from_ffi<v8::Function>(on_rejected)));
+}
+
+MaybeLocal local_promise_then_callback(
+    Isolate* isolate, const Local& promise, size_t callback, const Local& data) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  auto context = isolate->GetCurrentContext();
+  v8::Local<v8::Function> function;
+  if (!v8::Function::New(context,
+          reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
+          local_as_ref_from_ffi<v8::Value>(data), 0, v8::ConstructorBehavior::kThrow)
+           .ToLocal(&function)) {
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  }
+  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(context, function));
 }
 
 // Local<PromiseResolver>
@@ -1053,11 +1089,9 @@ MaybeLocal wrappable_get_wrapper(Isolate* isolate, Wrappable& wrappable, bool& w
   return MaybeLocal{.ptr = 0};
 }
 
-MaybeLocal wrap_resource(
-    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
-  auto existing = wrappable_get_wrapper(isolate, *wrappable, wrappedElsewhere);
-  if (existing.ptr != 0 || wrappedElsewhere || exceptionPending(isolate)) {
-    return existing;
+MaybeLocal wrap_resource(Isolate* isolate, Wrappable& wrappable, const Global& tmpl) {
+  if (exceptionPending(isolate)) {
+    return MaybeLocal{.ptr = 0};
   }
 
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
@@ -1070,7 +1104,7 @@ MaybeLocal wrap_resource(
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
   // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
-  wrappable->attachWrapper(isolate, object, true,
+  wrappable.attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
@@ -1343,8 +1377,7 @@ kj::Rc<Wrappable> wrappable_new(size_t size, size_t align, uintptr_t& storage) {
 }
 
 void wrappable_init(Wrappable& wrappable, TraitObjectPtr ptr) {
-  wrappable.trait_object = kj::mv(ptr);
-  wrappable.addStrongRef();
+  wrappable.init(ptr);
 }
 
 void wrappable_init_unreferenced(Wrappable& wrappable, TraitObjectPtr ptr) {
@@ -2051,10 +2084,7 @@ void function_template_set_nested_type(
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
-  auto* realm =
-      static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
-  KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
-  return realm;
+  return static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
 }
 
 namespace {
@@ -2207,7 +2237,7 @@ bool dom_exception_try_unwrap(Isolate* isolate,
     bool& isDomException,
     ::rust::String& name,
     ::rust::String& message) {
-  // Recognizing the bootstrap's DOMException reads private symbols, which passes the context.
+  // Recognizing the C++ class's DOMException passes the context to V8.
   if (exceptionPending(isolate)) return false;
   KJ_IF_SOME(exception,
       ::workerd::jsg::tryGetDOMExceptionNameAndMessage(
@@ -2312,6 +2342,22 @@ void isolate_try_catch(
   if (callback(data)) {
     catch_exception(tryCatch, exception);
   }
+}
+
+// HandleScope
+void isolate_handle_scope(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
+  v8::HandleScope scope(isolate);
+  callback(data);
+}
+
+void isolate_escapable_handle_scope(
+    Isolate* isolate, size_t data, ::rust::Fn<void(size_t, EscapableHandleScope&)> callback) {
+  v8::EscapableHandleScope scope(isolate);
+  callback(data, scope);
+}
+
+Local escapable_handle_scope_escape(EscapableHandleScope& scope, Local value) {
+  return to_ffi(scope.Escape(local_from_ffi<v8::Value>(kj::mv(value))));
 }
 
 // Isolate

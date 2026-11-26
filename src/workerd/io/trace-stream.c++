@@ -169,6 +169,30 @@ jsg::JsValue ToJs(jsg::Lock& js, const Attribute::Value& value) {
     KJ_CASE_ONEOF(i, int64_t) {
       return js.bigInt(i);
     }
+    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+      return js.arr(arr.asPtr(), [](jsg::Lock& js, const auto& str) -> jsg::JsValue {
+        KJ_IF_SOME(value, str) {
+          return js.str(value);
+        }
+        return js.null();
+      });
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+      return js.arr(arr.asPtr(), [](jsg::Lock& js, const auto& b) -> jsg::JsValue {
+        KJ_IF_SOME(value, b) {
+          return js.boolean(value);
+        }
+        return js.null();
+      });
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+      return js.arr(arr.asPtr(), [](jsg::Lock& js, const auto& d) -> jsg::JsValue {
+        KJ_IF_SOME(value, d) {
+          return js.num(value);
+        }
+        return js.null();
+      });
+    }
   }
   KJ_UNREACHABLE;
 }
@@ -943,9 +967,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
     // Invoke the tailStream handler function.
     v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
     kj::Maybe<v8::Local<v8::Object>> maybeCtx;
-    KJ_IF_SOME(hCtx, handler->getCtx()) {
-      maybeCtx = v8::Local<v8::Object>(
-          lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, kj::mv(hCtx)));
+    KJ_IF_SOME(hCtx, handler->ctx) {
+      maybeCtx = v8::Local<v8::Object>(hCtx.getHandle(js));
     }
     v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, maybeCtx != kj::none ? 3 : 2);
     handlerArgs[0] = ToJs(js, event, stringCache);

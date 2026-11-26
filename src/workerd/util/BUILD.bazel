@@ -2,6 +2,7 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 bool_flag(
     name = "use_perfetto",
@@ -197,9 +198,19 @@ wd_cc_library(
 
 wd_cc_library(
     name = "mimetype",
-    srcs = ["mimetype.c++"],
-    hdrs = ["mimetype.h"],
+    srcs = [
+        "mimetype.c++",
+        # The C++ parser and serializer, used unless the RUST_MIMETYPE autogate is on.
+        "mimetype-legacy.c++",
+    ],
+    hdrs = [
+        "mimetype.h",
+        "mimetype-legacy.h",
+    ],
     implementation_deps = [
+        ":autogate",
+        ":mimetype-rs",
+        ":mimetype/ffi.rs@cxx",
         ":string-buffer",
     ],
     visibility = ["//visibility:public"],
@@ -209,6 +220,22 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
     ],
+)
+
+# The Rust parser and serializer behind mimetype.h, under the RUST_MIMETYPE autogate.
+wd_rust_crate(
+    name = "mimetype-rs",
+    srcs = glob(["mimetype/**/*.rs"]),
+    crate_root = "mimetype/lib.rs",
+    cxx_bridge_deps = [
+        ":strings",
+        "@capnp-cpp//src/kj",
+    ],
+    cxx_bridge_hdrs = ["mimetype/ffi.h"],
+    cxx_bridge_src = "mimetype/ffi.rs",
+    # api/mimetype-js.c++ calls the bridge directly for the TypeScript implementations.
+    cxx_bridge_visibility = ["//src/workerd/api:__pkg__"],
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_library(
@@ -469,6 +496,16 @@ kj_test(
 kj_test(
     src = "mimetype-test.c++",
     deps = [
+        ":mimetype",
+    ],
+)
+
+# Checks that the Rust parser and serializer agree with the C++ ones in mimetype-legacy.c++.
+kj_test(
+    size = "large",
+    src = "mimetype-legacy-test.c++",
+    deps = [
+        ":autogate",
         ":mimetype",
     ],
 )

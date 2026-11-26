@@ -6,7 +6,7 @@
 // one.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
+import { usingV8Impl } from 'which-impl';
 import { attributesOf } from 'helpers';
 
 function throwOne() {
@@ -53,7 +53,7 @@ export const subclassFrames = {
     // Ledger #9: V8 leaves out the subclass constructor's frame, as for
     // subclasses of Error.
     const firstFrame = lines[1].trim();
-    if (usingTsImpl) {
+    if (usingV8Impl) {
       strictEqual(firstFrame.startsWith('at make '), true, firstFrame);
     } else {
       strictEqual(firstFrame.startsWith('at new Sub '), true, firstFrame);
@@ -67,7 +67,7 @@ export const stackProperty = {
     // Ledger #2: an own accessor, enumerable only in the C++.
     strictEqual(
       attributesOf(error, 'stack'),
-      usingTsImpl ? 'accessorc' : 'accessorec'
+      usingV8Impl ? 'accessorc' : 'accessorec'
     );
     error.stack = 'replaced';
     strictEqual(error.stack, 'replaced');

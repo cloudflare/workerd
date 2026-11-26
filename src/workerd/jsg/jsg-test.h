@@ -8,6 +8,8 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/resource.h>
 #include <workerd/jsg/setup.h>
+// False negative
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/jsg/type-wrapper.h>
 
 #include <kj/test.h>

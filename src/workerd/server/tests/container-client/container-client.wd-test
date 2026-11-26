@@ -63,6 +63,9 @@ const unitTests :Workerd.Config = (
           ( name = "MY_NAMED_IMAGES_ONLY_CONTAINER", durableObjectNamespace = "NamedImagesOnlyDurableObject" ),
           ( name = "MY_EMPTY_CONTAINER", durableObjectNamespace = "EmptyContainerDurableObject" ),
           ( name = "MY_DIFFERENT_DEFAULT_CONTAINER", durableObjectNamespace = "SnapshotRestoreWithDifferentDefaultDurableObject" ),
+          # Which of the cases to run, when Bazel shards the test (see the end of test.js).
+          ( name = "TEST_TOTAL_SHARDS", fromEnvironment = "TEST_TOTAL_SHARDS" ),
+          ( name = "TEST_SHARD_INDEX", fromEnvironment = "TEST_SHARD_INDEX" ),
         ],
       )
     ),

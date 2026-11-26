@@ -1189,9 +1189,18 @@ impl ChannelFactory {
     }
 }
 
+/// See `bench_clock_now` in bridge.rs.
+pub fn bench_clock_now() -> ffi::StartupPhaseTiming {
+    let now = bench_core::clock::now();
+    ffi::StartupPhaseTiming {
+        wall_ns: now.wall_ns,
+        cpu_ns: now.cpu_ns,
+    }
+}
+
 /// The timing of a start, as the factory measured it.
 fn startup_timing(timing: ffi::WorkerStartupTiming) -> bench_core::startup::StartupTiming {
-    let phase = |phase: ffi::StartupPhaseTiming| bench_core::startup::Timing {
+    let phase = |phase: ffi::StartupPhaseTiming| bench_core::Timing {
         wall_ns: phase.wall_ns,
         cpu_ns: phase.cpu_ns,
     };

@@ -907,7 +907,7 @@ class Request final: public Body {
 
   jsg::Ref<Request> clone(jsg::Lock& js);
 
-  kj::StringPtr getMethod();
+  kj::ArrayPtr<const char> getMethod();
   kj::StringPtr getUrl();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
   kj::StringPtr getRedirect();
