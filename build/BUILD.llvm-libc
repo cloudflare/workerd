@@ -19,5 +19,7 @@ cc_library(
         "include/llvm-libc-macros/**/*.h",
         "include/llvm-libc-types/**/*.h",
         "src/__support/**/*.h",
+        # Included by src/__support/FPUtil/aarch64/fenv_darwin_impl.h.
+        "src/string/memory_utils/**/*.h",
     ]),
 )
