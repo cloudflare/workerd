@@ -421,6 +421,37 @@ kj::Array<kj::byte> encode(kj::ArrayPtr<const kj::byte> bytes, StreamEncoding en
   return kj::heapArray(output.getArray());
 }
 
+KJ_TEST("Native pump that decodes corrupt data reports a user-facing error") {
+  TestFixture fixture;
+  struct Case {
+    StreamEncoding encoding;
+    kj::StringPtr expected;
+  };
+  for (auto c: {Case{StreamEncoding::GZIP, "jsg.TypeError: Gzip decompression failed."_kj},
+         Case{StreamEncoding::BROTLI, "jsg.TypeError: Brotli decompression failed."_kj}}) {
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      // Plain text labeled as compressed, as when an origin mislabels its Content-Encoding.
+      auto bytes = "This is plain text, not compressed data. It goes on for a little while so "
+                   "that the decoder reads far enough to reject it."_kjb;
+      auto source = newSystemStream(kj::heap<BufferedInput>(bytes), c.encoding, env.context);
+      kj::Vector<kj::byte> output;
+      // An identity sink, so the pump has to decode the source.
+      auto sink = newSystemStream(
+          kj::heap<CollectingAsyncOutputStream>(output), StreamEncoding::IDENTITY, env.context);
+
+      kj::Maybe<kj::Exception> failure;
+      try {
+        auto proxy = co_await source->pumpTo(sink->getPtr(), true);
+        co_await proxy.proxyTask;
+      } catch (...) {
+        failure = kj::getCaughtExceptionAsKj();
+      }
+      auto& exception = KJ_ASSERT_NONNULL(failure);
+      KJ_EXPECT(exception.getDescription() == c.expected, exception);
+    });
+  }
+}
+
 KJ_TEST("System stream identity length tracks decoded reads and independent tee branches") {
   TestFixture fixture;
   for (auto encoding: {StreamEncoding::IDENTITY, StreamEncoding::GZIP, StreamEncoding::BROTLI}) {
