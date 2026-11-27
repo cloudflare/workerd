@@ -60,6 +60,120 @@ export const concurrentRunMetadata = {
   },
 };
 
+export const reusedRunOptions = {
+  async test() {
+    for (const option of ['returnRawResponse', 'websocket']) {
+      const { promise: firstResponse, resolve: releaseFirstResponse } =
+        Promise.withResolvers();
+      const ai = new Ai({
+        async fetch(_url, init) {
+          if (init.headers.Upgrade === 'websocket') {
+            await firstResponse;
+            const [client] = Object.values(new WebSocketPair());
+            return new Response(null, { status: 101, webSocket: client });
+          }
+          const { inputs } = JSON.parse(init.body);
+          if (inputs.prompt === 'first') await firstResponse;
+          return Response.json(inputs);
+        },
+      });
+
+      const options = { [option]: true };
+      const first = ai.runWithMetadata(
+        'testModel',
+        { prompt: 'first' },
+        options
+      );
+      options[option] = false;
+      const second = await ai.run('testModel', { prompt: 'second' }, options);
+      releaseFirstResponse();
+
+      const { result } = await first;
+      assert.ok(result instanceof Response);
+      if (option === 'websocket') {
+        assert.strictEqual(result.status, 101);
+        assert.ok(result.webSocket);
+      } else {
+        assert.deepStrictEqual(await result.json(), { prompt: 'first' });
+      }
+      assert.deepStrictEqual(second, { prompt: 'second' });
+    }
+  },
+};
+
+export const concurrentLegacyDiagnostics = {
+  async test() {
+    const { promise: bodyStarted, resolve: markBodyStarted } =
+      Promise.withResolvers();
+    const { promise: firstBody, resolve: releaseFirstBody } =
+      Promise.withResolvers();
+    const ai = new Ai({
+      async fetch(_url, init) {
+        const { prompt } = JSON.parse(init.body).inputs;
+        const headers = {
+          'content-type': 'application/json',
+          'cf-aig-log-id': `log-${prompt}`,
+          'cf-ai-req-id': `request-${prompt}`,
+        };
+        const error = { internalCode: 7003, message: 'Bad inputs' };
+        if (prompt === 'transport') throw new Error('transport failed');
+        if (prompt === 'immediate-error') {
+          return Response.json(error, { status: 422, headers });
+        }
+        if (prompt !== 'first') {
+          return Response.json({ prompt }, { status: 201, headers });
+        }
+        const body = new ReadableStream(
+          {
+            async pull(controller) {
+              markBodyStarted();
+              await firstBody;
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify(error))
+              );
+              controller.close();
+            },
+          },
+          { highWaterMark: 0 }
+        );
+        return new Response(body, { status: 422, headers });
+      },
+    });
+
+    const first = assert.rejects(ai.run('testModel', { prompt: 'first' }), {
+      code: 7003,
+      httpStatus: 422,
+      logId: 'log-first',
+      requestId: 'request-first',
+    });
+    await bodyStarted;
+    await ai.run('testModel', { prompt: 'second' });
+    releaseFirstBody();
+    await first;
+
+    assert.strictEqual(ai.lastRequestId, 'request-second');
+    assert.strictEqual(ai.aiGatewayLogId, 'log-second');
+    assert.strictEqual(ai.lastRequestHttpStatusCode, 201);
+    assert.strictEqual(ai.lastRequestInternalStatusCode, null);
+
+    await assert.rejects(ai.run('testModel', { prompt: 'immediate-error' }), {
+      code: 7003,
+    });
+    assert.strictEqual(ai.lastRequestInternalStatusCode, 7003);
+    await ai.run('testModel', { prompt: 'success' });
+    assert.strictEqual(ai.lastRequestInternalStatusCode, null);
+
+    await assert.rejects(
+      ai.run('testModel', { prompt: 'transport' }),
+      /transport failed/
+    );
+    assert.strictEqual(ai.lastRequestId, 'request-success');
+    assert.strictEqual(ai.aiGatewayLogId, 'log-success');
+    assert.strictEqual(ai.lastRequestHttpStatusCode, 201);
+    assert.strictEqual(ai.lastRequestInternalStatusCode, null);
+  },
+};
+
 export const tests = {
   async test(_, env) {
     {

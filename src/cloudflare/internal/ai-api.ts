@@ -194,6 +194,7 @@ function findReadableStreamKeys(
 
 export class Ai extends wrappedBinding.WrappedBinding {
   #fetcher: Fetcher;
+  #responseSequence = 0;
 
   /*
    * @deprecated this option is deprecated, do not use this
@@ -389,7 +390,8 @@ export class Ai extends wrappedBinding.WrappedBinding {
       httpStatus: number
     ) => Output
   ): Promise<Output> {
-    this.lastRequestId = '';
+    const websocket = options.websocket;
+    const returnRawResponse = options.returnRawResponse || websocket;
 
     // This removes some unwanted options from getting sent in the body
     const cleanedOptions = (({
@@ -402,7 +404,7 @@ export class Ai extends wrappedBinding.WrappedBinding {
 
     let res: Response;
 
-    if (options.websocket) {
+    if (websocket) {
       res = await this.#generateWebsocketFetch(
         inputs,
         options,
@@ -436,16 +438,22 @@ export class Ai extends wrappedBinding.WrappedBinding {
     const requestId = res.headers.get('cf-ai-req-id');
     const logId = res.headers.get('cf-aig-log-id');
     const httpStatus = res.status;
+    const responseSequence = ++this.#responseSequence;
     this.lastRequestId = requestId;
     this.aiGatewayLogId = logId;
     this.lastRequestHttpStatusCode = httpStatus;
+    this.lastRequestInternalStatusCode = null;
 
-    if (options.returnRawResponse || options.websocket) {
+    if (returnRawResponse) {
       return formatResult(res, logId, requestId, httpStatus);
     }
 
     if (!res.ok || !res.body) {
-      throw await this._parseError(res);
+      throw await this._parseError(res, (code): void => {
+        if (this.#responseSequence === responseSequence) {
+          this.lastRequestInternalStatusCode = code;
+        }
+      });
     }
 
     const contentType = res.headers.get('content-type');
@@ -470,7 +478,10 @@ export class Ai extends wrappedBinding.WrappedBinding {
 
   // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
-  private async _parseError(res: Response): Promise<InferenceUpstreamError> {
+  private async _parseError(
+    res: Response,
+    setInternalStatusCode?: (code: number) => void
+  ): Promise<InferenceUpstreamError> {
     const content = await res.text();
     const httpStatus = res.status || undefined;
     const logId = res.headers.get('cf-aig-log-id') ?? undefined;
@@ -479,7 +490,7 @@ export class Ai extends wrappedBinding.WrappedBinding {
     try {
       const parsedContent = JSON.parse(content) as AiError;
       if (parsedContent.internalCode) {
-        this.lastRequestInternalStatusCode = parsedContent.internalCode;
+        setInternalStatusCode?.(parsedContent.internalCode);
         const defaultMessage =
           parsedContent.name && parsedContent.description
             ? `${parsedContent.name}: ${parsedContent.description}`

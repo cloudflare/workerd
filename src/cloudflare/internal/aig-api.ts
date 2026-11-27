@@ -181,7 +181,8 @@ export class AiGateway {
     options?: AiGatewayGetLogOptions
   ): Promise<AiGatewayLog> {
     const url = `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/logs/${logId}`;
-    const fetchLog = () => this.#fetcher.fetch(url, { method: 'GET' });
+    const fetchLog = (): Promise<Response> =>
+      this.#fetcher.fetch(url, { method: 'GET' });
     let res = await fetchLog();
 
     if (options?.retryOnNotFound) {
