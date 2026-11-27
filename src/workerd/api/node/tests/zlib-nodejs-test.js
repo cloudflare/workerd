@@ -3088,13 +3088,17 @@ export const maxOutputLengthAfterBufferGrowth = {
     for (const size of [40961, 50000, 100000, 200000]) {
       const original = Buffer.alloc(size);
       for (let i = 0; i < size; i++) original[i] = (i * 7 + (i >> 9)) & 0xff;
-      for (const [compress, decompress] of [
-        [zlib.deflateRawSync, zlib.inflateRawSync],
-        [zlib.deflateSync, zlib.inflateSync],
-        [zlib.gzipSync, zlib.gunzipSync],
-        [zlib.brotliCompressSync, zlib.brotliDecompressSync],
+      for (const [compress, decompress, options] of [
+        [zlib.deflateRawSync, zlib.inflateRawSync, { level: 1 }],
+        [zlib.deflateSync, zlib.inflateSync, { level: 1 }],
+        [zlib.gzipSync, zlib.gunzipSync, { level: 1 }],
+        [
+          zlib.brotliCompressSync,
+          zlib.brotliDecompressSync,
+          { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 1 } },
+        ],
       ]) {
-        const compressed = compress(original);
+        const compressed = compress(original, options);
         for (const maxOutputLength of [size, size + 1, size + 20000]) {
           assert.deepStrictEqual(
             decompress(compressed, { maxOutputLength }),
