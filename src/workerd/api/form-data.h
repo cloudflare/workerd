@@ -91,10 +91,11 @@ public:
   // JS API
 
   // The spec allows a FormData to be constructed from a <form> HTML element. We don't support that,
-  // for obvious reasons, so this constructor doesn't take any parameters. If someone tries to use
-  // FormData to represent a <form> element we probably don't have to worry about making the error
-  // message they receive too pretty: they won't get farther than `document.getElementById()`.
-  static jsg::Ref<FormData> constructor(jsg::Lock& js);
+  // for obvious reasons, so the constructor takes no declared parameters. With the
+  // `formdata_standard` flag, any argument other than `undefined` throws a TypeError, as it
+  // would in a browser given something that isn't an HTMLFormElement. `args` is read only for that
+  // check, and keeps the parameter out of the generated TypeScript types.
+  static jsg::Ref<FormData> constructor(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   void append(jsg::Lock& js, kj::String name,
               kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,

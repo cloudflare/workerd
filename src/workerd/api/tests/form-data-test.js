@@ -5,6 +5,7 @@ import {
   strictEqual,
   deepStrictEqual,
   notStrictEqual,
+  ok,
   rejects,
   throws,
 } from 'node:assert';
@@ -1005,5 +1006,50 @@ export const formDataPropagatesBodyStreamError = {
       message: 'Parsing a Body as FormData requires a Content-Type header.',
     });
     strictEqual(noType.bodyUsed, true);
+  },
+};
+
+export const formDataStandard = {
+  async test() {
+    const specCompliant =
+      globalThis.Cloudflare.compatibilityFlags['formdata_standard'];
+
+    // The constructor accepts no form element.
+    new FormData();
+    new FormData(undefined);
+    for (const arg of [null, 'string', {}]) {
+      if (specCompliant) {
+        throws(() => new FormData(arg), TypeError);
+      } else {
+        new FormData(arg);
+      }
+    }
+
+    // A Blob without a filename is named "blob", here and in the multipart body.
+    const fd = new FormData();
+    fd.append('entry', new Blob(['x']));
+    fd.set('other', new Blob(['y'], { type: 'text/plain' }));
+    const entryName = specCompliant ? 'blob' : 'entry';
+    const otherName = specCompliant ? 'blob' : 'other';
+    strictEqual(fd.get('entry').name, entryName);
+    strictEqual(fd.get('other').name, otherName);
+    const body = await new Response(fd).text();
+    ok(body.includes(`name="entry"; filename="${entryName}"`));
+
+    // A File renamed on the way in keeps its lastModified.
+    const file = new File([], 'name', { lastModified: 123 });
+    fd.set('file', file, 'custom name');
+    const renamed = fd.get('file');
+    notStrictEqual(renamed, file);
+    strictEqual(renamed.name, 'custom name');
+    if (specCompliant) {
+      strictEqual(renamed.lastModified, 123);
+    } else {
+      notStrictEqual(renamed.lastModified, 123);
+    }
+
+    // A File without a new filename is stored as is.
+    fd.set('same', file);
+    strictEqual(fd.get('same'), file);
   },
 };
