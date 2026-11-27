@@ -4,6 +4,8 @@
 
 #include "per-process.h"
 
+#include "loop-io.h"
+
 #include <workerd/io/async-trace.h>
 #include <workerd/io/release-version.embed.h>
 #include <workerd/jsg/setup.h>
@@ -155,15 +157,17 @@ kj::Maybe<const AsyncTraceWriter&> ProcessState::getAsyncTraceWriter() const {
 }
 
 kj::Own<WorkerFactory> newWorkerFactory(const ProcessState& process,
-    FactoryIo io,
+    kj::Rc<LoopIo> io,
     kj::Own<WorkerFactory::Options> options,
     ::rust::Vec<uint64_t> config) {
   KJ_IF_SOME(writer, process.getAsyncTraceWriter()) {
     options->asyncTraceWriter = writer;
   }
-  auto factory = kj::heap<WorkerFactory>(process.getV8System(), io.timer, io.monotonicClock,
-      io.network, io.entropySource, io.fs, kj::mv(options), kj::mv(config));
-  return factory.attach(process.addRef());
+  auto& on = io->get();
+  auto factory = kj::heap<WorkerFactory>(process.getV8System(), on.timer, on.monotonicClock,
+      on.network, on.entropySource, on.fs, kj::mv(options), kj::mv(config));
+  // Destroyed in this order: the factory, its reference to the process, then its I/O's.
+  return factory.attach(process.addRef(), kj::mv(io));
 }
 
 }  // namespace workerd::server

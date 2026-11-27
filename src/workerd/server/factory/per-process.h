@@ -20,14 +20,6 @@
 #include <kj/refcount.h>
 #include <kj/string.h>
 
-namespace kj {
-class EntropySource;
-class Filesystem;
-class MonotonicClock;
-class Network;
-class Timer;
-}  // namespace kj
-
 namespace workerd {
 class AsyncTraceWriter;
 }  // namespace workerd
@@ -37,6 +29,8 @@ class V8System;
 }  // namespace workerd::jsg
 
 namespace workerd::server {
+
+class LoopIo;
 
 // The process's tracing, allocator, autogates, test and bench modes, and V8: everything that
 // lives as long as the process serves and that every factory shares. Started at most once per
@@ -92,22 +86,12 @@ class ProcessState final: public kj::AtomicRefcounted {
   jsg::V8System& v8System;
 };
 
-// The I/O a factory runs on. Everything here must outlive the factory and every I/O object it
-// made.
-struct FactoryIo {
-  kj::Timer& timer;
-  // Consistent with `timer`.
-  const kj::MonotonicClock& monotonicClock;
-  kj::Network& network;
-  kj::EntropySource& entropySource;
-  kj::Filesystem& fs;
-};
-
 // A worker factory over `config`, an encoded `Config` message the factory owns for its run, on
-// `process`'s V8 and `io`. The factory holds a reference to `process`, and its workers write to
-// the process's async trace file, if it has one.
+// `process`'s V8 and `io` (loop-io.h). The factory holds a reference to both, dropping the
+// process's before the I/O's, and its workers write to the process's async trace file, if it has
+// one.
 kj::Own<WorkerFactory> newWorkerFactory(const ProcessState& process,
-    FactoryIo io,
+    kj::Rc<LoopIo> io,
     kj::Own<WorkerFactory::Options> options,
     ::rust::Vec<uint64_t> config);
 

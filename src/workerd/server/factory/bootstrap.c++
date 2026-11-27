@@ -4,6 +4,7 @@
 
 #include "bootstrap.h"
 
+#include "loop-io.h"
 #include "per-process.h"
 #include "worker-factory.h"
 
@@ -12,9 +13,7 @@
 #include <workerd/io/release-version.embed.h>
 #include <workerd/server/json-logger.h>
 #include <workerd/server/server/bridge.rs.h>
-#include <workerd/util/entropy.h>
 
-#include <kj-rs-io/async-io.h>
 #include <kj-rs/kj-rs.h>
 #include <v8-initialization.h>
 
@@ -96,15 +95,6 @@ __lsan_default_suppressions() {
 
 // =======================================================================================
 
-class EntropySourceImpl: public kj::EntropySource {
- public:
-  void generate(kj::ArrayPtr<kj::byte> buffer) override {
-    getEntropy(buffer);
-  }
-};
-
-// =======================================================================================
-
 // How the binary was built, for `workerd bench`'s report: a sanitizer's instrumentation and a
 // debug build's checks make code slower than in a release build.
 kj::StringPtr buildMode() {
@@ -117,40 +107,6 @@ kj::StringPtr buildMode() {
   return "debug"_kj;
 #endif
 }
-
-// The I/O of one factory over the Rust-owned loop, attached to the factory. Members are declared
-// in construction order, which is the reverse of destruction.
-class LoopIo {
- public:
-  explicit LoopIo(kj_rs_tokio::TokioAsyncIoContext& loop)
-      : timer(loop.getTimer()),
-        monotonicClock(kj::systemPreciseMonotonicClock()),
-        provider(loop.getTimer()) {}
-  KJ_DISALLOW_COPY_AND_MOVE(LoopIo);
-
-  FactoryIo get() {
-    return FactoryIo{
-      .timer = timer,
-      .monotonicClock = monotonicClock,
-      .network = provider.getNetwork(),
-      .entropySource = entropySource,
-      .fs = *fs,
-    };
-  }
-
-  kj::Filesystem& getFilesystem() {
-    return *fs;
-  }
-
- private:
-  kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
-  EntropySourceImpl entropySource;
-  kj::Timer& timer;
-  // The loop's monotonic clock, consistent with `timer`.
-  const kj::MonotonicClock& monotonicClock;
-  // The tokio-backed kj::Network over the Runtime's loop.
-  kj_rs_io::TokioAsyncIoProvider provider;
-};
 
 kj::Maybe<kj::String> toKj(const kj::Maybe<::rust::String>& string) {
   return string.map([](const ::rust::String& string) { return kj::str(string); });
@@ -243,16 +199,18 @@ kj::Arc<ProcessState> process_start(const ProcessOptions& options) {
   });
 }
 
+kj::Rc<LoopIo> loop_io_new(kj_rs_tokio::TokioAsyncIoContext& loop) {
+  return LoopIo::start(loop);
+}
+
 kj::Own<WorkerFactory> factory_new(const ProcessState& process,
-    kj_rs_tokio::TokioAsyncIoContext& loop,
+    kj::Rc<LoopIo> io,
     ::rust::Vec<uint64_t> config,
     const FactoryOptions& factoryOptions) {
-  auto io = kj::heap<LoopIo>(loop);
   auto options = kj::heap<WorkerFactory::Options>();
   options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
-  applyFactoryOptions(*options, factoryOptions, io->getFilesystem());
-  // Destroyed in this order: the factory, its reference to the process, then its I/O.
-  return newWorkerFactory(process, io->get(), kj::mv(options), kj::mv(config)).attach(kj::mv(io));
+  applyFactoryOptions(*options, factoryOptions, io->get().fs);
+  return newWorkerFactory(process, kj::mv(io), kj::mv(options), kj::mv(config));
 }
 
 BuildInfo build_info() {

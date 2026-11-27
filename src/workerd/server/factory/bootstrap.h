@@ -24,6 +24,7 @@ struct TokioAsyncIoContext;
 }  // namespace kj_rs_tokio
 
 namespace workerd::server {
+class LoopIo;
 class ProcessState;
 class WorkerFactory;
 struct PendingCommand;
@@ -43,8 +44,9 @@ bool fuzzilli_supported();
 // See the bridge (server/bridge.rs).
 int32_t with_process_context(bool verbose, bool structured, ::rust::Box<PendingCommand> command);
 kj::Arc<ProcessState> process_start(const ProcessOptions& options);
+kj::Rc<LoopIo> loop_io_new(kj_rs_tokio::TokioAsyncIoContext& loop);
 kj::Own<WorkerFactory> factory_new(const ProcessState& process,
-    kj_rs_tokio::TokioAsyncIoContext& loop,
+    kj::Rc<LoopIo> io,
     ::rust::Vec<uint64_t> config,
     const FactoryOptions& options);
 BuildInfo build_info();

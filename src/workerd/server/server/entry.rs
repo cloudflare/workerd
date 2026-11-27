@@ -9,15 +9,17 @@
 //! [`serve`] / [`test`] / [`bench`]. Each sets up the process's logging (`with_process_context`),
 //! creates the event loop -- a `kj_rs_tokio::Runtime`, the KJ loop with tokio running whenever it
 //! sleeps -- sets up the process (`process_start`: perfetto, autogates, V8; `process.rs` reads its
-//! settings out of the config), builds the worker factory on it and that loop (`factory_new`),
+//! settings out of the config), builds the loop's I/O (`loop_io_new`) and the worker factory on
+//! the process and that I/O (`factory_new`),
 //! then blocks on `server_serve` / `server_test` / `server_bench`, which run the server
 //! (`run.rs`). Every config error is printed, and the server then does not serve; unless
 //! `--watch` is on, in which case it serves what it can, waits for the config to change and the
 //! process re-executes itself.
 //!
 //! Exit: status 0 when the run completes, 1 if any error was reported or the run failed (the
-//! failure is printed as `*** Uncaught exception ***`). However the run ended, the factory and the
-//! process's handle have been dropped by then and, with them, V8 and the perfetto session.
+//! failure is printed as `*** Uncaught exception ***`). However the run ended, the factory, the
+//! loop's I/O and the process's handle have been dropped by then and, with them, V8 and the
+//! perfetto session.
 //! Unless `KJ_CLEAN_SHUTDOWN` is set the process ends right there, without running the remaining
 //! destructors, like `kj::ProcessContext::exit()`; with it, the Runtime is torn down and `main`
 //! returns the status.
@@ -149,13 +151,15 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
         let mut runtime = kj_rs_tokio::Runtime::new()?;
         let (process_options, factory_options) = command_options(&config, options, test, bench)?;
         let process = ffi::process_start(&process_options)?;
-        let factory = ffi::factory_new(&process, runtime.context(), config, &factory_options)?;
-        // The command owns the factory and drops it when it completes (`shutdown`), and the
-        // process's handle goes after it: the factory holds the process too, so V8 is torn down
-        // with whichever goes last. If the command does not complete, `block_on` drops both before
-        // returning.
+        let io = ffi::loop_io_new(runtime.context())?;
+        let factory = ffi::factory_new(&process, io.clone(), config, &factory_options)?;
+        // The command owns the factory and drops it when it completes (`shutdown`), then the
+        // loop's I/O and the process's handle go after it: the factory holds both too, so each is
+        // torn down with whichever of its references goes last, V8 with the process. If the
+        // command does not complete, `block_on` drops all three before returning.
         let result = runtime.block_on(async move {
             let result = command(factory, structured).await;
+            drop(io);
             drop(process);
             result
         });
