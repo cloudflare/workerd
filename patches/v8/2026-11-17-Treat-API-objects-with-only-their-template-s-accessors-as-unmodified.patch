@@ -20,14 +20,14 @@ initial map. Any other change, including reading a lazy data property,
 which turns it into a data field, still makes the object count as
 modified.
 ---
- src/objects/js-objects.cc | 80 ++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 79 insertions(+), 1 deletion(-)
+ src/objects/js-objects.cc | 65 ++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 64 insertions(+), 1 deletion(-)
 
 diff --git a/src/objects/js-objects.cc b/src/objects/js-objects.cc
-index 6d54368605bd8e4c439fc76cc014c127807f3d54..4d0efa8bc5437730ce3f1db8558a8d043663c483 100644
+index 158f9c7cfe9258b89db67946a4fb41736d1bbbf4..cde0861ddcec2285a2b9648cc5e36f417ba17535 100644
 --- a/src/objects/js-objects.cc
 +++ b/src/objects/js-objects.cc
-@@ -76,6 +76,7 @@
+@@ -73,6 +73,7 @@
  #include "src/objects/shared-function-info.h"
  #include "src/objects/swiss-name-dictionary-inl.h"
  #include "src/objects/tagged.h"
@@ -35,30 +35,11 @@ index 6d54368605bd8e4c439fc76cc014c127807f3d54..4d0efa8bc5437730ce3f1db8558a8d04
  #include "src/objects/transitions.h"
  #include "src/strings/string-builder-inl.h"
  #include "src/strings/string-stream.h"
-@@ -3196,6 +3197,81 @@ void JSObject::PrintInstanceMigration(FILE* file, Tagged<Map> original_map,
+@@ -3267,6 +3268,66 @@ void JSObject::PrintInstanceMigration(FILE* file, Tagged<Map> original_map,
    PrintF(file, "\n");
  }
  
 +namespace {
-+
-+// Calls `callback` on each AccessorInfo that instantiating `info`'s instance
-+// template installs, walking the parent templates as ConfigureInstance() in
-+// api-natives.cc does.
-+template <typename Callback>
-+void ForEachTemplateAccessor(Tagged<FunctionTemplateInfo> info,
-+                             Callback callback) {
-+  for (Tagged<Object> current = info; IsFunctionTemplateInfo(current);
-+       current = Cast<FunctionTemplateInfo>(current)->GetParentTemplate()) {
-+    Tagged<Object> instance_template =
-+        Cast<FunctionTemplateInfo>(current)->GetInstanceTemplate();
-+    if (!IsObjectTemplateInfo(instance_template)) continue;
-+    Tagged<Object> accessors =
-+        Cast<ObjectTemplateInfo>(instance_template)->property_accessors();
-+    if (!IsArrayList(accessors)) continue;
-+    Tagged<ArrayList> list = Cast<ArrayList>(accessors);
-+    for (int i = 0; i < list->length(); i++) callback(list->get(i));
-+  }
-+}
 +
 +// Returns whether `map` differs from `initial_map` only by having exactly the
 +// native data properties (AccessorInfos) of `constructor`'s instance template,
@@ -80,36 +61,40 @@ index 6d54368605bd8e4c439fc76cc014c127807f3d54..4d0efa8bc5437730ce3f1db8558a8d04
 +  if (!shared->IsApiFunction()) return false;
 +  Tagged<FunctionTemplateInfo> info = shared->api_func_data();
 +
-+  int template_accessors = 0;
-+  ForEachTemplateAccessor(info, [&](Tagged<Object>) { template_accessors++; });
-+  if (template_accessors == 0 ||
-+      map->NumberOfOwnDescriptors() != template_accessors) {
-+    return false;
-+  }
-+
++  // ConfigureInstance() in api-natives.cc installs the accessors of the
++  // instance template and then of each parent template's, each list from back
++  // to front, skipping any name it already installed. Walk them in that order
++  // and compare each with the next own descriptor, so the check takes one pass.
++  // A skipped name leaves fewer descriptors than the templates have accessors,
++  // and any other difference fails a comparison; either way the object counts
++  // as modified.
++  int own_descriptors = map->NumberOfOwnDescriptors();
 +  Tagged<DescriptorArray> descriptors = map->instance_descriptors();
-+  for (InternalIndex i : map->IterateOwnDescriptors()) {
-+    PropertyDetails details = descriptors->GetDetails(i);
-+    if (details.kind() != PropertyKind::kAccessor ||
-+        details.location() != PropertyLocation::kDescriptor) {
-+      return false;
++  int next = 0;
++  for (Tagged<Object> current = info; IsFunctionTemplateInfo(current);
++       current = Cast<FunctionTemplateInfo>(current)->GetParentTemplate()) {
++    Tagged<Object> instance_template =
++        Cast<FunctionTemplateInfo>(current)->GetInstanceTemplate();
++    if (!IsObjectTemplateInfo(instance_template)) continue;
++    Tagged<Object> accessors =
++        Cast<ObjectTemplateInfo>(instance_template)->property_accessors();
++    if (!IsArrayList(accessors)) continue;
++    Tagged<ArrayList> list = Cast<ArrayList>(accessors);
++    for (int i = list->length() - 1; i >= 0; i--) {
++      if (next == own_descriptors) return false;
++      InternalIndex descriptor(next++);
++      PropertyDetails details = descriptors->GetDetails(descriptor);
++      Tagged<Object> accessor = list->get(i);
++      if (details.kind() != PropertyKind::kAccessor ||
++          details.location() != PropertyLocation::kDescriptor ||
++          descriptors->GetStrongValue(descriptor) != accessor ||
++          details.attributes() !=
++              Cast<AccessorInfo>(accessor)->initial_property_attributes()) {
++        return false;
++      }
 +    }
-+    Tagged<Object> value = descriptors->GetStrongValue(i);
-+    if (!IsAccessorInfo(value) ||
-+        details.attributes() !=
-+            Cast<AccessorInfo>(value)->initial_property_attributes()) {
-+      return false;
-+    }
-+    // Each AccessorInfo can only be installed once, under its own name, so
-+    // finding all of them in the template means the object has all of the
-+    // template's.
-+    bool from_template = false;
-+    ForEachTemplateAccessor(info, [&](Tagged<Object> accessor) {
-+      from_template |= accessor == value;
-+    });
-+    if (!from_template) return false;
 +  }
-+  return true;
++  return next != 0 && next == own_descriptors;
 +}
 +
 +}  // namespace
@@ -117,7 +102,7 @@ index 6d54368605bd8e4c439fc76cc014c127807f3d54..4d0efa8bc5437730ce3f1db8558a8d04
  // static
  bool JSObject::IsUnmodifiedApiObject(FullObjectSlot o) {
    Tagged<Object> object = *o;
-@@ -3212,7 +3288,9 @@ bool JSObject::IsUnmodifiedApiObject(FullObjectSlot o) {
+@@ -3283,7 +3344,9 @@ bool JSObject::IsUnmodifiedApiObject(FullObjectSlot o) {
    if (!IsUndefined(js_object->GetIdentityHash())) return false;
  
    Tagged<JSFunction> constructor = Cast<JSFunction>(maybe_constructor);
