@@ -863,7 +863,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   // as isolate external memory. The queue lives outside the V8 heap, so without this a peer that
   // never reads, or a WebSocketPair end that is never returned in a Response, lets it grow without
   // the isolate's memory limit seeing it.
-  kj::Maybe<jsg::ExternalMemoryAdjustment> chargeOutgoing(size_t payloadBytes);
+  jsg::ExternalMemoryAdjustment chargeOutgoing(size_t payloadBytes);
 
   // ---------------------------------------------------------------------------
   // Members retained by the legacy adapter while the EW-10817 refactor is incomplete.
@@ -919,7 +919,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> error;
 
   // The isolate's external memory, to which queued outgoing messages are charged.
-  kj::Maybe<kj::Arc<const jsg::ExternalMemoryTarget>> outgoingMemory;
+  kj::Arc<const jsg::ExternalMemoryTarget> outgoingMemory;
 
   // Queue of messages to be sent. Wrapped in an IoOwn so the pump loop can safely access
   // the map without locking the isolate.
