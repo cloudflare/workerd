@@ -819,6 +819,25 @@ kj_test(
 )
 
 kj_test(
+    src = "otlp-span-submitter-test.c++",
+    deps = [
+        ":invocation-span",
+        ":otlp-span-submitter",
+        "//src/opentelemetry:otlp_cc_proto",
+        "//src/workerd/util:thread-scopes",
+        "@protobuf//:differencer",
+    ],
+)
+
+kj_test(
+    src = "invocation-span-time-test.c++",
+    deps = [
+        ":invocation-span",
+        "//src/workerd/util:thread-scopes",
+    ],
+)
+
+kj_test(
     src = "trace-test.c++",
     deps = [
         ":io",
