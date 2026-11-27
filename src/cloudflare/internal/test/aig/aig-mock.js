@@ -2,9 +2,39 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+const logAttempts = new Map();
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === 'GET') {
+      const logId = new URL(request.url).pathname.split('/').at(-1);
+      if (
+        [
+          'default-no-retry',
+          'retry-once',
+          'still-missing',
+          'retry-stop-on-error',
+        ].includes(logId)
+      ) {
+        const attempt = (logAttempts.get(logId) ?? 0) + 1;
+        logAttempts.set(logId, attempt);
+        if (attempt === 1 || logId === 'still-missing') {
+          return Response.json(
+            { errors: [{ message: `Not Found (attempt ${attempt})` }] },
+            { status: 404 }
+          );
+        }
+        if (logId === 'retry-stop-on-error') {
+          return Response.json(
+            { errors: [{ message: `Internal Error (attempt ${attempt})` }] },
+            { status: 500 }
+          );
+        }
+        return Response.json({
+          result: { id: logId, created_at: '2019-08-24T14:15:22Z' },
+        });
+      }
+
       if (request.url.endsWith('logs/404')) {
         return Response.json(
           {

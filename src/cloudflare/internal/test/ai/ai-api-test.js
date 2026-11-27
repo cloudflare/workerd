@@ -3,6 +3,62 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import * as assert from 'node:assert';
+import { Ai } from 'cloudflare:ai';
+
+export const concurrentRunMetadata = {
+  async test() {
+    const { promise: bodyStarted, resolve: markBodyStarted } =
+      Promise.withResolvers();
+    const { promise: releaseFirstBody, resolve: finishFirstCall } =
+      Promise.withResolvers();
+    const ai = new Ai({
+      async fetch(_url, init) {
+        const { prompt } = JSON.parse(init.body).inputs;
+        const headers = {
+          'content-type': 'application/json',
+          'cf-aig-log-id': `log-${prompt}`,
+          'cf-ai-req-id': `request-${prompt}`,
+        };
+        if (prompt !== 'first') {
+          return Response.json({ prompt }, { status: 201, headers });
+        }
+        const body = new ReadableStream(
+          {
+            async pull(controller) {
+              markBodyStarted();
+              await releaseFirstBody;
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify({ prompt }))
+              );
+              controller.close();
+            },
+          },
+          { highWaterMark: 0 }
+        );
+        return new Response(body, { headers });
+      },
+    });
+
+    const first = ai.runWithMetadata('testModel', { prompt: 'first' });
+    await bodyStarted;
+    const second = await ai.runWithMetadata('testModel', { prompt: 'second' });
+    finishFirstCall();
+
+    assert.deepStrictEqual(await first, {
+      result: { prompt: 'first' },
+      logId: 'log-first',
+      requestId: 'request-first',
+      httpStatus: 200,
+    });
+    assert.deepStrictEqual(second, {
+      result: { prompt: 'second' },
+      logId: 'log-second',
+      requestId: 'request-second',
+      httpStatus: 201,
+    });
+    assert.strictEqual(ai.aiGatewayLogId, 'log-second');
+  },
+};
 
 export const tests = {
   async test(_, env) {
@@ -102,6 +158,29 @@ export const tests = {
         response: 'slow raw response',
       });
       assert.deepStrictEqual(parsedResp, { response: 'model response' });
+    }
+
+    {
+      const parsed = await env.ai.runWithMetadata('testModel', {
+        prompt: 'parsed',
+      });
+      assert.deepStrictEqual(parsed, {
+        result: { response: 'model response' },
+        logId: null,
+        requestId: '3a1983d7-1ddd-453a-ab75-c4358c91b582',
+        httpStatus: 200,
+      });
+
+      const { result, logId } = await env.ai.runWithMetadata(
+        'slowRawModel',
+        { prompt: 'raw' },
+        { returnRawResponse: true }
+      );
+      assert.strictEqual(logId, 'log-slow-raw');
+      assert.strictEqual(logId, result.headers.get('cf-aig-log-id'));
+      assert.deepStrictEqual(await result.json(), {
+        response: 'slow raw response',
+      });
     }
 
     {

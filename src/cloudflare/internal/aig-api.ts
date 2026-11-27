@@ -37,6 +37,10 @@ export type AiGatewayPatchLog = {
   metadata?: Record<string, number | string | boolean | null | bigint> | null;
 };
 
+export type AiGatewayGetLogOptions = {
+  retryOnNotFound?: boolean;
+};
+
 export type AiGatewayLog = {
   id: string;
   provider: string;
@@ -172,13 +176,22 @@ export class AiGateway {
     return data.result.url;
   }
 
-  async getLog(logId: string): Promise<AiGatewayLog> {
-    const res = await this.#fetcher.fetch(
-      `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/logs/${logId}`,
-      {
-        method: 'GET',
+  async getLog(
+    logId: string,
+    options?: AiGatewayGetLogOptions
+  ): Promise<AiGatewayLog> {
+    const url = `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/logs/${logId}`;
+    const fetchLog = () => this.#fetcher.fetch(url, { method: 'GET' });
+    let res = await fetchLog();
+
+    if (options?.retryOnNotFound) {
+      for (const delay of [100, 250, 500]) {
+        if (res.status !== 404) break;
+        await res.body?.cancel();
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        res = await fetchLog();
       }
-    );
+    }
 
     switch (res.status) {
       case 200: {

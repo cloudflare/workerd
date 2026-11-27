@@ -29,6 +29,10 @@ export type AiGatewayPatchLog = {
   metadata?: Record<string, number | string | boolean | null | bigint> | null;
 };
 
+export type AiGatewayGetLogOptions = {
+  retryOnNotFound?: boolean;
+};
+
 export type AiGatewayLog = {
   id: string;
   provider: string;
@@ -113,7 +117,7 @@ export interface AiGatewayLogNotFound extends Error {}
 
 export declare abstract class AiGateway {
   patchLog(logId: string, data: AiGatewayPatchLog): Promise<void>;
-  getLog(logId: string): Promise<AiGatewayLog>;
+  getLog(logId: string, options?: AiGatewayGetLogOptions): Promise<AiGatewayLog>;
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
     options?: {

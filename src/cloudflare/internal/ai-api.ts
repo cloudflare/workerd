@@ -58,6 +58,15 @@ export type AiOptions = {
   signal?: AbortSignal;
 };
 
+export type AiRunResult<Result> = {
+  result: Result;
+  logId: string | null;
+  requestId: string | null;
+  httpStatus: number;
+};
+
+type AiRunOutput = Response | ReadableStream<Uint8Array> | object | null;
+
 export type AiWebSearchRequest = {
   gatewayId: string;
   query: string;
@@ -343,11 +352,43 @@ export class Ai extends wrappedBinding.WrappedBinding {
     return await this.#fetcher.fetch(aiEndpoint, fetchOptions);
   }
 
-  async run(
+  run(
     model: string,
     inputs: Record<string, string | AiInputReadableStream>,
     options: AiOptions = {}
-  ): Promise<Response | ReadableStream<Uint8Array> | object | null> {
+  ): Promise<AiRunOutput> {
+    return this.#run(model, inputs, options, (result) => result);
+  }
+
+  runWithMetadata(
+    model: string,
+    inputs: Record<string, string | AiInputReadableStream>,
+    options: AiOptions = {}
+  ): Promise<AiRunResult<AiRunOutput>> {
+    return this.#run(
+      model,
+      inputs,
+      options,
+      (result, logId, requestId, httpStatus) => ({
+        result,
+        logId,
+        requestId,
+        httpStatus,
+      })
+    );
+  }
+
+  async #run<Output>(
+    model: string,
+    inputs: Record<string, string | AiInputReadableStream>,
+    options: AiOptions,
+    formatResult: (
+      result: AiRunOutput,
+      logId: string | null,
+      requestId: string | null,
+      httpStatus: number
+    ) => Output
+  ): Promise<Output> {
     this.lastRequestId = '';
 
     // This removes some unwanted options from getting sent in the body
@@ -392,12 +433,15 @@ export class Ai extends wrappedBinding.WrappedBinding {
       }
     }
 
-    this.lastRequestId = res.headers.get('cf-ai-req-id');
-    this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
-    this.lastRequestHttpStatusCode = res.status;
+    const requestId = res.headers.get('cf-ai-req-id');
+    const logId = res.headers.get('cf-aig-log-id');
+    const httpStatus = res.status;
+    this.lastRequestId = requestId;
+    this.aiGatewayLogId = logId;
+    this.lastRequestHttpStatusCode = httpStatus;
 
     if (options.returnRawResponse || options.websocket) {
-      return res;
+      return formatResult(res, logId, requestId, httpStatus);
     }
 
     if (!res.ok || !res.body) {
@@ -406,10 +450,15 @@ export class Ai extends wrappedBinding.WrappedBinding {
 
     const contentType = res.headers.get('content-type');
     if (contentType === 'application/json') {
-      return (await res.json()) as object;
+      return formatResult(
+        (await res.json()) as object,
+        logId,
+        requestId,
+        httpStatus
+      );
     }
 
-    return res.body;
+    return formatResult(res.body, logId, requestId, httpStatus);
   }
 
   /*

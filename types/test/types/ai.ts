@@ -63,6 +63,33 @@ export const handler: ExportedHandler<{ AI: Ai }> = {
       expectType<Record<string, unknown>>(result);
     }
 
+    {
+      const parsed = await env.AI.runWithMetadata(
+        '@cf/meta/llama-3.1-8b-instruct-fp8',
+        { prompt: 'hello' }
+      );
+      expectType<AiRunResult<AiTextGenerationOutput>>(parsed);
+
+      const stream = await env.AI.runWithMetadata(
+        '@cf/meta/llama-3.1-8b-instruct-fp8',
+        { prompt: 'hello', stream: true }
+      );
+      expectType<AiRunResult<ReadableStream>>(stream);
+
+      const raw = await env.AI.runWithMetadata(
+        'google/nano-banana',
+        { prompt: 'hello' },
+        { gateway: { id: 'my-gateway' }, returnRawResponse: true }
+      );
+      expectType<AiRunResult<Response>>(raw);
+      if (raw.logId !== null) {
+        const log = await env.AI.gateway('my-gateway').getLog(raw.logId, {
+          retryOnNotFound: true,
+        });
+        expectType<AiGatewayLog>(log);
+      }
+    }
+
     // AI Gateway web search
     {
       const result = await env.AI.websearch({
