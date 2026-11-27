@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
+
 function expectType<T>(_value: T) {}
 
 export const handler: ExportedHandler<{ SERVICE: Fetcher }> = {
@@ -124,3 +126,44 @@ export const handler: ExportedHandler<{ SERVICE: Fetcher }> = {
     return new Response();
   },
 };
+
+export class EntrypointWithIncomingCf extends WorkerEntrypoint {
+  override async fetch(
+    request: Request<unknown, IncomingRequestCfProperties>,
+  ): Promise<Response> {
+    expectType<string | undefined>(request.cf?.colo);
+    expectType<Iso3166Alpha2Code | "T1" | undefined>(request.cf?.country);
+    return new Response();
+  }
+}
+
+export class EntrypointWithBareRequest extends WorkerEntrypoint {
+  override async fetch(_request: Request): Promise<Response> {
+    return new Response();
+  }
+}
+
+export class DurableObjectWithIncomingCf extends DurableObject {
+  override async fetch(
+    request: Request<unknown, IncomingRequestCfProperties>,
+  ): Promise<Response> {
+    expectType<string | undefined>(request.cf?.colo);
+    expectType<Iso3166Alpha2Code | "T1" | undefined>(request.cf?.country);
+    return new Response();
+  }
+}
+
+export class DurableObjectWithBareRequest extends DurableObject {
+  override async fetch(_request: Request): Promise<Response> {
+    return new Response();
+  }
+}
+
+type EntrypointFetchParam = Parameters<NonNullable<WorkerEntrypoint["fetch"]>>[0];
+type DurableObjectFetchParam = Parameters<NonNullable<DurableObject["fetch"]>>[0];
+declare const entrypointReq: EntrypointFetchParam;
+declare const doReq: DurableObjectFetchParam;
+expectType<string | undefined>(entrypointReq.cf?.colo);
+expectType<Iso3166Alpha2Code | "T1" | undefined>(entrypointReq.cf?.country);
+expectType<string | undefined>(doReq.cf?.colo);
+expectType<Iso3166Alpha2Code | "T1" | undefined>(doReq.cf?.country);
