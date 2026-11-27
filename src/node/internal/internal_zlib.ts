@@ -10,6 +10,7 @@ import {
   type ZstdOptions,
 } from 'node-internal:zlib';
 import { Buffer } from 'node-internal:internal_buffer';
+import { constants } from 'node-internal:internal_zlib_constants';
 import { validateUint32 } from 'node-internal:validators';
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
 import { isAnyArrayBuffer } from 'node-internal:internal_types';
@@ -28,18 +29,18 @@ type ZlibResult = Buffer | { buffer: Buffer; engine: ZlibBase };
 type CompressCallback = (err: Error | null, result?: ZlibResult) => void;
 
 const {
-  CONST_DEFLATE,
-  CONST_DEFLATERAW,
-  CONST_INFLATE,
-  CONST_INFLATERAW,
-  CONST_GUNZIP,
-  CONST_GZIP,
-  CONST_UNZIP,
-  CONST_BROTLI_DECODE,
-  CONST_BROTLI_ENCODE,
-  CONST_ZSTD_ENCODE,
-  CONST_ZSTD_DECODE,
-} = zlibUtil;
+  DEFLATE,
+  DEFLATERAW,
+  INFLATE,
+  INFLATERAW,
+  GUNZIP,
+  GZIP,
+  UNZIP,
+  BROTLI_DECODE,
+  BROTLI_ENCODE,
+  ZSTD_ENCODE,
+  ZSTD_DECODE,
+} = constants;
 
 const ZlibMode = {
   DEFLATE: 1,
@@ -107,49 +108,49 @@ export function inflateSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
 ): ZlibResult {
-  return zlibSyncImpl(data, options, CONST_INFLATE);
+  return zlibSyncImpl(data, options, INFLATE);
 }
 
 export function deflateSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
 ): ZlibResult {
-  return zlibSyncImpl(data, options, CONST_DEFLATE);
+  return zlibSyncImpl(data, options, DEFLATE);
 }
 
 export function gunzipSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
 ): ZlibResult {
-  return zlibSyncImpl(data, options, CONST_GUNZIP);
+  return zlibSyncImpl(data, options, GUNZIP);
 }
 
 export function gzipSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
 ): ZlibResult {
-  return zlibSyncImpl(data, options, CONST_GZIP);
+  return zlibSyncImpl(data, options, GZIP);
 }
 
 export function inflateRawSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
 ): ZlibResult {
-  return zlibSyncImpl(data, options, CONST_INFLATERAW);
+  return zlibSyncImpl(data, options, INFLATERAW);
 }
 
 export function deflateRawSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
 ): ZlibResult {
-  return zlibSyncImpl(data, options, CONST_DEFLATERAW);
+  return zlibSyncImpl(data, options, DEFLATERAW);
 }
 
 export function unzipSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
 ): ZlibResult {
-  return zlibSyncImpl(data, options, CONST_UNZIP);
+  return zlibSyncImpl(data, options, UNZIP);
 }
 
 export function brotliDecompressSync(
@@ -253,7 +254,7 @@ export function inflate(
   options: ZlibOptions | CompressCallback,
   callback?: CompressCallback
 ): void {
-  zlibImpl(CONST_INFLATE, data, options, callback);
+  zlibImpl(INFLATE, data, options, callback);
 }
 
 export function unzip(
@@ -261,7 +262,7 @@ export function unzip(
   options: ZlibOptions | CompressCallback,
   callback?: CompressCallback
 ): void {
-  zlibImpl(CONST_UNZIP, data, options, callback);
+  zlibImpl(UNZIP, data, options, callback);
 }
 
 export function inflateRaw(
@@ -269,7 +270,7 @@ export function inflateRaw(
   options: ZlibOptions | CompressCallback,
   callback?: CompressCallback
 ): void {
-  zlibImpl(CONST_INFLATERAW, data, options, callback);
+  zlibImpl(INFLATERAW, data, options, callback);
 }
 
 export function gunzip(
@@ -277,7 +278,7 @@ export function gunzip(
   options: ZlibOptions | CompressCallback,
   callback?: CompressCallback
 ): void {
-  zlibImpl(CONST_GUNZIP, data, options, callback);
+  zlibImpl(GUNZIP, data, options, callback);
 }
 
 export function deflate(
@@ -285,7 +286,7 @@ export function deflate(
   options: ZlibOptions | CompressCallback,
   callback?: CompressCallback
 ): void {
-  zlibImpl(CONST_DEFLATE, data, options, callback);
+  zlibImpl(DEFLATE, data, options, callback);
 }
 
 export function deflateRaw(
@@ -293,7 +294,7 @@ export function deflateRaw(
   options: ZlibOptions | CompressCallback,
   callback?: CompressCallback
 ): void {
-  zlibImpl(CONST_DEFLATERAW, data, options, callback);
+  zlibImpl(DEFLATERAW, data, options, callback);
 }
 
 export function gzip(
@@ -301,7 +302,7 @@ export function gzip(
   options: ZlibOptions | CompressCallback,
   callback?: CompressCallback
 ): void {
-  zlibImpl(CONST_GZIP, data, options, callback);
+  zlibImpl(GZIP, data, options, callback);
 }
 
 export function brotliDecompress(
@@ -449,19 +450,19 @@ export function zstdCompress(
 }
 export class Gzip extends Zlib {
   constructor(options: ZlibOptions) {
-    super(options, CONST_GZIP);
+    super(options, GZIP);
   }
 }
 
 export class Gunzip extends Zlib {
   constructor(options: ZlibOptions) {
-    super(options, CONST_GUNZIP);
+    super(options, GUNZIP);
   }
 }
 
 export class Deflate extends Zlib {
   constructor(options: ZlibOptions) {
-    super(options, CONST_DEFLATE);
+    super(options, DEFLATE);
   }
 }
 
@@ -470,49 +471,49 @@ export class DeflateRaw extends Zlib {
     if (options?.windowBits === 8) {
       options.windowBits = 9;
     }
-    super(options, CONST_DEFLATERAW);
+    super(options, DEFLATERAW);
   }
 }
 
 export class Inflate extends Zlib {
   constructor(options: ZlibOptions) {
-    super(options, CONST_INFLATE);
+    super(options, INFLATE);
   }
 }
 
 export class InflateRaw extends Zlib {
   constructor(options: ZlibOptions) {
-    super(options, CONST_INFLATERAW);
+    super(options, INFLATERAW);
   }
 }
 
 export class Unzip extends Zlib {
   constructor(options: ZlibOptions) {
-    super(options, CONST_UNZIP);
+    super(options, UNZIP);
   }
 }
 
 export class BrotliCompress extends Brotli {
   constructor(options: BrotliOptions) {
-    super(options, CONST_BROTLI_ENCODE);
+    super(options, BROTLI_ENCODE);
   }
 }
 
 export class BrotliDecompress extends Brotli {
   constructor(options: BrotliOptions) {
-    super(options, CONST_BROTLI_DECODE);
+    super(options, BROTLI_DECODE);
   }
 }
 
 export class ZstdCompress extends Zstd {
   constructor(options: ZstdOptions) {
-    super(options, CONST_ZSTD_ENCODE, zstdInitCParamsArray, kMaxZstdCParam);
+    super(options, ZSTD_ENCODE, zstdInitCParamsArray, kMaxZstdCParam);
   }
 }
 
 export class ZstdDecompress extends Zstd {
   constructor(options: ZstdOptions) {
-    super(options, CONST_ZSTD_DECODE, zstdInitDParamsArray, kMaxZstdDParam);
+    super(options, ZSTD_DECODE, zstdInitDParamsArray, kMaxZstdDParam);
   }
 }
 

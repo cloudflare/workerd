@@ -439,6 +439,37 @@ export const constantsTest = {
   },
 };
 
+export const constantsShapeTest = {
+  test() {
+    const { constants } = zlib;
+    assert.strictEqual(Object.getPrototypeOf(constants), Object.prototype);
+    assert.ok(Object.isExtensible(constants));
+    const keys = Object.keys(constants);
+    assert.strictEqual(keys.length, 172);
+    assert.deepStrictEqual(keys.slice(0, 3), [
+      'Z_NO_FLUSH',
+      'Z_PARTIAL_FLUSH',
+      'Z_SYNC_FLUSH',
+    ]);
+    assert.deepStrictEqual(keys.slice(-2), [
+      'ZSTD_error_noForwardProgress_destFull',
+      'ZSTD_error_noForwardProgress_inputEmpty',
+    ]);
+    for (const key of keys) {
+      const desc = Object.getOwnPropertyDescriptor(constants, key);
+      assert.strictEqual(typeof desc.value, 'number', key);
+      assert.strictEqual(desc.writable, false, key);
+      assert.strictEqual(desc.enumerable, true, key);
+      assert.strictEqual(desc.configurable, false, key);
+    }
+    assert.strictEqual(constants.ZLIB_VERNUM > 0, true);
+    assert.strictEqual(constants.DEFLATE, 1);
+    assert.strictEqual(constants.ZSTD_DECOMPRESS, constants.ZSTD_DECODE);
+    assert.strictEqual(zlib.Z_MAX_CHUNK, 128 * 1024 * 1024);
+    assert.strictEqual(zlib.BROTLI_DECODER_ERROR_UNREACHABLE, -31);
+  },
+};
+
 // This test makes sure constants can be accessed from the zlib module directly
 // This is supported by NodeJS, but is deprecated.
 export const constantsDirectlyUnderZlibTest = {
