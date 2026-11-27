@@ -513,6 +513,8 @@ pub mod ffi {
         fn r_roundtrip_kj_exception(exception: KjException) -> KjException;
         fn r_drop_kj_exception(exception: KjException);
         fn r_fail_with_kj_exception(exception: KjException) -> Result<()>;
+        fn r_set_detail_kj_exception(exception: KjException) -> KjException;
+        fn r_clone_kj_exception(exception: KjException) -> KjException;
 
         unsafe fn r_try_return_sliceu8<'a>(s: &'a [u8]) -> Result<&'a [u8]>;
         unsafe fn r_try_return_mutsliceu8<'a>(s: &'a mut [u8]) -> Result<&'a mut [u8]>;
@@ -988,6 +990,18 @@ fn r_drop_kj_exception(exception: cxx::KjException) {
 
 fn r_fail_with_kj_exception(exception: cxx::KjException) -> Result<(), cxx::KjException> {
     Err(exception)
+}
+
+fn r_set_detail_kj_exception(mut exception: cxx::KjException) -> cxx::KjException {
+    exception.set_detail(77, b"set");
+    exception
+}
+
+/// A clone of `exception`, which outlives `exception` itself.
+fn r_clone_kj_exception(exception: cxx::KjException) -> cxx::KjException {
+    let copy = exception.clone();
+    drop(exception);
+    copy
 }
 
 // Panic with CanceledException to simulate cancellation

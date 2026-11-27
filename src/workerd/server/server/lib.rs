@@ -24,6 +24,7 @@ pub mod in_process;
 pub mod listen;
 pub mod loader;
 pub mod log;
+pub mod moved;
 pub mod pyodide;
 pub mod run;
 pub mod services;

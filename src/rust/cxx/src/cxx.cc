@@ -585,6 +585,29 @@ void cxxbridge1$kjException$getDetails(kj::Exception *err,
   }
 }
 
+// find a detail of kj::Exception by id; its bytes stay owned by the exception.
+bool cxxbridge1$kjException$getDetail(const kj::Exception *err,
+                                      uint64_t typeId, const uint8_t **ptr,
+                                      std::size_t *len) noexcept {
+  KJ_IF_SOME(value, err->getDetail(typeId)) {
+    *ptr = value.begin();
+    *len = value.size();
+    return true;
+  }
+  return false;
+}
+
+// set a detail of kj::Exception, replacing any detail with the same id.
+void cxxbridge1$kjException$setDetail(kj::Exception *err, uint64_t typeId,
+                                      const uint8_t *ptr,
+                                      std::size_t len) noexcept {
+  auto data = kj::heapArray<kj::byte>(len);
+  if (len > 0) {
+    data.asPtr().copyFrom(kj::arrayPtr(ptr, len));
+  }
+  err->setDetail(typeId, kj::mv(data));
+}
+
 // copy a kj::Exception into a new one allocated by new.
 kj::Exception *cxxbridge1$kjException$clone(const kj::Exception *err) noexcept {
   return new kj::Exception(err->clone());

@@ -54,7 +54,6 @@ struct Committer;
 struct ResultTask;
 struct PeerSession;
 struct KeepAlive;
-struct MovedHook;
 struct WorkerInterfaceList;
 struct WorkerStub;
 struct UdpFlow;
@@ -476,16 +475,15 @@ inline kj::AsyncOutputStream& http_call_body(HttpCall& call) {
   return *call.request.body;
 }
 kj::Promise<HttpAnswer> http_call_response(kj::Own<HttpCall> call, ::rust::Str header);
-kj::Own<WorkerInterface> worker_interface_watch_moved(
-    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
-kj::Own<WorkerInterface> worker_interface_watch_peer(
-    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
 
 inline uint64_t request_not_delivered_detail_id() {
   return jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID;
 }
 inline uint64_t actor_predecessor_rejected_detail_id() {
   return jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID;
+}
+inline uint64_t request_delivered_detail_id() {
+  return jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID;
 }
 
 uint16_t factory_start_inspector(const WorkerFactory& factory, ::rust::Str address);

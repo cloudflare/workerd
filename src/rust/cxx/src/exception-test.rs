@@ -390,3 +390,38 @@ fn test_kj_exception_clone() {
     assert_eq!(copy.line(), 11);
     assert_eq!(copy.details(), exception.details());
 }
+
+#[test]
+fn test_kj_exception_set_detail() {
+    let mut exception = detailed_exception();
+    exception.set_detail(8, b"added");
+    exception.set_detail(9, b"");
+    assert_eq!(
+        exception.details(),
+        Some(vec![
+            (7, b"detail".to_vec()),
+            (8, b"added".to_vec()),
+            (9, Vec::new()),
+        ])
+    );
+    assert_eq!(exception.what(), "kept");
+    assert_eq!(exception.r#type(), repr::KjExceptionType::Overloaded);
+    assert_eq!(exception.file(), c"kept.rs");
+    assert_eq!(exception.line(), 11);
+}
+
+#[test]
+fn test_kj_exception_set_detail_replaces() {
+    let mut exception = detailed_exception();
+    exception.set_detail(7, b"replaced");
+    assert_eq!(exception.details(), Some(vec![(7, b"replaced".to_vec())]));
+}
+
+#[test]
+fn test_kj_exception_detail() {
+    let mut exception = detailed_exception();
+    assert_eq!(exception.detail(7), Some(&b"detail"[..]));
+    assert_eq!(exception.detail(8), None);
+    exception.set_detail(8, b"");
+    assert_eq!(exception.detail(8), Some(&b""[..]));
+}

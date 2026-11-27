@@ -17,7 +17,6 @@
 
 pub use assets_router::mitigations::should_block_image_response;
 
-pub use crate::actor::MovedHook;
 pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
 pub use crate::channels::ActorNamespaceHandle;
@@ -756,19 +755,6 @@ pub mod ffi {
             client: &RpcClient,
             metadata: KjOwn<RequestMetadata>,
         ) -> KjOwn<WorkerInterface>;
-        /// `inner`, calling `hook.moved()` on each of its events that fails with a `moved`
-        /// answer (`cluster::moved`).
-        fn worker_interface_watch_moved(
-            inner: KjOwn<WorkerInterface>,
-            hook: Box<MovedHook>,
-        ) -> KjOwn<WorkerInterface>;
-        /// `worker_interface_watch_moved` for an interface on a peer. A failure neither side
-        /// marked as before or after delivery is marked as after it, and one that is a
-        /// disconnect calls `hook.lost()`.
-        fn worker_interface_watch_peer(
-            inner: KjOwn<WorkerInterface>,
-            hook: Box<MovedHook>,
-        ) -> KjOwn<WorkerInterface>;
         /// An HTTP request made from Rust: its body is written, then its response awaited.
         type HttpCall;
         /// Starts `method url` with `headers` and a body of `length` bytes on `interface`.
@@ -789,6 +775,9 @@ pub mod ffi {
         /// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
         fn request_not_delivered_detail_id() -> u64;
         fn actor_predecessor_rejected_detail_id() -> u64;
+        /// The detail id (`jsg/exception.h`) that marks a request's failure as after it reached
+        /// the object: `REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID`.
+        fn request_delivered_detail_id() -> u64;
 
         /// Starts the inspector on `address` on its own thread; every isolate the factory
         /// creates afterwards registers with it. Returns the bound port.
@@ -1213,12 +1202,6 @@ pub mod ffi {
 
         /// What a request's interface keeps alive (`worker_interface_attach`).
         type KeepAlive;
-
-        /// What a stub forgets when the instance it reached answers that the object moved
-        /// (`worker_interface_watch_moved`).
-        type MovedHook;
-        fn moved(self: &MovedHook);
-        fn lost(self: &MovedHook);
 
         /// One UDP flow (every datagram to and from one peer, until idle), as the
         /// `workerd::DatagramChannel` of a `UdpConnectCustomEvent`.
