@@ -17288,33 +17288,31 @@ declare namespace Rpc {
                         [K in keyof T]: Stubify<T[K]>;
                       }
                     : T;
-  // Recursively rewrite all `Stub<T>`s with the corresponding `T`s.
+  // Recursively allow `Stub<T>` or the corresponding `T` in RPC arguments.
+  // For callable stubs, keep their properties but omit their call signature so that
+  // inline functions are contextually typed by the original callback signature only.
   // Note we use `StubBase` instead of `Stub` here to avoid circular dependencies:
   // `Stub` depends on `Provider`, which depends on `Unstubify`, which would depend on `Stub`.
   type Unstubify<T> =
     T extends StubBase<infer V>
-      ? V
-      : T extends Map<infer K, infer V>
-        ? Map<Unstubify<K>, Unstubify<V>>
-        : T extends Set<infer V>
-          ? Set<Unstubify<V>>
-          : T extends ReadonlyMap<infer K, infer V>
-            ? ReadonlyMap<Unstubify<K>, Unstubify<V>>
-            : T extends ReadonlySet<infer V>
-              ? ReadonlySet<Unstubify<V>>
-              : T extends Array<infer V>
-                ? Array<Unstubify<V>>
-                : T extends ReadonlyArray<infer V>
-                  ? ReadonlyArray<Unstubify<V>>
-                  : T extends BaseType
-                    ? T
-                    : T extends {
-                          [key: string | number]: any;
-                        }
-                      ? {
-                          [K in keyof T]: Unstubify<T[K]>;
-                        }
-                      : T;
+      ? V | (T extends (...args: any[]) => any ? Pick<T, keyof T> : T)
+      : T extends Stubable
+        ? T
+        : T extends Map<infer K, infer V>
+          ? Map<Unstubify<K>, Unstubify<V>>
+          : T extends Set<infer V>
+            ? Set<Unstubify<V>>
+            : T extends ReadonlyMap<infer K, infer V>
+              ? ReadonlyMap<Unstubify<K>, Unstubify<V>>
+              : T extends ReadonlySet<infer V>
+                ? ReadonlySet<Unstubify<V>>
+                : T extends BaseType
+                  ? T
+                  : T extends object
+                    ? {
+                        [K in keyof T]: Unstubify<T[K]>;
+                      }
+                    : T;
   type UnstubifyAll<A extends any[]> = {
     [I in keyof A]: Unstubify<A[I]>;
   };
@@ -17335,8 +17333,7 @@ declare namespace Rpc {
       ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
       : never;
   // Type for method or property on an RPC interface.
-  // For methods, unwrap `Stub`s in parameters, and rewrite returns to be `Result`s.
-  // Unwrapping `Stub`s allows calling with `Stubable` arguments.
+  // For methods, accept both `Stub` and `Stubable` arguments, and rewrite returns to be `Result`s.
   // For properties, rewrite types to be `Result`s.
   // In each case, unwrap `Promise`s.
   type MethodOrProperty<V> = V extends (...args: infer P) => infer R
