@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/io-channels.h>
+#include <workerd/io/io-context/ffi.h>
 
 #include <cstdint>
 
@@ -23,5 +24,10 @@ void record_drop_context();
 // Keeps `channel`, which Rust took from a Fetcher in a reentry callback, for the test to check
 // (keptChannel in test-bridge-state.h).
 void keep_channel(kj::Rc<IoChannelFactory::SubrequestChannel> channel);
+
+// A prelude for run_in_wait_until() that returns the number 42, or, if `throws`, throws a
+// JavaScript Error ("the prelude threw"), leaving it pending, as a class entrypoint's constructor
+// does when it throws.
+kj::Own<RunPrelude> new_run_prelude(bool throws);
 
 }  // namespace workerd::io_context::test

@@ -92,6 +92,26 @@ mod ffi {
         Dropped,
     }
 
+    /// How the function that the last `run_in_wait_until()` runs ends.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum RunEnding {
+        /// The function returns a future that succeeds.
+        Succeed,
+        /// The function fails with a JavaScript error.
+        Throw,
+        /// The function fails with a KJ exception.
+        FailWithKj,
+        /// The function throws a JavaScript exception, which stays pending, and then fails with a
+        /// KJ exception.
+        FailWithKjWhilePending,
+        /// The function panics.
+        PanicInFunction,
+        /// The future that the function returns panics.
+        PanicInFuture,
+        /// The prelude throws a JavaScript exception, so the function never runs.
+        PreludeThrows,
+    }
+
     /// How the callback of the last `await_promise()` ends once its future has a value.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum PromiseEnding {
@@ -176,16 +196,18 @@ mod ffi {
         Panic,
     }
 
+    #[namespace = "workerd::io_context"]
+    unsafe extern "C++" {
+        include!("workerd/io/io-context/ffi.h");
+
+        type IncomingRequest = io_context::IncomingRequest;
+        type RunPrelude = io_context::RunPrelude;
+    }
+
     #[namespace = "workerd::api::channel_interop"]
     unsafe extern "C++" {
         include!("workerd/api/channel-interop/ffi.h");
         type SubrequestChannel = channel_interop::SubrequestChannel;
-    }
-
-    #[namespace = "workerd::io_context"]
-    unsafe extern "C++" {
-        include!("workerd/io/io-context/ffi.h");
-        type IncomingRequest = io_context::IncomingRequest;
     }
 
     unsafe extern "C++" {
@@ -195,6 +217,7 @@ mod ffi {
         fn record_await_context();
         fn record_drop_context();
         fn keep_channel(channel: KjRc<SubrequestChannel>);
+        fn new_run_prelude(throws: bool) -> KjOwn<RunPrelude>;
     }
 
     extern "Rust" {
@@ -205,6 +228,10 @@ mod ffi {
         fn register_terminating_module(registry: Pin<&mut ModuleRegistry>);
         fn take_probe_observation() -> ProbeObservation;
         unsafe fn await_released(isolate: usize, ending: AwaitEnding) -> Result<()>;
+        fn run_in_wait_until(request: Pin<&mut IncomingRequest>, ending: RunEnding) -> Result<()>;
+        fn run_observation() -> AwaitObservation;
+        fn run_future_done() -> bool;
+        fn run_handle() -> f64;
         fn release_await(value: i32);
         fn release_await_from_thread(value: i32);
         fn await_observation() -> AwaitObservation;
@@ -261,6 +288,14 @@ mod ffi {
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
         fn now_in_current_request_nanos() -> Result<i64>;
         unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<()>;
+        unsafe fn write_logfwdr_with(
+            isolate: usize,
+            channel: u32,
+            message: &[u8],
+            panic: bool,
+        ) -> Result<()>;
+        fn logfwdr_build_times() -> Vec<i64>;
+        unsafe fn new_analytics_engine_request(isolate: usize) -> Result<()>;
 
         /// A `ReentryCallback`, as a crate that hands one to C++ wraps it.
         type HeldReentryCallback;
@@ -381,6 +416,54 @@ unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<
     jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
     IoContext::current(lock)
         .and_then(|context| context.write_logfwdr(channel, message))
+        .map_err(|err| to_io(&err))
+}
+
+thread_local! {
+    /// For each message that `write_logfwdr_with()` built, the request's clock as the build read
+    /// it, in nanoseconds since the Unix epoch, or -1 if there was no current request.
+    static LOGFWDR_BUILD_TIMES: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+}
+
+/// `IoContext::current()?.write_logfwdr_with(channel, ...)`, building a copy of `message`, or
+/// panicking if `panic` is set. Each build is recorded for `logfwdr_build_times()`.
+unsafe fn write_logfwdr_with(
+    isolate: usize,
+    channel: u32,
+    message: &[u8],
+    panic: bool,
+) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let message = message.to_vec();
+    let build = move || {
+        let nanos = IoContext::now_in_current_request().map_or(-1, |now| {
+            let nanos = now
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            i64::try_from(nanos).unwrap_or(i64::MAX)
+        });
+        LOGFWDR_BUILD_TIMES.with_borrow_mut(|times| times.push(nanos));
+        assert!(!panic, "the build was told to panic");
+        message
+    };
+    IoContext::current(lock)
+        .and_then(|context| context.write_logfwdr_with(channel, build))
+        .map_err(|err| to_io(&err))
+}
+
+/// Takes what `write_logfwdr_with()` has recorded since this was last called.
+fn logfwdr_build_times() -> Vec<i64> {
+    LOGFWDR_BUILD_TIMES.take()
+}
+
+/// `IoContext::current()?.new_analytics_engine_request()`.
+unsafe fn new_analytics_engine_request(isolate: usize) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    IoContext::current(lock)
+        .and_then(|context| context.new_analytics_engine_request())
         .map_err(|err| to_io(&err))
 }
 
@@ -517,6 +600,93 @@ unsafe fn await_released(isolate: usize, ending: ffi::AwaitEnding) -> Result<()>
             })
         })
         .map_err(|err| to_io(&err))
+}
+
+/// What the function of the last `run_in_wait_until()` did, as an `AwaitObservation`.
+static RUN_OBSERVATION: AtomicU8 = AtomicU8::new(ffi::AwaitObservation::Pending.repr);
+/// Whether the future of the last `run_in_wait_until()` has completed.
+static RUN_FUTURE_DONE: AtomicBool = AtomicBool::new(false);
+/// The number that the function of the last `run_in_wait_until()` received from its prelude.
+static RUN_HANDLE: Mutex<f64> = Mutex::new(0.0);
+
+/// Sets the run observation to `Dropped` when dropped while it is still `Pending`, that is, if the
+/// function holding it never ran.
+struct RunDropObserver;
+
+impl Drop for RunDropObserver {
+    fn drop(&mut self) {
+        let _ = RUN_OBSERVATION.compare_exchange(
+            ffi::AwaitObservation::Pending.repr,
+            ffi::AwaitObservation::Dropped.repr,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
+    }
+}
+
+/// Outside the lock, runs a function in a waitUntil task of `request` with
+/// `io_context::incoming_request_run_in_wait_until()`, after a C++ prelude that returns the number
+/// 42, or throws if `ending` says so. The function records that it ran, the number and the
+/// `IoContext` it runs in, then ends as `ending` says.
+fn run_in_wait_until(
+    request: Pin<&mut io_context::IncomingRequest>,
+    ending: ffi::RunEnding,
+) -> Result<()> {
+    RUN_OBSERVATION.store(ffi::AwaitObservation::Pending.repr, Ordering::SeqCst);
+    RUN_FUTURE_DONE.store(false, Ordering::SeqCst);
+    *RUN_HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = 0.0;
+    let observer = RunDropObserver;
+    let prelude = ffi::new_run_prelude(ending == ffi::RunEnding::PreludeThrows);
+    io_context::incoming_request_run_in_wait_until(request, prelude, move |lock, handles| {
+        let _observer = observer;
+        ffi::record_await_context();
+        RUN_OBSERVATION.store(ffi::AwaitObservation::Ran.repr, Ordering::SeqCst);
+        let [handle] = handles else {
+            panic!("the prelude returned {} handles", handles.len())
+        };
+        *RUN_HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = f64::from_js(lock, *handle)?;
+        match ending {
+            ffi::RunEnding::Throw => {
+                return Err(jsg::Error::new_type_error("the function threw").into());
+            }
+            ffi::RunEnding::FailWithKj => {
+                return Err(io_context::RunError::Kj(
+                    kj::failed!("jsg.Error: the function failed").into(),
+                ));
+            }
+            ffi::RunEnding::FailWithKjWhilePending => {
+                lock.throw_exception(&jsg::Error::new_type_error("the pending exception"));
+                return Err(io_context::RunError::Kj(
+                    kj::failed!("jsg.Error: the dropped failure").into(),
+                ));
+            }
+            ffi::RunEnding::PanicInFunction => panic!("the function panicked"),
+            _ => {}
+        }
+        Ok(async move {
+            assert!(
+                ending != ffi::RunEnding::PanicInFuture,
+                "the future panicked"
+            );
+            RUN_FUTURE_DONE.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    })
+    .map_err(|exception| std::io::Error::other(exception.to_string()))
+}
+
+fn run_handle() -> f64 {
+    *RUN_HANDLE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn run_observation() -> ffi::AwaitObservation {
+    ffi::AwaitObservation {
+        repr: RUN_OBSERVATION.load(Ordering::SeqCst),
+    }
+}
+
+fn run_future_done() -> bool {
+    RUN_FUTURE_DONE.load(Ordering::SeqCst)
 }
 
 thread_local! {

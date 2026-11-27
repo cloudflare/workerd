@@ -40,6 +40,37 @@ void incoming_request_delivered(IncomingRequest& request,
 void incoming_request_set_scheduled_event_info(
     IncomingRequest& request, kj::Date scheduledTime, ::rust::Slice<const kj::byte> cron);
 
+// Tells the request's tracer, if it has one, that the event is a custom event.
+void incoming_request_set_custom_event_info(IncomingRequest& request);
+
+// Rust type, defined in ffi.rs.
+struct WaitUntilRun;
+
+// The C++ work that a run in a waitUntil task does in IoContext::run() before it calls Rust, as a
+// C++ event's lambda finds the exported handler before it calls it. run() returns the handles that
+// the Rust function receives, in the lock's HandleScope. An exception that it throws fails the run
+// as one that C++ code run() runs throws: a JavaScript exception, left pending, is logged as
+// uncaught. Rust holds no lock while it runs.
+class RunPrelude {
+ public:
+  virtual ~RunPrelude() noexcept(false) = default;
+  virtual kj::Array<v8::Local<v8::Value>> run(Worker::Lock& lock, IoContext& context) = 0;
+
+  // The name of the run's Perfetto span, which covers the prelude and the Rust function. Perfetto
+  // keeps it, so it must have static storage, as a string literal does.
+  virtual kj::StringPtr spanName() const = 0;
+};
+
+// context.addWaitUntil(context.run(...)) on the request's IoContext, as C++ starts an event's
+// handler: in IoContext::run(), under the Perfetto span that `prelude` names and in the request's
+// trace scope, runs `prelude`, then the function of `run` on the handles that `prelude` returned,
+// then waits for the future that the function returned. The task fails with the exception that
+// `prelude` throws, with the exception that the function leaves pending, which run() logs as
+// uncaught, with the KJ exception it fails with, unchanged, or with the exception of its future. If
+// the function panics, the task fails with a KJ exception.
+void incoming_request_run_in_wait_until(
+    IncomingRequest& request, kj::Own<RunPrelude> prelude, ::rust::Box<WaitUntilRun> run);
+
 // IoContext::IncomingRequest::finishScheduled(request). An exception that it throws rejects the
 // promise.
 kj::Promise<::workerd::rust::worker::ScheduledResult> incoming_request_finish_scheduled(
@@ -143,6 +174,18 @@ struct IoFuture;
 struct IoCallback;
 struct IoOwnedSlot;
 struct WaitUntilFuture;
+struct LogfwdrMessage;
+
+// Like io_context_write_logfwdr(), but builds the serialized message with `message` only when it
+// is written: in a Durable Object, once the output gate opens, in IoContext::run(), so that what
+// it reads, such as the time, is read then. A message that fails to build, or is not exactly one
+// serialized message, then fails a waitUntil task rather than this call.
+void io_context_write_logfwdr_with(
+    uint64_t id, uint32_t channel, ::rust::Box<LogfwdrMessage> message);
+
+// LimitEnforcer::newAnalyticsEngineRequest(), which throws a JSG error if the write is over a
+// limit.
+void io_context_new_analytics_engine_request(uint64_t id);
 
 // IoContext::awaitIoAndRun(): waits for `future` as a task of the IoContext, holding a pending
 // event, then runs `callback` with its output in IoContext::run(), in the critical section and

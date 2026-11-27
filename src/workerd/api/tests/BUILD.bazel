@@ -333,6 +333,16 @@ wd_test(
 )
 
 wd_test(
+    src = "test-controller-test.wd-test",
+    data = ["test-controller-test.js"],
+)
+
+wd_test(
+    src = "test-controller-immutable-prototypes-test.wd-test",
+    data = ["test-controller-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-test.js"],
@@ -520,6 +530,15 @@ wd_test(
     src = "analytics-engine-test.wd-test",
     args = ["--experimental"],
     data = ["analytics-engine-test.js"],
+)
+
+wd_test(
+    src = "analytics-engine-rust-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "analytics-engine-test.js",
+        "analytics-engine-test.wd-test",
+    ],
 )
 
 wd_test(
@@ -1047,6 +1066,18 @@ wd_test(
     data = ["htmlrewriter-test.js"],
     # TODO(soon): Test is excessively flaky under ASan, re-enable once fixed
     tags = ["no-asan"],
+)
+
+wd_test(
+    src = "htmlrewriter-security-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-security-test.js"],
+)
+
+wd_test(
+    src = "htmlrewriter-security-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-security-test.js"],
 )
 
 wd_test(

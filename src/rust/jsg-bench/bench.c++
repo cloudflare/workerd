@@ -165,7 +165,7 @@ class Target final: public Object {
   uint32_t bytesCopy(v8::Local<v8::Uint8Array> a) {
     auto bytes = kj::heapArray(a->ByteLength() == 0
             ? kj::ArrayPtr<const kj::byte>()
-            : kj::arrayPtr(static_cast<const kj::byte*>(a->Buffer()->Data()) + a->ByteOffset(),
+            : kj::arrayPtr(static_cast<const kj::byte*>(a->GetBuffer()->Data()) + a->ByteOffset(),
                   a->ByteLength()));
     benchmark::DoNotOptimize(bytes.begin());
     return static_cast<uint32_t>(bytes.size());
@@ -173,7 +173,7 @@ class Target final: public Object {
   uint32_t bytesSum(v8::Local<v8::Uint8Array> a) {
     if (a->ByteLength() == 0) return 0;
     auto bytes = kj::arrayPtr(
-        static_cast<const kj::byte*>(a->Buffer()->Data()) + a->ByteOffset(), a->ByteLength());
+        static_cast<const kj::byte*>(a->GetBuffer()->Data()) + a->ByteOffset(), a->ByteLength());
     uint32_t sum = 0;
     for (auto n: bytes) sum += n;
     return sum;

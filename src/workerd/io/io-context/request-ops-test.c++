@@ -270,6 +270,11 @@ class UncaughtExceptionLog final: public kj::ExceptionCallback {
     }
   }
 
+  // Symbolized frames differ between C++ and Rust, and appear only where llvm-symbolizer exists.
+  StackTraceMode stackTraceMode() override {
+    return StackTraceMode::ADDRESS_ONLY;
+  }
+
   kj::Vector<kj::String> messages;
 
  private:

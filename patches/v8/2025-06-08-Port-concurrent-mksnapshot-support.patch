@@ -6,7 +6,7 @@ Subject: Port concurrent mksnapshot support
 Change-Id: I57c8158ff5d624e5379e6b072f27ac7a40419522
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index d554427c01de432a0e8d66184fd2c5028409d0e6..1ef24b49b7e116e3acac66e6bb8ad9e7dbf2c23e 100644
+index f44d032c5683d26cb2023e038118df5e5a6bed19..7caacefb8377a9124cdf84464d9888306ce8ea12 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -122,6 +122,11 @@ v8_flag(name = "v8_enable_hugepage")

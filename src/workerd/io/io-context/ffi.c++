@@ -10,6 +10,7 @@
 #include <workerd/jsg/inspector.h>
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/worker/bridge.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <v8-inspector.h>
 
@@ -39,6 +40,12 @@ void incoming_request_delivered(IncomingRequest& request,
   location.columnNumber = column;
   request.delivered(kj::str(kj::from<kj_rs::Rust>(eventType).asChars()),
       DropQueuedCrossContextActions::NO, location);
+}
+
+void incoming_request_set_custom_event_info(IncomingRequest& request) {
+  KJ_IF_SOME(tracer, request.getWorkerTracer()) {
+    tracer.setEventInfo(request, tracing::CustomEventInfo());
+  }
 }
 
 void incoming_request_set_scheduled_event_info(
@@ -92,6 +99,47 @@ void setTag(Span& span, Literal key, Value value) {
     span.setTag(wrapLiteral(key), wrapLiteral(value));
   } else {
     span.setTag(wrapLiteral(key), value);
+  }
+}
+
+// Copies `bytes`, which must be exactly one serialized Cap'n Proto message, to words: Rust does
+// not align them.
+kj::Array<capnp::word> copyMessage(kj::ArrayPtr<const kj::byte> bytes) {
+  KJ_REQUIRE(bytes.size() > 0, "the serialized message is empty");
+  KJ_REQUIRE(bytes.size() % sizeof(capnp::word) == 0,
+      "the serialized message is not a whole number of words");
+  auto words = kj::heapArray<capnp::word>(bytes.size() / sizeof(capnp::word));
+  words.asBytes().copyFrom(bytes);
+  capnp::FlatArrayMessageReader reader(words);
+  KJ_REQUIRE(reader.getEnd() == words.end(), "bytes follow the serialized message");
+  return words;
+}
+
+// IoContext::writeLogfwdr() for a message from copyMessage().
+void writeMessage(IoContext& context, uint32_t channel, kj::ArrayPtr<const capnp::word> words) {
+  capnp::FlatArrayMessageReader reader(words);
+  context.writeLogfwdr(channel, [&](capnp::AnyPointer::Builder builder) {
+    builder.set(reader.getRoot<capnp::AnyPointer>());
+  });
+}
+
+// Calls `write(context)` now or, in a Durable Object, once the output gate opens, so that the
+// message does not leave before the storage writes that precede it are confirmed, as in
+// AnalyticsEngine::writeDataPoint(). A later write runs in a waitUntil task, which fails if it
+// throws.
+template <typename Write>
+void afterOutputLocks(IoContext& context, Write write) {
+  KJ_IF_SOME(outputLocks, context.waitForOutputLocksIfNecessary()) {
+    context.addWaitUntil(
+        outputLocks.then([weakRef = context.getWeakRef(), write = kj::mv(write)]() mutable {
+      // The IoContext owns its waitUntil tasks, so it is alive while one runs.
+      auto& context = KJ_ASSERT_NONNULL(weakRef->tryGet());
+      // IoChannelFactory::writeLogfwdr() needs the current IoContext, so the write runs in it.
+      return context.run(
+          [write = kj::mv(write)](Worker::Lock&, IoContext& context) mutable { write(context); });
+    }));
+  } else {
+    write(context);
   }
 }
 
@@ -177,39 +225,24 @@ int64_t io_context_now(uint64_t id) {
 
 void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const uint8_t> message) {
   auto& context = currentWithId(id);
+  // The message is checked now, so that an invalid one fails this call rather than the write.
+  auto words = copyMessage(kj::arrayPtr(message.data(), message.size()));
+  afterOutputLocks(context, [channel, words = kj::mv(words)](IoContext& context) {
+    writeMessage(context, channel, words);
+  });
+}
 
-  // Rust does not align the bytes to words, so they are copied.
-  auto bytes = kj::arrayPtr(message.data(), message.size());
-  KJ_REQUIRE(bytes.size() > 0, "the serialized message is empty");
-  KJ_REQUIRE(bytes.size() % sizeof(capnp::word) == 0,
-      "the serialized message is not a whole number of words");
-  auto words = kj::heapArray<capnp::word>(bytes.size() / sizeof(capnp::word));
-  words.asBytes().copyFrom(bytes);
-  capnp::FlatArrayMessageReader reader(words);
-  KJ_REQUIRE(reader.getEnd() == words.end(), "bytes follow the serialized message");
+void io_context_write_logfwdr_with(
+    uint64_t id, uint32_t channel, ::rust::Box<LogfwdrMessage> message) {
+  afterOutputLocks(
+      currentWithId(id), [channel, message = kj::mv(message)](IoContext& context) mutable {
+    auto bytes = logfwdr_message_build(kj::mv(message));
+    writeMessage(context, channel, copyMessage(kj::arrayPtr(bytes.data(), bytes.size())));
+  });
+}
 
-  KJ_IF_SOME(outputLocks, context.waitForOutputLocksIfNecessary()) {
-    // In a Durable Object, the message must not leave before the storage writes that precede it
-    // are confirmed, as in AnalyticsEngine::writeDataPoint(). The message is copied now, so that
-    // an invalid one fails this call rather than the write.
-    auto copy = kj::heap<capnp::MallocMessageBuilder>();
-    copy->getRoot<capnp::AnyPointer>().set(reader.getRoot<capnp::AnyPointer>());
-    context.addWaitUntil(
-        outputLocks.then([weakRef = context.getWeakRef(), channel, copy = kj::mv(copy)]() mutable {
-      // The IoContext owns its waitUntil tasks, so it is alive while one runs.
-      auto& context = KJ_ASSERT_NONNULL(weakRef->tryGet());
-      // IoChannelFactory::writeLogfwdr() needs the current IoContext, so the write runs in it.
-      return context.run([channel, copy = kj::mv(copy)](Worker::Lock&, IoContext& context) mutable {
-        context.writeLogfwdr(channel, [&](capnp::AnyPointer::Builder builder) {
-          builder.set(copy->getRoot<capnp::AnyPointer>().asReader());
-        });
-      });
-    }));
-  } else {
-    context.writeLogfwdr(channel, [&](capnp::AnyPointer::Builder builder) {
-      builder.set(reader.getRoot<capnp::AnyPointer>());
-    });
-  }
+void io_context_new_analytics_engine_request(uint64_t id) {
+  currentWithId(id).getLimitEnforcer().newAnalyticsEngineRequest();
 }
 
 void io_context_add_wait_until(uint64_t id, ::rust::Box<WaitUntilFuture> future) {
@@ -250,6 +283,33 @@ void io_context_await_io_and_run(
     }
     KJ_UNREACHABLE;
   });
+}
+
+void incoming_request_run_in_wait_until(
+    IncomingRequest& request, kj::Own<RunPrelude> prelude, ::rust::Box<WaitUntilRun> run) {
+  auto& context = request.getContext();
+  context.addWaitUntil(
+      context.run([prelude = kj::mv(prelude), run = kj::mv(run)](
+                      Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
+    TRACE_EVENT("workerd", perfetto::StaticString(prelude->spanName().cStr()));
+    auto traceScope = context.makeRequestTraceScope(lock);
+    auto handles = prelude->run(lock, context);
+    auto ffiHandles =
+        KJ_MAP(handle, handles) { return ::workerd::rust::jsg::to_ffi(kj::mv(handle)); };
+    switch (wait_until_run_start(reinterpret_cast<uintptr_t>(lock.getIsolate()), *run,
+        ::rust::Slice<const ::workerd::rust::jsg::Local>(ffiHandles.begin(), ffiHandles.size()))) {
+      case IoCallbackOutcome::Succeeded:
+        return wait_until_run_wait(kj::mv(run));
+      case IoCallbackOutcome::Failed:
+        // As in io_context_await_io_and_run(): run() logs the exception as uncaught and fails
+        // the task with it.
+        throwPendingToRun();
+      case IoCallbackOutcome::Panicked:
+        // As in io_context_await_io_and_run().
+        KJ_FAIL_ASSERT("the function of IoContext::IncomingRequest::run_in_wait_until() panicked");
+    }
+    KJ_UNREACHABLE;
+  }));
 }
 
 ReentryCallback::ReentryCallback(IoContext& context, ::rust::Box<ReentryFn> function)

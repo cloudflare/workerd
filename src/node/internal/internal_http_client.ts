@@ -59,7 +59,41 @@ const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 // (colon before the first separator).
 const AUTHORITY_OVERRIDE_REGEX = /^(?:[/\\]{2}|[^/\\]*:)/;
 
+// Matches hosts that `new URL(`http://${host}`)` would not read as a host
+// alone: a delimiter that ends the authority (/ \ ? #) or makes what comes
+// before it userinfo (@), and the control characters and space, which the
+// parser strips or removes.
+const INVALID_HOST_REGEX = /[^\u0021-\uffff]|[/\\?#@]/;
+
 type WriteCallback = (err?: Error) => void;
+
+// Throws unless `new URL(path, base)` keeps the authority of `base`. Runs in
+// the constructor and again when the request is sent, since `path` is a
+// public field that callers may reassign in between.
+function validatePath(path: string): void {
+  // This check comes first because the URL parser strips leading control
+  // characters and spaces, and removes tabs and newlines anywhere. Without
+  // it, "\t//evil.test" would pass the check below and then be parsed as
+  // "//evil.test".
+  if (INVALID_PATH_REGEX.test(path)) {
+    throw new ERR_UNESCAPED_CHARACTERS('Request path');
+  }
+  // Reject paths that would override the URL authority. Two cases:
+  //
+  // 1. Network-path references and backslash variants - the WHATWG URL
+  //    parser treats \ as / for special schemes, so any pair of / and \
+  //    at the start (//  /\  \/  \\) introduces an authority.
+  //
+  // 2. Absolute-form URLs - a scheme (e.g. "http:") before the first
+  //    separator causes the parser to ignore the base entirely.
+  if (AUTHORITY_OVERRIDE_REGEX.test(path)) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'options.path',
+      path,
+      'must be a path-only request target'
+    );
+  }
+}
 
 function validateHost(host: unknown, name: string): string {
   if (host != null && typeof host !== 'string') {
@@ -69,7 +103,26 @@ function validateHost(host: unknown, name: string): string {
       host
     );
   }
+  if (host) {
+    validateHostSyntax(host, name);
+  }
   return host as string;
+}
+
+// Throws unless `new URL(`http://${host}`)` takes its authority from all of
+// `host`. Node passes the host to DNS as it is, where such a host fails;
+// the URL parser would instead send to only part of it, reading the rest
+// as userinfo, path, query or fragment.
+// Runs in the constructor and again when the request is sent, since `host`
+// is a public field that callers may reassign in between.
+function validateHostSyntax(host: string, name: string): void {
+  if (INVALID_HOST_REGEX.test(host)) {
+    throw new ERR_INVALID_ARG_VALUE(
+      `options.${name}`,
+      host,
+      'must be a host name or address'
+    );
+  }
 }
 
 // @ts-expect-error TS2720 Complaining due to "override req" being undefined.
@@ -127,25 +180,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     }
 
     if (options.path) {
-      if (INVALID_PATH_REGEX.test(options.path)) {
-        throw new ERR_UNESCAPED_CHARACTERS('Request path');
-      }
-      // Reject paths that would override the URL authority when passed to
-      // `new URL(path, base)`.  Two cases:
-      //
-      // 1. Network-path references and backslash variants - the WHATWG URL
-      //    parser treats \ as / for special schemes, so any pair of / and \
-      //    at the start (//  /\  \/  \\) introduces an authority.
-      //
-      // 2. Absolute-form URLs - a scheme (e.g. "http:") before the first
-      //    separator causes the parser to ignore the base entirely.
-      if (AUTHORITY_OVERRIDE_REGEX.test(options.path)) {
-        throw new ERR_INVALID_ARG_VALUE(
-          'options.path',
-          options.path,
-          'must be a path-only request target'
-        );
-      }
+      validatePath(options.path);
     }
 
     type AgentLike = Agent | boolean | null | undefined;
@@ -389,27 +424,23 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       return;
     }
 
-    let url = new URL(`http://${this.host}`);
+    const host = this.host;
+    // The caller may have reassigned `host` since the constructor checked
+    // it. A failure here fails the request through #onFinish().
+    validateHostSyntax(host, 'host');
+    let url = new URL(`http://${host}`);
     url.protocol = this.protocol;
     url.port = this.port;
 
-    if (this.path.length > 0 && this.path !== '/') {
-      // Defense-in-depth: re-validate in case this.path was mutated after
-      // construction (the field is public).
-      if (AUTHORITY_OVERRIDE_REGEX.test(this.path)) {
-        this.destroy(
-          new ERR_INVALID_ARG_VALUE(
-            'options.path',
-            this.path,
-            'must be a path-only request target'
-          )
-        );
-        return;
-      }
+    const path = this.path;
+    if (path.length > 0 && path !== '/') {
+      // The caller may have reassigned `path` since the constructor checked
+      // it. A failure here fails the request through #onFinish().
+      validatePath(path);
       // We pass `path` as the first argument since it can contain search and hash components.
       // Therefore, running the pathname setter will not work.
       // Since this is an extremely costly operation, we only do it if necessary.
-      url = new URL(this.path, url);
+      url = new URL(path, url);
     }
 
     // Our fetch implementation has the following limitation:

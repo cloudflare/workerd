@@ -9,7 +9,8 @@
 //! `jsg`.
 //!
 //! It also binds `IoContext::IncomingRequest` ([`IncomingRequest`]), for the code that delivers an
-//! event: [`incoming_request_delivered`], [`incoming_request_finish_scheduled`] and
+//! event: [`incoming_request_delivered`], [`incoming_request_finish_scheduled`],
+//! [`incoming_request_run_in_wait_until`], [`incoming_request_set_custom_event_info`] and
 //! [`incoming_request_set_scheduled_event_info`] are the calls on it, made as C++ makes them.
 
 mod ffi;
@@ -34,11 +35,15 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 pub use ffi::DeliveredLocation;
+pub use ffi::RunError;
 use ffi::bridge;
 pub use ffi::bridge::IncomingRequest;
+pub use ffi::bridge::RunPrelude;
 pub use ffi::bridge::incoming_request_finish_scheduled;
+pub use ffi::bridge::incoming_request_set_custom_event_info;
 pub use ffi::bridge::incoming_request_set_scheduled_event_info;
 pub use ffi::incoming_request_delivered;
+pub use ffi::incoming_request_run_in_wait_until;
 use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;
@@ -122,6 +127,38 @@ impl<'s> IoContext<'s> {
     /// if this `IoContext` is no longer the current one.
     pub fn write_logfwdr(&self, channel: u32, message: &[u8]) -> jsg::Result<()> {
         Ok(bridge::io_context_write_logfwdr(self.id, channel, message)?)
+    }
+
+    /// Like [`IoContext::write_logfwdr`], but calls `build` for the message only when it is
+    /// written: at once, or in a Durable Object once the output gate opens. What `build` reads,
+    /// such as [`IoContext::now_in_current_request`], is then read at that time, with this
+    /// `IoContext` current but without a lock. `build` is dropped without being called if the
+    /// `IoContext` is destroyed first, and must not panic when dropped.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one, or if
+    /// `build` is called now and panics or returns anything but exactly one valid serialized
+    /// message. When `build` is called later, those failures fail a `waitUntil` task instead, so
+    /// whatever can fail should be checked before this call.
+    pub fn write_logfwdr_with(
+        &self,
+        channel: u32,
+        build: impl FnOnce() -> Vec<u8> + 'static,
+    ) -> jsg::Result<()> {
+        let message = Box::new(ffi::LogfwdrMessage(Box::new(build)));
+        Ok(bridge::io_context_write_logfwdr_with(
+            self.id, channel, message,
+        )?)
+    }
+
+    /// Counts a write to Workers Analytics Engine against the request's limits, as C++
+    /// `LimitEnforcer::newAnalyticsEngineRequest()` does.
+    ///
+    /// # Errors
+    /// Fails with the error the limit enforcer throws if the write is over a limit, and with an
+    /// internal error if this `IoContext` is no longer the current one.
+    pub fn new_analytics_engine_request(&self) -> jsg::Result<()> {
+        Ok(bridge::io_context_new_analytics_engine_request(self.id)?)
     }
 
     /// Waits for `future` as part of this request, then calls `callback` with its output in this

@@ -250,6 +250,8 @@ wd_cc_library(
         "//src/workerd/api:urlpattern-standard",
         "//src/workerd/api:worker-loader",
         "//src/workerd/api:wrapped-binding",
+        "//src/workerd/api/analytics-engine-api",
+        "//src/workerd/api/analytics-engine-api:ffi.rs@cxx",
         "//src/workerd/api/bench-api",
         "//src/workerd/api/bench-api:ffi.rs@cxx",
         "//src/workerd/api/execution-context",

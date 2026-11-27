@@ -204,15 +204,6 @@ class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
   static jsg::Ref<WorkerGlobalScope> constructor() = delete;
 };
 
-// Controller type for test handler.
-//
-// At present, this has no methods. It is defined for consistency with other handlers and on the
-// assumption that we'll probably want to put something here someday.
-class TestController: public jsg::Object {
- public:
-  JSG_RESOURCE_TYPE(TestController) {}
-};
-
 // Structured types for the cache purge APIs (ctx.cache.purge() and ctx.cache.invalidate()).
 // These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
 // NOTE: TypeScript stubs for CachePurgeError, CachePurgeResult, CachePurgeOptions, and
@@ -421,6 +412,12 @@ class ExecutionContext: public jsg::Object {
 
     JSG_METHOD(abort);
 
+    // TestController, the first argument of a test() handler, is a Rust resource (api/test-api).
+    // Rust RTTI reaches the type generator only through module registration, so it can't join
+    // the global scope's types and is declared by hand. It sits here, before ExecutionContext,
+    // where the generated declarations had it.
+    JSG_TS_DEFINE(interface TestController {});
+
     // TODO(soon): This is getting unwieldy.
     if (flags.getEnableCtxExports()) {
       if (flags.getEnableVersionApi()) {
@@ -543,10 +540,10 @@ struct ExportedHandler {
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
-  using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
-      jsg::Value env,
-      jsg::Optional<exportedhandler::ExecutionContext> ctx);
-  jsg::LenientOptional<jsg::Function<TestHandler>> test;
+  // A test event calls it with a TestController, which is a Rust resource (api/test-api) that a
+  // jsg::Function signature can't name, so it is held untyped and called from Rust
+  // (src/workerd/io/entrypoint/test.rs). See ServiceWorkerGlobalScope::getTestHandler().
+  jsg::LenientOptional<jsg::V8Ref<v8::Function>> test;
 
   using HibernatableWebSocketMessageHandler = kj::Promise<void>(
       jsg::Ref<WebSocket>, kj::OneOf<kj::String, kj::Array<byte>> message);
@@ -764,10 +761,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  // Received test() (called from C++, not JS). See WorkerInterface::test(). This version returns
-  // a jsg::Promise<void>; it fails if an exception is thrown. WorkerEntrypoint will catch these
-  // and report them.
-  jsg::Promise<void> test(Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
+  // The test() function of `exportedHandler`, which a test event calls (called from C++, not JS).
+  // See WorkerInterface::test(). Throws a JavaScript Error, as a KJ exception, under Service
+  // Workers syntax and when the export has no test() function; WorkerEntrypoint reports it as the
+  // test's failure.
+  v8::Local<v8::Function> getTestHandler(
+      jsg::Lock& js, kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received bench() (called from C++, not JS). See WorkerInterface::bench(). Runs the handler to
   // register cases, then runs them, through Worker::Api::runBench(). Resolves with the group's
@@ -1303,9 +1302,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 };
 
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
-  api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
-      api::ExecutionContext, api::ExportedHandler,                                                 \
-      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+  api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::ExecutionContext,                    \
+      api::ExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator, \
       api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
       api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE

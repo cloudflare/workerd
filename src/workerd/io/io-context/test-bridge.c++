@@ -39,6 +39,34 @@ void record_drop_context() {
       [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });
 }
 
+namespace {
+
+class TestRunPrelude final: public RunPrelude {
+ public:
+  explicit TestRunPrelude(bool throws): throws(throws) {}
+
+  kj::Array<v8::Local<v8::Value>> run(Worker::Lock& lock, IoContext&) override {
+    jsg::Lock& js = lock;
+    if (throws) {
+      js.throwException(js.error("the prelude threw"));
+    }
+    return kj::arr<v8::Local<v8::Value>>(js.num(42));
+  }
+
+  kj::StringPtr spanName() const override {
+    return "run_in_wait_until()"_kj;
+  }
+
+ private:
+  bool throws;
+};
+
+}  // namespace
+
+kj::Own<RunPrelude> new_run_prelude(bool throws) {
+  return kj::heap<TestRunPrelude>(throws);
+}
+
 void record_async_context(uintptr_t isolate) {
   auto& js = jsg::Lock::from(reinterpret_cast<v8::Isolate*>(isolate));
   recordedAsyncContext = kj::str("none");

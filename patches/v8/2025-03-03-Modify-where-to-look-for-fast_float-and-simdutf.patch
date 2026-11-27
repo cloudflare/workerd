@@ -12,7 +12,7 @@ include changes are needed.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index d2ff5969960d5a6dbc5a9bec36fa548f8160e5f5..8eaf2582fe897c96457c4ea7de41145240af4ef8 100644
+index ddde1f9e0c8ba7effd48934becaa99305fe449cd..d21c241fd5231e4040b0389b8fe24b5422902c47 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -4579,7 +4579,6 @@ filegroup(
@@ -73,7 +73,7 @@ index d2ff5969960d5a6dbc5a9bec36fa548f8160e5f5..8eaf2582fe897c96457c4ea7de411452
  
  v8_library(
      name = "v8_libshared",
-@@ -4996,15 +4996,15 @@ v8_library(
+@@ -4996,9 +4996,7 @@ v8_library(
      }),
      deps = [
          ":lib_dragonbox",
@@ -83,15 +83,16 @@ index d2ff5969960d5a6dbc5a9bec36fa548f8160e5f5..8eaf2582fe897c96457c4ea7de411452
          ":v8_libbase",
          "@abseil-cpp//absl/container:btree",
          "@abseil-cpp//absl/container:flat_hash_map",
-         "@abseil-cpp//absl/container:flat_hash_set",
+@@ -5006,6 +5004,8 @@ v8_library(
          "@abseil-cpp//absl/functional:overload",
+         "@boringssl//:crypto",
          "@highway//:hwy",
 +        "@fast_float",
 +        "@simdutf",
      ],
  )
  
-@@ -5123,7 +5123,7 @@ v8_binary(
+@@ -5124,7 +5124,7 @@ v8_binary(
          "//conditions:default": [],
      }),
      deps = [

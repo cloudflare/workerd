@@ -48,6 +48,9 @@ switch (MODE) {
     // pipeline.
     captured = env.KEY;
     break;
+  case 'analytics-engine':
+    captured = env.AE;
+    break;
   default:
     throw new Error(`unknown MODE ${MODE}`);
 }
@@ -92,10 +95,31 @@ async function checks() {
         sameBinding: captured === env.KEY,
         isKey: captured.type === 'secret' && captured.algorithm.name === 'HMAC',
       };
+    case 'analytics-engine': {
+      // The binding writes the data point to this Worker's fetch handler, which delivers it.
+      const arrived = new Promise((resolve) => {
+        deliverDataPoint = resolve;
+      });
+      captured.writeDataPoint({ blobs: ['b'] });
+      const point = await arrived;
+      const text = (bytes) => String.fromCharCode(...bytes);
+      return {
+        sameBinding: captured === env.AE,
+        dataset: text(point.dataset) === 'analytics-engine',
+        blob: text(point.blob1) === 'b',
+      };
+    }
   }
 }
 
-async function fetch() {
+// Set while the analytics-engine case waits for its data point.
+let deliverDataPoint;
+
+async function fetch(request) {
+  if (MODE === 'analytics-engine' && request.method === 'POST') {
+    deliverDataPoint(await request.json());
+    return new Response('');
+  }
   return Response.json({
     mode: MODE,
     snapshotUsed: unsafe.startedFromStartupSnapshot(),
@@ -110,7 +134,7 @@ async function test(ctrl, env) {
 
   // Cases whose top level the zygote can carry: started from the snapshot when the pipeline is
   // on.
-  const transferable = ['rpc', 'durable-object'];
+  const transferable = ['rpc', 'durable-object', 'analytics-engine'];
   // Cases that fail the zygote, or whose bindings keep them out of the pipeline: always plain
   // Workers.
   const fallback = ['rpc-property', 'wrapped', 'crypto-key'];

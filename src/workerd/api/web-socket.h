@@ -790,30 +790,19 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   // Tracks hibernatable auto-response status to avoid racing between regular websocket
   // messages and auto-responses.
   struct AutoResponse {
-    using OwnedAutoResponsePromise =
-        kj::OneOf<IoOwn<kj::Promise<void>>, kj::Own<kj::Promise<void>>>;
     struct Pending {
       kj::String message;
       // Queued auto-responses are historically fire-and-forget. Completion means the pump no
       // longer owns this item, not necessarily that the send succeeded.
       kj::Own<kj::PromiseFulfiller<void>> fulfiller;
     };
-    kj::Maybe<OwnedAutoResponsePromise> ongoingAutoResponse;
+    kj::Maybe<kj::Promise<void>> ongoingAutoResponse;
     // Allows a replacement adapter to wait for this adapter's pump without keeping it alive.
     kj::Maybe<kj::ForkedPromise<void>> maybePumpCompletion;
     workerd::util::Queue<Pending> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
     bool isClosed = false;
-
-    JSG_MEMORY_INFO(AutoResponse) {
-      tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
-      if (maybePumpCompletion != kj::none) {
-        tracker.trackFieldWithSize("maybePumpCompletion", sizeof(kj::ForkedPromise<void>));
-      }
-      pendingAutoResponseDeque.forEach(
-          [&](const Pending& pending) { tracker.trackField(nullptr, pending.message); });
-    }
   };
 
   // Maximum allowed size for WebSocket messages
@@ -936,10 +925,11 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   // the map without locking the isolate.
   IoOwn<OutgoingMessagesMap> outgoingMessages;
 
-  // Auto-responses can run without a current IoContext, so they access the state directly while
-  // the IoOwn ensures it is destroyed by the owning IoContext.
-  IoOwn<AutoResponse> autoResponseStatusOwner;
-  AutoResponse& autoResponseStatus;
+  // Auto-responses can run without a current IoContext, in the HibernationManager's read loop.
+  // The owning IoContext can be destroyed while the HibernationManager still holds this WebSocket
+  // (an actor abort, or a reset that skips hibernation, does it), so code that may run outside it
+  // must use `tryGetWithoutCurrentContext()`.
+  IoOwn<AutoResponse> autoResponseStatus;
 
   kj::Maybe<kj::Own<WebSocketObserver>> observer;
 

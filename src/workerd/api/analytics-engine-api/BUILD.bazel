@@ -1,0 +1,21 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# AnalyticsEngine, the JavaScript API of a Workers Analytics Engine binding, in Rust. C++ creates
+# it for an Analytics Engine binding when the RUST_ANALYTICS_ENGINE autogate is on;
+# analytics-engine.c++ otherwise.
+wd_rust_crate(
+    name = "analytics-engine-api",
+    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    test_deps = ["//src/rust/jsg-test"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/workerd/api:analytics-engine_capnp_rust",
+        "//src/workerd/io/io-context",
+        "@crates_vendor//capnp",
+    ],
+)

@@ -6,6 +6,7 @@
 
 #include "workerd-api-isolate.h"
 
+#include <workerd/api/analytics-engine-api/ffi.rs.h>
 #include <workerd/api/bench-api/ffi.rs.h>
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/execution-context/execution-context.h>
@@ -710,6 +711,13 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     case Global::ANALYTICS_ENGINE: {
       auto ae = global.getAnalyticsEngine();
       // Use subrequestChannel as logfwdrChannel
+      if (util::Autogate::isEnabled(util::AutogateKey::RUST_ANALYTICS_ENGINE)) {
+        auto dataset = ae.getDataset();
+        return jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
+            api::analytics_engine_new(lock.v8Isolate, ae.getChannel(),
+                ::rust::Str(dataset.begin(), dataset.size()), /*schema_version=*/0,
+                /*account_id=*/1)));
+      }
       return lock.wrap(context,
           lock.alloc<api::AnalyticsEngine>(
               ae.getChannel(), kj::str(ae.getDataset()), /*version=*/0, /*ownerId=*/1));

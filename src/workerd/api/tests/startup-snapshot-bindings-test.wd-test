@@ -29,6 +29,7 @@ const unitTests :Workerd.Config = (
           (name = "rpc-property", service = "rpc-property"),
           (name = "wrapped", service = "wrapped"),
           (name = "crypto-key", service = "crypto-key"),
+          (name = "analytics-engine", service = "analytics-engine"),
         ],
       )
     ),
@@ -96,6 +97,25 @@ const unitTests :Workerd.Config = (
               usages = [sign, verify],
             )
           ),
+        ],
+      )
+    ),
+    ( name = "analytics-engine",
+      worker = (
+        modules = .modules,
+        # The data point the case writes settles a promise its request created.
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+          "unsafe_module",
+          "handle_cross_request_promise_resolution",
+        ],
+        bindings = [
+          (name = "MODE", json = "\"analytics-engine\""),
+          # The binding writes each data point to this Worker's own fetch handler, with the
+          # service's name as its dataset.
+          (name = "AE", analyticsEngine = "analytics-engine"),
         ],
       )
     ),

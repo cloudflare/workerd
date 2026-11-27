@@ -559,6 +559,9 @@ uint8_t* local_array_buffer_data(const Local& buffer);
 uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength);
 size_t local_array_buffer_get_backing_store(const Local& buffer);
 
+// Local<SharedArrayBuffer>
+size_t local_shared_array_buffer_get_backing_store(const Local& buffer);
+
 // Local<WasmModuleObject>
 kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module);
 

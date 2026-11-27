@@ -149,6 +149,13 @@ jobs:
               EXTRA_BAZEL_ARGS=$RUNNER_EXTRA_BAZEL_ARGS
             fi
           fi
+          if [ "$BAZELFLARE" = false ]; then
+            # The remote repo contents cache crashes Bazel when the remote cache has evicted one of
+            # its files (bazelbuild/bazel#31197), and the devprod cache evicts. .bazelrc turns it on
+            # for bazelflare's sake; turn it off here, where .bazelrc imports runner settings.
+            mkdir -p .local
+            echo "startup --noexperimental_remote_repo_contents_cache" > .local/bazelrc
+          fi
           {
             echo "BAZELFLARE=$BAZELFLARE"
             echo "BAZEL_REMOTE_ARGS=$BAZEL_REMOTE_ARGS"

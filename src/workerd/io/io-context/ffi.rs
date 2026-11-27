@@ -6,10 +6,10 @@
 
 #![allow(
     unsafe_code,
-    reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() and reentry_fn_run() open \
-              a scope C++ has set up, the inspector call takes V8 handles, the trace span calls \
-              take literals that C++ does not copy, and IsolateWeakRef and AsyncResource \
-              are declared Send"
+    reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run(), reentry_fn_run() and \
+              wait_until_run_start() open a scope C++ has set up, the inspector call takes V8 \
+              handles, the trace span calls and the run in a waitUntil task take literals that \
+              C++ does not copy, and IsolateWeakRef and AsyncResource are declared Send"
 )]
 
 use std::any::Any;
@@ -95,6 +95,12 @@ pub mod bridge {
         fn io_context_require_current(id: u64) -> Result<()>;
         fn io_context_now(id: u64) -> Result<i64>;
         fn io_context_write_logfwdr(id: u64, channel: u32, message: &[u8]) -> Result<()>;
+        fn io_context_write_logfwdr_with(
+            id: u64,
+            channel: u32,
+            message: Box<LogfwdrMessage>,
+        ) -> Result<()>;
+        fn io_context_new_analytics_engine_request(id: u64) -> Result<()>;
         fn io_context_await_io_and_run(
             id: u64,
             future: Box<IoFuture>,
@@ -225,16 +231,31 @@ pub mod bridge {
             scheduled_time: KjDate,
             cron: &[u8],
         ) -> Result<()>;
+        /// Tells the request's tracer, if it has one, that the event is a custom event.
+        fn incoming_request_set_custom_event_info(request: Pin<&mut IncomingRequest>)
+        -> Result<()>;
+        /// The C++ work that a run in a waitUntil task does before it calls Rust.
+        type RunPrelude;
+
+        /// `context.addWaitUntil(context.run(...))` on the request's `IoContext`, running
+        /// `prelude`, then `run` with the handles `prelude` returns, under the Perfetto span that
+        /// `prelude` names, in the request's trace scope.
+        fn incoming_request_run_in_wait_until(
+            request: Pin<&mut IncomingRequest>,
+            prelude: KjOwn<RunPrelude>,
+            run: Box<WaitUntilRun>,
+        ) -> Result<()>;
         /// `IncomingRequest::finishScheduled(self)`. An exception that it throws fails the future.
         async fn incoming_request_finish_scheduled(
             request: KjOwn<IncomingRequest>,
         ) -> Result<ScheduledResult>;
     }
 
-    // Dropping a `KjOwn` of it is generated here, where it is declared.
+    // Dropping a `KjOwn` of them is generated here, where they are declared.
     impl KjOwn<IncomingRequest> {}
+    impl KjOwn<RunPrelude> {}
 
-    /// How `io_callback_run()` ended.
+    /// How `io_callback_run()` or `wait_until_run_start()` ended.
     enum IoCallbackOutcome {
         Succeeded,
         /// The callback failed, leaving an exception pending, or a termination.
@@ -272,6 +293,22 @@ pub mod bridge {
     }
 
     extern "Rust" {
+        /// The function that `incoming_request_run_in_wait_until()` runs, then the future it
+        /// returned.
+        type WaitUntilRun;
+
+        /// # Safety
+        /// C++ calls this once, from `IoContext::run()`, with the isolate locked, a context
+        /// entered and a `HandleScope` open, which outlive the call and hold `handles`.
+        unsafe fn wait_until_run_start(
+            isolate: usize,
+            run: &mut WaitUntilRun,
+            handles: &[Local],
+        ) -> Result<IoCallbackOutcome>;
+        async fn wait_until_run_wait(run: Box<WaitUntilRun>) -> Result<()>;
+    }
+
+    extern "Rust" {
         type IoFuture;
         type IoOutput;
         type IoCallback;
@@ -283,6 +320,10 @@ pub mod bridge {
         fn aborted(self: &AbortCallback, exception: KjException);
 
         type WaitUntilFuture;
+
+        /// Builds a message for `io_context_write_logfwdr_with()`.
+        type LogfwdrMessage;
+        fn logfwdr_message_build(message: Box<LogfwdrMessage>) -> Result<Vec<u8>>;
 
         async fn io_future_wait(future: Box<IoFuture>) -> Box<IoOutput>;
         async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<()>;
@@ -484,6 +525,27 @@ async fn reentry_call_wait(call: Box<ReentryCall>) -> Result<(), cxx::KjExceptio
     Ok(())
 }
 
+/// What `IoContext::write_logfwdr_with()` builds its message with. C++ drops it, unbuilt, if the
+/// `IoContext` is destroyed before the output gate opens.
+pub struct LogfwdrMessage(pub Box<dyn FnOnce() -> Vec<u8>>);
+
+/// Builds `message`. A panic fails the write, rather than unwinding into C++.
+#[expect(
+    clippy::boxed_local,
+    reason = "C++ owns a Rust type only through a Box"
+)]
+fn logfwdr_message_build(message: Box<LogfwdrMessage>) -> Result<Vec<u8>, cxx::KjError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(message.0)).map_err(|payload| {
+        cxx::KjError::new(
+            cxx::KjExceptionType::Failed,
+            format!(
+                "building a logfwdr message panicked: {}",
+                panic_message(&*payload)
+            ),
+        )
+    })
+}
+
 /// The message of a panic with `payload`, as `cxx::panic_message()` reads it.
 pub fn panic_message(payload: &(dyn Any + Send)) -> &str {
     cxx::panic_message(payload).unwrap_or("<non-string panic payload>")
@@ -572,4 +634,143 @@ pub fn incoming_request_delivered(
             location.column,
         )
     }
+}
+
+/// How the function that [`incoming_request_run_in_wait_until`] runs fails.
+#[derive(Debug)]
+pub enum RunError {
+    /// A JavaScript error, which the run throws, unless it stands for an exception that is
+    /// pending (see [`jsg::Error::is_pending`]). `IoContext::run()` then fails with the exception,
+    /// which it logs as uncaught.
+    Js(jsg::Error),
+    /// A KJ exception, as a C++ call fails with, which `IoContext::run()` fails with unchanged,
+    /// unless a JavaScript exception or a termination is pending. That one must keep propagating
+    /// (see AGENTS.md), so the run fails with it, as for [`RunError::Js`], and the KJ exception
+    /// is dropped.
+    Kj(cxx::KjException),
+}
+
+impl From<jsg::Error> for RunError {
+    fn from(err: jsg::Error) -> Self {
+        Self::Js(err)
+    }
+}
+
+impl From<cxx::KjException> for RunError {
+    fn from(err: cxx::KjException) -> Self {
+        Self::Kj(err)
+    }
+}
+
+/// The future that the function of a [`WaitUntilRun`] returns. KJ polls it on the thread of the
+/// `IoContext`, so it need not be `Send`.
+type WaitUntilRunFuture = Pin<Box<dyn Future<Output = Result<(), cxx::KjException>>>>;
+
+/// The function of a [`WaitUntilRun`], which receives the handles of its prelude.
+type WaitUntilRunFn = Box<
+    dyn for<'s> FnOnce(
+        &mut jsg::Lock<'s>,
+        &[v8::Local<'s, v8::Value>],
+    ) -> Result<WaitUntilRunFuture, RunError>,
+>;
+
+/// See `bridge::WaitUntilRun`. C++ runs and drops it only on the thread of the `IoContext`, so it
+/// need not be `Send`.
+pub struct WaitUntilRun {
+    /// The function, until `wait_until_run_start()` runs it.
+    function: Option<WaitUntilRunFn>,
+    /// The future of the function, once `wait_until_run_start()` has started it.
+    future: Option<WaitUntilRunFuture>,
+}
+
+/// `context.addWaitUntil(context.run(...))` on the `IoContext` of `request`, as C++ starts an
+/// event's handler.
+///
+/// In a waitUntil task of the request, in `IoContext::run()`, with the isolate locked, under the
+/// Perfetto span that `prelude` names (`RunPrelude::spanName()`) and in the request's trace scope
+/// (`IoContext::makeRequestTraceScope()`), runs the C++ `prelude`, then `f` with the handles that
+/// `prelude` returns, then waits for the future that `f` returns, outside the lock. `prelude` is
+/// the C++ work that a C++ event's lambda does before the call that `f` stands for, such as
+/// finding the exported handler. It runs before Rust holds the lock, and an exception that it
+/// throws fails the run as one that C++ code throws.
+///
+/// The task fails with the error that `f` fails with, as [`RunError`] describes, or with the
+/// future's. If `f` panics, the panic terminates execution (`jsg::catch_panic()`) and the task
+/// fails with a KJ exception.
+///
+/// # Errors
+/// Fails with the exception that keeps the task from being added.
+pub fn incoming_request_run_in_wait_until<F>(
+    request: Pin<&mut bridge::IncomingRequest>,
+    prelude: kj_rs::KjOwn<bridge::RunPrelude>,
+    f: impl for<'s> FnOnce(&mut jsg::Lock<'s>, &[v8::Local<'s, v8::Value>]) -> Result<F, RunError>
+    + 'static,
+) -> Result<(), cxx::KjException>
+where
+    F: Future<Output = Result<(), cxx::KjException>> + 'static,
+{
+    let function: WaitUntilRunFn = Box::new(move |lock: &mut jsg::Lock<'_>, handles| {
+        let future: WaitUntilRunFuture = Box::pin(f(lock, handles)?);
+        Ok(future)
+    });
+    let run = Box::new(WaitUntilRun {
+        function: Some(function),
+        future: None,
+    });
+    bridge::incoming_request_run_in_wait_until(request, prelude, run)
+}
+
+/// Runs the function of `run` on `handles`, from `incoming_request_run_in_wait_until()` in
+/// `IoContext::run()`, after its prelude, and keeps the future it returns for
+/// `wait_until_run_wait()`. An error is thrown, so that C++ fails the run with `Failed`, unless it
+/// is a KJ exception, which C++ throws on as if it had not passed through Rust. A KJ exception
+/// while a JavaScript exception or a termination is pending fails the run with `Failed` too, so
+/// that the pending one keeps propagating.
+unsafe fn wait_until_run_start(
+    isolate: usize,
+    run: &mut WaitUntilRun,
+    handles: &[bridge::Local],
+) -> Result<bridge::IoCallbackOutcome, cxx::KjException> {
+    let Some(function) = run.function.take() else {
+        unreachable!("C++ runs the function once")
+    };
+    let scope = std::pin::pin!(
+        // SAFETY: C++ calls this with the isolate locked, a context entered and a HandleScope
+        // open, which outlive the scope.
+        unsafe { jsg::CallbackScope::new(isolate as *mut v8::ffi::Isolate) }
+    );
+    jsg::catch_panic(scope, |lock| {
+        // SAFETY: C++ passes handles in the HandleScope that the scope is in.
+        let handles: Vec<v8::Local<'_, v8::Value>> = handles
+            .iter()
+            .map(|&handle| unsafe { v8::Local::from_ffi(handle) })
+            .collect();
+        match function(lock, &handles) {
+            Ok(future) => {
+                run.future = Some(future);
+                Ok(bridge::IoCallbackOutcome::Succeeded)
+            }
+            Err(RunError::Js(err)) => {
+                lock.throw_exception(&err);
+                Ok(bridge::IoCallbackOutcome::Failed)
+            }
+            Err(RunError::Kj(exception)) => {
+                if lock.is_execution_terminating() || lock.has_pending_exception() {
+                    Ok(bridge::IoCallbackOutcome::Failed)
+                } else {
+                    Err(exception)
+                }
+            }
+        }
+    })
+    .unwrap_or(Ok(bridge::IoCallbackOutcome::Panicked))
+}
+
+/// Waits for the future that `wait_until_run_start()` kept. A panic is handled as in
+/// `io_future_wait()`.
+async fn wait_until_run_wait(run: Box<WaitUntilRun>) -> Result<(), cxx::KjException> {
+    let Some(future) = run.future else {
+        unreachable!("C++ waits only once wait_until_run_start() succeeded")
+    };
+    future.await
 }

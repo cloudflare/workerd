@@ -4,6 +4,7 @@
 
 #include "html-rewriter.h"
 
+#include "html-rewriter-selector.h"
 #include "util.h"
 
 #include <workerd/api/streams/common.h>
@@ -207,6 +208,114 @@ struct UnregisteredDocumentHandlers {
 using UnregisteredElementOrDocumentHandlers =
     kj::OneOf<UnregisteredElementHandlers, UnregisteredDocumentHandlers>;
 
+// The JavaScript state that a transform keeps alive, which the garbage collector traces through
+// the continuations of the transform's pump. A collection may run on any thread that holds the
+// isolate lock, so the roots may only be modified under the lock. The Rewriter, which runs on
+// the request's thread without the lock, reaches them through a RewriterGcRoots.
+struct TransformGcRoots final: public kj::AtomicRefcounted {
+  // Identifies a root for its removal. Removing a root that clear() already dropped does nothing.
+  using RootId = uint64_t;
+
+  RootId addCallback(jsg::Lock& js, ElementCallbackFunction& callback) {
+    auto id = nextId++;
+    callbacks.insert(id, callback.addRef(js));
+    return id;
+  }
+
+  void removeCallback(RootId id) {
+    callbacks.erase(id);
+  }
+
+  RootId addStream(jsg::Lock& js, JsReadableStream& stream) {
+    auto id = nextId++;
+    streams.insert(id, stream.addRef(js));
+    return id;
+  }
+
+  void removeStream(RootId id) {
+    streams.erase(id);
+  }
+
+  void setAsyncContext(kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>>& context) {
+    KJ_IF_SOME(frame, context) {
+      asyncContext = frame.addRef();
+    }
+  }
+
+  void clear() {
+    callbacks.clear();
+    streams.clear();
+    asyncContext = kj::none;
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    for (auto& entry: callbacks) {
+      visitor.visit(entry.value);
+    }
+    for (auto& entry: streams) {
+      entry.value.visitForGc(visitor);
+    }
+    visitor.visit(asyncContext);
+  }
+
+ private:
+  kj::HashMap<RootId, ElementCallbackFunction> callbacks;
+  kj::HashMap<RootId, JsReadableStream> streams;
+  RootId nextId = 0;
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext;
+};
+
+struct TransformGcRootsRef {
+  kj::Own<TransformGcRoots> roots;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    // The roots are shared, so a jsg::TracedOwn cannot hold them, but they have a single visitor:
+    // the two continuations that visit them are the halves of one jsg::Promise::then(), which
+    // the collector traces as one object, and the Rewriter's reference never visits. Neither
+    // continuation is moved after a visit other than to run, which clears the roots.
+    roots->visitForGc(visitor);  // NOLINT(jsg-shared-visit,jsg-traced-own)
+  }
+};
+
+// The Rewriter's reference to its transform's GC roots. lol-html drops a replacer, and the pump
+// destroys the Rewriter, without the isolate lock. Whatever this releases without the lock goes
+// to the isolate's deferred destruction queue, which jsg::Ref uses for the same reason, and so
+// is released under the lock on whichever thread takes it next. If the isolate is gone, nothing
+// traces the roots anymore, so the release happens in place.
+class RewriterGcRoots final {
+ public:
+  RewriterGcRoots(jsg::Lock& js, kj::Own<TransformGcRoots> roots)
+      : roots(kj::mv(roots)),
+        isolateLiveness(jsg::IsolateBase::from(js.v8Isolate).getIsolateLiveness()) {}
+  KJ_DISALLOW_COPY_AND_MOVE(RewriterGcRoots);
+
+  ~RewriterGcRoots() noexcept(false) {
+    destroyUnderLock(kj::mv(roots));
+  }
+
+  // Direct access to the roots requires the isolate lock.
+  TransformGcRoots& get(jsg::Lock&) {
+    return *roots;
+  }
+
+  // Callable without the isolate lock. The stream stays rooted until the removal runs.
+  void removeStream(TransformGcRoots::RootId stream) {
+    destroyUnderLock(kj::heap(kj::defer(
+        [roots = kj::atomicAddRef(*roots), stream]() mutable { roots->removeStream(stream); })));
+  }
+
+ private:
+  kj::Own<TransformGcRoots> roots;
+  kj::Arc<const jsg::IsolateLiveness> isolateLiveness;
+
+  void destroyUnderLock(kj::Own<void> item) {
+    v8::Isolate* isolate = isolateLiveness->tryGetIsolate();
+    if (isolate != nullptr && !v8::Locker::IsLocked(isolate)) {
+      jsg::IsolateBase::from(isolate).destroyUnderLock(kj::mv(item));
+    }
+  }
+};
+
 }  // namespace
 
 // Wrapper around an actual rewriter (streaming parser).
@@ -215,7 +324,8 @@ class Rewriter final: public WritableStreamSink {
   explicit Rewriter(jsg::Lock& js,
       kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
       kj::ArrayPtr<const char> encoding,
-      kj::Own<WritableStreamSink> inner);
+      kj::Own<WritableStreamSink> inner,
+      kj::Own<TransformGcRoots> gcRoots);
   KJ_DISALLOW_COPY_AND_MOVE(Rewriter);
 
   // WritableStreamSink implementation. The input body pumpTo() operation calls these.
@@ -225,11 +335,14 @@ class Rewriter final: public WritableStreamSink {
   void abort(kj::Exception reason) override;
 
   // Implementation for `Element::onEndTag` to avoid exposing private details of Rewriter.
-  void onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback);
+  void onEndTag(jsg::Lock& js, lol_html_element_t* element, ElementCallbackFunction&& callback);
 
-  lol_html_streaming_handler_t registerReplacer(JsReadableStream content, bool isHtml);
+  lol_html_streaming_handler_t registerReplacer(
+      jsg::Lock& js, JsReadableStream content, bool isHtml);
 
   ~Rewriter() {
+    // Let lol-html drop outstanding replacers while their userdata is still alive.
+    rewriter = nullptr;
     KJ_DTOR_ASSERT(registeredReplacers.size() == 0, "Some replacers were leaked by lol-html");
   }
 
@@ -273,6 +386,7 @@ class Rewriter final: public WritableStreamSink {
     Rewriter& rewriter;
     bool isHtml;
     JsReadableStream stream;
+    TransformGcRoots::RootId gcRoot;
   };
 
   struct RegisteredHandler {
@@ -280,6 +394,8 @@ class Rewriter final: public WritableStreamSink {
     Rewriter& rewriter;
 
     ElementCallbackFunction callback;
+
+    kj::Maybe<TransformGcRoots::RootId> gcRoot;
   };
 
   kj::Vector<kj::Own<RegisteredHandler>> registeredHandlers;
@@ -302,7 +418,7 @@ class Rewriter final: public WritableStreamSink {
 
   // Eagerly free this handler. Should only be called if we're confident the handler will never be
   // used again.
-  void removeEndTagHandler(RegisteredHandler& registration);
+  void removeEndTagHandler(jsg::Lock& js, RegisteredHandler& registration);
 
   // Field stores a list of readable streams that are being used by lol-html for replacements
   kj::HashMap<void*, kj::Own<RegisteredReplacer>> registeredReplacers;
@@ -312,8 +428,10 @@ class Rewriter final: public WritableStreamSink {
   int replacerThunkImpl(lol_html_streaming_sink_t* sink, RegisteredReplacer& registration);
   static void removeRegisteredReplacer(void* userData);
 
-  // Must be constructed AFTER the registered handler vector, since the function which constructs
-  // this (buildRewriter()) modifies that vector.
+  RewriterGcRoots gcRoots;
+
+  // Must be constructed after the handler vectors and GC roots because buildRewriter() modifies
+  // them.
   kj::Own<lol_html_HtmlRewriter> rewriter;
 
   // Stores data written by lol-html, which will be periodically flushed to inner.
@@ -361,7 +479,8 @@ kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(jsg::Lock& js,
   auto builder = LOL_HTML_OWN(rewriter_builder, lol_html_rewriter_builder_new());
 
   auto registerCallback = [&](ElementCallbackFunction& callback) {
-    auto registeredHandler = RegisteredHandler{rewriter, callback.addRef(js)};
+    rewriter.gcRoots.get(js).addCallback(js, callback);
+    auto registeredHandler = RegisteredHandler{rewriter, callback.addRef(js), kj::none};
     return rewriter.registeredHandlers.add(kj::heap(kj::mv(registeredHandler))).get();
   };
 
@@ -419,12 +538,16 @@ kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(jsg::Lock& js,
 Rewriter::Rewriter(jsg::Lock& js,
     kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
     kj::ArrayPtr<const char> encoding,
-    kj::Own<WritableStreamSink> inner)
-    : rewriter(buildRewriter(js, unregisteredHandlers, encoding, *this)),
+    kj::Own<WritableStreamSink> inner,
+    kj::Own<TransformGcRoots> gcRoots)
+    : gcRoots(js, kj::mv(gcRoots)),
+      rewriter(buildRewriter(js, unregisteredHandlers, encoding, *this)),
       externalMemoryAdjustment(js.getExternalMemoryAdjustment()),
       inner(kj::mv(inner)),
       ioContext(IoContext::current()),
-      maybeAsyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
+      maybeAsyncContext(jsg::AsyncContextFrame::currentRef(js)) {
+  this->gcRoots.get(js).setAsyncContext(maybeAsyncContext);
+}
 
 namespace {
 
@@ -584,7 +707,10 @@ lol_html_rewriter_directive_t Rewriter::thunkImpl(
   return LOL_HTML_CONTINUE;
 }
 
-void Rewriter::removeEndTagHandler(RegisteredHandler& handler) {
+void Rewriter::removeEndTagHandler(jsg::Lock& js, RegisteredHandler& handler) {
+  KJ_IF_SOME(root, handler.gcRoot) {
+    gcRoots.get(js).removeCallback(root);
+  }
   auto size = registeredEndTagHandlers.size();
   for (auto counter = size; counter != 0; --counter) {
     auto idx = counter - 1;
@@ -625,7 +751,7 @@ void Rewriter::waitForThunk(CType* content, RegisteredHandler& registeredHandler
         //   being resolved. For now we let handles to end tag handlers tags live for the duration of
         //   the response transformation, but eagerly release ones that we can.
         //   In particular, note that `waitForThunk` is never called for implied end tags.
-        removeEndTagHandler(registeredHandler);
+        removeEndTagHandler(js, registeredHandler);
       }
 
       return value.attach(kj::mv(scope));
@@ -634,8 +760,10 @@ void Rewriter::waitForThunk(CType* content, RegisteredHandler& registeredHandler
   promise.wait(KJ_ASSERT_NONNULL(maybeWaitScope));
 }
 
-lol_html_streaming_handler_t Rewriter::registerReplacer(JsReadableStream content, bool isHtml) {
-  auto replacer = kj::heap<RegisteredReplacer>(*this, isHtml, kj::mv(content));
+lol_html_streaming_handler_t Rewriter::registerReplacer(
+    jsg::Lock& js, JsReadableStream content, bool isHtml) {
+  auto root = gcRoots.get(js).addStream(js, content);
+  auto replacer = kj::heap<RegisteredReplacer>(*this, isHtml, kj::mv(content), root);
   auto userData = replacer.get();
   registeredReplacers.insert(userData, kj::mv(replacer));
 
@@ -746,12 +874,17 @@ void Rewriter::waitForReplacerThunk(
 
 void Rewriter::removeRegisteredReplacer(void* userData) {
   auto& registration = *reinterpret_cast<RegisteredReplacer*>(userData);
-  KJ_REQUIRE(registration.rewriter.registeredReplacers.erase(userData),
+  auto& rewriter = registration.rewriter;
+  auto root = registration.gcRoot;
+  KJ_REQUIRE(rewriter.registeredReplacers.erase(userData),
       "Tried to remove replacer that was not registered");
+  rewriter.gcRoots.removeStream(root);
 }
 
-void Rewriter::onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback) {
-  auto registeredHandler = Rewriter::RegisteredHandler{*this, kj::mv(callback)};
+void Rewriter::onEndTag(
+    jsg::Lock& js, lol_html_element_t* element, ElementCallbackFunction&& callback) {
+  auto root = gcRoots.get(js).addCallback(js, callback);
+  auto registeredHandler = Rewriter::RegisteredHandler{*this, kj::mv(callback), root};
   // NOTE: this gets freed in `waitForThunk` above.
   // TODO(someday): this uses more memory than necessary for implied end tags, which lol-html
   // doesn't actually call `thunk` on.  LOL HTML drops the handler after it finishes transforming
@@ -804,13 +937,13 @@ void HTMLRewriter::Token::ImplBase<CType>::rewriteContentGeneric(
     }
 
     KJ_CASE_ONEOF(streamContent, JsReadableStream) {
-      auto handler = rewriter.registerReplacer(kj::mv(streamContent), isHtml);
+      auto handler = rewriter.registerReplacer(js, kj::mv(streamContent), isHtml);
       check(StreamingFunc(&element, &handler));
     }
 
     KJ_CASE_ONEOF(responseContent, jsg::Ref<Response>) {
       KJ_IF_SOME(body, responseContent->getBody(js)) {
-        auto handler = rewriter.registerReplacer(kj::mv(body), isHtml);
+        auto handler = rewriter.registerReplacer(js, kj::mv(body), isHtml);
         check(StreamingFunc(&element, &handler));
       }
       // Otherwise if no body, there is no replacement to make
@@ -968,9 +1101,9 @@ jsg::Ref<Element> Element::removeAndKeepContent() {
   return JSG_THIS;
 }
 
-void Element::onEndTag(ElementCallbackFunction&& callback) {
+void Element::onEndTag(jsg::Lock& js, ElementCallbackFunction&& callback) {
   auto& knownImpl = checkToken(impl);
-  knownImpl.rewriter.onEndTag(&knownImpl.element, kj::mv(callback));
+  knownImpl.rewriter.onEndTag(js, &knownImpl.element, kj::mv(callback));
 }
 
 EndTag::EndTag(CType& endTag, Rewriter& rewriter) {
@@ -1263,6 +1396,10 @@ jsg::Ref<HTMLRewriter> HTMLRewriter::constructor(jsg::Lock& js) {
 
 jsg::Ref<HTMLRewriter> HTMLRewriter::on(
     kj::String stringSelector, ElementContentHandlers&& handlers) {
+  JSG_REQUIRE(!htmlrewriter::selectorExceedsComplexityLimit(stringSelector), TypeError,
+      "HTMLRewriter selector exceeds maximum complexity of ", htmlrewriter::MAX_SELECTOR_COMPLEXITY,
+      ".");
+
   kj::Own<lol_html_Selector> selector =
       LOL_HTML_OWN(selector, lol_html_selector_parse(stringSelector.cStr(), stringSelector.size()));
 
@@ -1310,25 +1447,29 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
     }
   }
 
-  auto rewriter = kj::heap<Rewriter>(js, impl->unregisteredHandlers, encoding, kj::mv(pipe.out));
+  auto gcRoots = kj::atomicRefcounted<TransformGcRoots>();
+  // lol-html copies selectors into its own matching VM while buildRewriter() registers them. The
+  // operation root therefore only needs to trace the JS-bearing state copied into Rewriter.
+  auto rewriter = kj::heap<Rewriter>(
+      js, impl->unregisteredHandlers, encoding, kj::mv(pipe.out), kj::atomicAddRef(*gcRoots));
 
   // NOTE: Avoid throwing any exceptions after initiating the pump below. This makes
   //   the input response object disturbed (response.bodyUsed === true), which should only happen
   //   after we know that nothing else (like invalid encoding) could cause an exception.
 
   // Drive and flush the parser asynchronously.
-  ioContext.addTask(
-      ioContext
-          .waitForDeferredProxy(
-              KJ_ASSERT_NONNULL(maybeInput).pumpTo(js, kj::mv(rewriter), EndStream::YES))
-          .catch_([](kj::Exception&& e) {
-    // Errors in pumpTo() are already propagated to the destination stream. We don't want to
-    // throw them from here since it'll cause an uncaught exception to be reported via taskFailed(),
-    // which would poison the IoContext even though the application may have handled the error.
-  }));
+  auto successRoots = kj::atomicAddRef(*gcRoots);
+  auto pump = ioContext
+                  .awaitDeferredProxy(js,
+                      KJ_ASSERT_NONNULL(maybeInput).pumpTo(js, kj::mv(rewriter), EndStream::YES))
+                  .then(js,
+                      JSG_VISITABLE_LAMBDA((roots = TransformGcRootsRef{kj::mv(successRoots)}),
+                          (roots), (jsg::Lock&)mutable { roots.roots->clear(); }),
+                      JSG_VISITABLE_LAMBDA((roots = TransformGcRootsRef{kj::mv(gcRoots)}), (roots),
+                          (jsg::Lock&, jsg::Value) mutable { roots.roots->clear(); }));
+  // Pump errors are already propagated to the output stream and may be handled by the application.
+  pump.markAsHandled(js);
 
-  // TODO(soon): EW-2025 Make Rewriter a proper wrapper object and put it in hidden property on the
-  //   response so the GC can find the handlers which Rewriter co-owns.
   return kj::mv(response);
 }
 

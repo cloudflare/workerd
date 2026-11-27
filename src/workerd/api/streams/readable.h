@@ -228,6 +228,10 @@ private:
 // draining reads. It locks the stream like standard readers but uses drainingRead()
 // instead of regular read() to drain all synchronously available data at once.
 // This is intended for optimized pipe operations.
+//
+// Destroying a DrainingReader releases its lock on the stream, which updates state that the
+// garbage collector traces, so it must be destroyed under the isolate lock. An owner that may
+// drop it without the lock, as pumpTo() does, defers it with jsg::IsolateBase::destroyUnderLock().
 class DrainingReader: public ReadableStreamController::Reader {
  public:
   explicit DrainingReader();
@@ -259,9 +263,6 @@ class DrainingReader: public ReadableStreamController::Reader {
   void visitForGc(jsg::GcVisitor& visitor);
 
   kj::Ptr<ReadableStreamController::Reader> getPtr() { return addPtrToThis(); }
-
-  // A pointer for holders that may outlive the reader and must notice when they have.
-  kj::Weak<DrainingReader> getWeak() { return addWeakToThis(); }
 
  private:
   struct Initial {};
