@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Checks that the Rust trace crate writes and reads ids as trace.c++ does, over generated and
-// mutated inputs, so that the two implementations stay in step.
+// Checks that the Rust trace crate writes and reads ids, span contexts, span status, tag values,
+// attributes and span links as trace.c++ does, over generated and mutated inputs, so that the two
+// implementations stay in step.
 
 #include <workerd/io/trace.h>
 #include <workerd/io/trace/test_bridge.rs.h>
@@ -13,6 +14,8 @@
 #include <capnp/serialize.h>
 #include <kj/encoding.h>
 #include <kj/test.h>
+
+#include <limits>
 
 namespace workerd::tracing {
 namespace {
@@ -105,6 +108,17 @@ class Random {
 
   size_t below(size_t n) {
     return next() % n;
+  }
+
+  // A double that is now and then one the formats treat specially: a NaN, an infinity, a signed
+  // zero or a subnormal.
+  double float64() {
+    static constexpr double SPECIAL[] = {std::numeric_limits<double>::quiet_NaN(),
+      -std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+      -std::numeric_limits<double>::infinity(), 0.0, -0.0,
+      std::numeric_limits<double>::denorm_min()};
+    if (below(4) == 0) return SPECIAL[below(kj::size(SPECIAL))];
+    return static_cast<double>(static_cast<int64_t>(next())) / 7;
   }
 
   // An id with each half zero, small or full now and then, which the formats treat specially.
@@ -281,7 +295,8 @@ KJ_TEST("traceparent headers are written as the C++ writes them") {
 }
 
 // Overwrites some bytes of the struct's data section (union discriminants, enum codes, ids,
-// flags) and clears some of its pointers, and does the same to the structs it points to.
+// flags) and clears some of its pointers, and does the same to the structs it points to, alone
+// or in lists.
 void scramble(capnp::AnyStruct::Builder builder, Random& random) {
   for (auto& b: builder.getDataSection()) {
     if (random.below(8) == 0) b = random.next();
@@ -293,6 +308,11 @@ void scramble(capnp::AnyStruct::Builder builder, Random& random) {
       pointer.clear();
     } else if (pointer.getPointerType() == capnp::PointerType::STRUCT) {
       scramble(pointer.getAs<capnp::AnyStruct>(), random);
+    } else if (pointer.getPointerType() == capnp::PointerType::LIST) {
+      auto list = pointer.getAs<capnp::AnyList>();
+      if (list.getElementSize() == capnp::ElementSize::INLINE_COMPOSITE) {
+        for (auto element: list.as<capnp::List<capnp::AnyStruct>>()) scramble(element, random);
+      }
     }
   }
 }
@@ -339,9 +359,15 @@ size_t expectSameCapnp(Fill fill, ReadWrite readWrite, RoundTrip roundTrip) {
 
     auto rust =
         roundTrip(::rust::Slice<const uint8_t>(flat.asBytes().begin(), flat.asBytes().size()));
+    // C++ reads the same flat bytes as Rust, so that both check them the same way.
+    capnp::FlatArrayMessageReader reader(flat);
     capnp::MallocMessageBuilder output;
-    bool cppAccepted = readWrite(input.getRoot<T>().asReader(), output);
-    KJ_ASSERT(rust.ok == cppAccepted, description);
+    // C++ throws where Rust returns an error: an unknown tag value variant, an attribute without
+    // values, or a pointer of the wrong kind.
+    bool cppAccepted = false;
+    auto exception =
+        kj::runCatchingExceptions([&]() { cppAccepted = readWrite(reader.getRoot<T>(), output); });
+    KJ_ASSERT(rust.ok == cppAccepted, description, exception);
     if (rust.ok) {
       auto bytes = kj::arrayPtr(rust.message.data(), rust.message.size());
       KJ_ASSERT(canonical<T>(bytes).asBytes() == canonical<T>(output).asBytes(), description);
@@ -399,6 +425,100 @@ KJ_TEST("SpanStatus capnp is read and written as the C++ does") {
     return true;
   }, ffi::span_status_round_trip);
   KJ_ASSERT(accepted == ROUNDS);
+}
+
+void randomTagValue(rpc::TagValue::Builder builder, Random& random) {
+  auto size = random.below(4);
+  switch (random.below(7)) {
+    case 0:
+      builder.setString(randomText(random, random.below(10)));
+      break;
+    case 1:
+      builder.setBool(random.below(2));
+      break;
+    case 2:
+      builder.setInt64(random.next());
+      break;
+    case 3:
+      builder.setFloat64(random.float64());
+      break;
+    case 4: {
+      auto list = builder.initStringArray(size);
+      for (auto element: list) {
+        if (random.below(3) == 0) {
+          element.setNone();
+        } else {
+          element.setValue(randomText(random, random.below(6)));
+        }
+      }
+      break;
+    }
+    case 5: {
+      auto list = builder.initBoolArray(size);
+      for (auto element: list) {
+        if (random.below(3) == 0) {
+          element.setNone();
+        } else {
+          element.setValue(random.below(2));
+        }
+      }
+      break;
+    }
+    default: {
+      auto list = builder.initFloat64Array(size);
+      for (auto element: list) {
+        if (random.below(3) == 0) {
+          element.setNone();
+        } else {
+          element.setValue(random.float64());
+        }
+      }
+    }
+  }
+}
+
+void randomAttribute(rpc::Trace::Attribute::Builder builder, Random& random) {
+  builder.setName(randomText(random, random.below(8)));
+  auto values = builder.initValue(random.below(4));
+  for (auto value: values) randomTagValue(value, random);
+}
+
+KJ_TEST("TagValue capnp is read and written as the C++ does") {
+  auto accepted = expectSameCapnp<rpc::TagValue>(
+      randomTagValue, [](rpc::TagValue::Reader reader, capnp::MessageBuilder& out) {
+    serializeTagValue(out.initRoot<rpc::TagValue>(), deserializeTagValue(reader));
+    return true;
+  }, ffi::tag_value_round_trip);
+  expectMixed(accepted);
+}
+
+KJ_TEST("Attribute capnp is read and written as the C++ does") {
+  auto accepted = expectSameCapnp<rpc::Trace::Attribute>(
+      randomAttribute, [](rpc::Trace::Attribute::Reader reader, capnp::MessageBuilder& out) {
+    Attribute(reader).copyTo(out.initRoot<rpc::Trace::Attribute>());
+    return true;
+  }, ffi::attribute_round_trip);
+  expectMixed(accepted);
+}
+
+KJ_TEST("SpanLinks capnp is read and written as the C++ does") {
+  auto accepted = expectSameCapnp<rpc::Trace::SpanLinks>(
+      [](rpc::Trace::SpanLinks::Builder builder, Random& random) {
+    auto links = builder.initLinks(random.below(3));
+    for (auto link: links) {
+      auto context = link.initContext();
+      randomTraceId(context.initTraceId(), random);
+      context.getInfo().setSpanId(random.id());
+      if (random.below(2) == 0) randomTraceFlags(context.initTraceFlags(), random);
+      auto attributes = link.initAttributes(random.below(3));
+      for (auto attribute: attributes) randomAttribute(attribute, random);
+      link.setDroppedAttributesCount(random.below(5));
+    }
+  }, [](rpc::Trace::SpanLinks::Reader reader, capnp::MessageBuilder& out) {
+    SpanLinks(reader).copyTo(out.initRoot<rpc::Trace::SpanLinks>());
+    return true;
+  }, ffi::span_links_round_trip);
+  expectMixed(accepted);
 }
 
 }  // namespace

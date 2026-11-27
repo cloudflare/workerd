@@ -2,7 +2,7 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # The trace data model of //src/workerd/io:trace in Rust, for Rust code. The C++ types stay;
-# trace-ids-differential-test keeps the two writing and reading ids the same way.
+# trace-types-differential-test keeps the two writing and reading them the same way.
 wd_rust_crate(
     name = "trace",
     srcs = glob(
@@ -17,7 +17,7 @@ wd_rust_crate(
     ],
 )
 
-# The Rust half of trace-ids-differential-test: the crate's id functions, callable from C++.
+# The Rust half of trace-types-differential-test: the crate's conversions, callable from C++.
 wd_rust_crate(
     name = "trace-test-bridge",
     testonly = True,
@@ -34,7 +34,7 @@ wd_rust_crate(
 )
 
 kj_test(
-    src = "trace-ids-differential-test.c++",
+    src = "trace-types-differential-test.c++",
     deps = [
         ":trace-test-bridge",
         "//src/workerd/io:trace",

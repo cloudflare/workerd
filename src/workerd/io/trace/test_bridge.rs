@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The bridge through which `trace-ids-differential-test.c++` checks the Rust ids against the C++
-//! of `workerd/io/trace.c++`, which writes and reads them the same way.
+//! The bridge through which `trace-types-differential-test.c++` checks the Rust trace types against
+//! the C++ of `workerd/io/trace.c++`, which writes and reads them the same way.
 //!
 //! Ids cross as integers, and text is written into a buffer the caller owns.
 
@@ -15,17 +15,23 @@
 use capnp::message::Builder;
 use capnp::message::HeapAllocator;
 use capnp::message::ReaderOptions;
+use trace::Attribute;
 use trace::IdText;
 use trace::InvocationSpanContext;
 use trace::SpanContext;
 use trace::SpanId;
+use trace::SpanLinks;
 use trace::SpanStatus;
+use trace::TagValue;
 use trace::TraceFlags;
 use trace::TraceId;
 use trace::format_traceparent;
 use trace_capnp::span_status;
+use trace_capnp::tag_value;
 use worker_interface_capnp::invocation_span_context;
 use worker_interface_capnp::span_context;
+use worker_interface_capnp::trace::attribute;
+use worker_interface_capnp::trace::span_links;
 
 #[cxx::bridge(namespace = "workerd::rust::trace_test")]
 mod ffi {
@@ -71,6 +77,15 @@ mod ffi {
 
         /// As `span_context_round_trip`, for a `SpanStatus`.
         fn span_status_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `TagValue`.
+        fn tag_value_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.Attribute`.
+        fn attribute_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.SpanLinks`.
+        fn span_links_round_trip(message: &[u8]) -> RoundTrip;
 
         /// Writes the `traceparent` of a span context to `out`, which has room for 55 bytes, and
         /// returns its length, or 0 if it has none.
@@ -261,6 +276,54 @@ fn span_status_round_trip(message: &[u8]) -> ffi::RoundTrip {
     };
     let mut builder = Builder::new_default();
     status.to_capnp(builder.init_root());
+    written(&builder)
+}
+
+fn tag_value_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    let Some(reader) = read_flat(message) else {
+        return rejected();
+    };
+    let Some(value) = reader
+        .get_root::<tag_value::Reader<'_>>()
+        .and_then(TagValue::from_capnp)
+        .ok()
+    else {
+        return rejected();
+    };
+    let mut builder = Builder::new_default();
+    value.to_capnp(builder.init_root());
+    written(&builder)
+}
+
+fn attribute_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    let Some(reader) = read_flat(message) else {
+        return rejected();
+    };
+    let Some(value) = reader
+        .get_root::<attribute::Reader<'_>>()
+        .and_then(Attribute::from_capnp)
+        .ok()
+    else {
+        return rejected();
+    };
+    let mut builder = Builder::new_default();
+    value.to_capnp(builder.init_root());
+    written(&builder)
+}
+
+fn span_links_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    let Some(reader) = read_flat(message) else {
+        return rejected();
+    };
+    let Some(value) = reader
+        .get_root::<span_links::Reader<'_>>()
+        .and_then(SpanLinks::from_capnp)
+        .ok()
+    else {
+        return rejected();
+    };
+    let mut builder = Builder::new_default();
+    value.to_capnp(builder.init_root());
     written(&builder)
 }
 
