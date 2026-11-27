@@ -12252,7 +12252,14 @@ export type AiModelsSearchObject = {
 };
 export type ChatCompletionsBase = ChatCompletionsMessagesInput;
 export type ChatCompletionsInput = ChatCompletionsMessagesInput;
-export interface InferenceUpstreamError extends Error {}
+export interface InferenceUpstreamError extends Error {
+  code?: number;
+  httpStatus?: number;
+  retryable?: boolean;
+  requestId?: string;
+  logId?: string;
+  description?: string;
+}
 export interface AiInternalError extends Error {}
 export type AiModelListType = Record<string, any>;
 export type AiAsyncBatchResponse = {
@@ -12369,7 +12376,7 @@ export type GatewayOptions = {
   requestTimeoutMs?: number;
   retries?: GatewayRetries;
 };
-export type UniversalGatewayOptions = Exclude<GatewayOptions, "id"> & {
+export type UniversalGatewayOptions = Omit<GatewayOptions, "id"> & {
   /**
    ** @deprecated
    */
@@ -12393,17 +12400,17 @@ export type AiGatewayLog = {
   response_content_type?: string;
   success: boolean;
   cached: boolean;
-  tokens_in?: number;
-  tokens_out?: number;
-  metadata?: Record<string, number | string | boolean | null | bigint>;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  metadata?: Record<string, number | string | boolean | null | bigint> | null;
   step?: number;
-  cost?: number;
+  cost?: number | null;
   custom_cost?: boolean;
-  request_size: number;
-  request_head?: string;
+  request_size?: number | null;
+  request_head?: string | null;
   request_head_complete: boolean;
-  response_size: number;
-  response_head?: string;
+  response_size?: number | null;
+  response_head?: string | null;
   response_head_complete: boolean;
   created_at: Date;
 };

@@ -6421,7 +6421,14 @@ export type AiModelsSearchObject = {
 export type ChatCompletionsBase = ChatCompletionsMessagesInput;
 export type ChatCompletionsInput = ChatCompletionsMessagesInput;
 
-export interface InferenceUpstreamError extends Error {}
+export interface InferenceUpstreamError extends Error {
+  code?: number;
+  httpStatus?: number;
+  retryable?: boolean;
+  requestId?: string;
+  logId?: string;
+  description?: string;
+}
 export interface AiInternalError extends Error {}
 export type AiModelListType = Record<string, any>;
 export type AiAsyncBatchResponse = { request_id: string };

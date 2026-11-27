@@ -88,6 +88,25 @@ export const handler: ExportedHandler<{ AI: Ai }> = {
       await env.AI.run('@cf/moonshotai/kimi-k2.6', { prompt: 'hello' });
     }
 
+    // Structured InferenceUpstreamError fields and UniversalGatewayOptions (id optional)
+    {
+      const checkError = (err: InferenceUpstreamError) => {
+        expectType<number | undefined>(err.code);
+        expectType<number | undefined>(err.httpStatus);
+        expectType<boolean | undefined>(err.retryable);
+        expectType<string | undefined>(err.requestId);
+        expectType<string | undefined>(err.logId);
+        expectType<string | undefined>(err.description);
+      };
+      void checkError;
+
+      const gatewayOpts: UniversalGatewayOptions = {
+        skipCache: true,
+        collectLog: true,
+      };
+      void gatewayOpts;
+    }
+
     return new Response();
   },
 };

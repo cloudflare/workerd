@@ -65,6 +65,46 @@ export const tests = {
     }
 
     {
+      // Test AI Gateway error preserves full message and exposes structured properties
+      await assert.rejects(
+        async () => {
+          await env.ai.run('gatewayInputErrorModel', { prompt: 'test' });
+        },
+        (e) => {
+          assert.strictEqual(e.name, 'AiGatewayError');
+          assert.strictEqual(
+            e.message,
+            '7003: Model execution failed (User Input Error): unsupported parameter reasoning_effort'
+          );
+          assert.strictEqual(e.code, 7003);
+          assert.strictEqual(e.httpStatus, 400);
+          assert.strictEqual(e.retryable, false);
+          assert.strictEqual(e.requestId, 'aig-req-123');
+          assert.strictEqual(e.logId, 'log-err-7003');
+          assert.strictEqual(e.description, 'User Input Error');
+          return true;
+        }
+      );
+    }
+
+    {
+      // Test concurrent run() calls do not clobber per-call options (returnRawResponse)
+      const [rawResp, parsedResp] = await Promise.all([
+        env.ai.run(
+          'slowRawModel',
+          { prompt: 'raw' },
+          { returnRawResponse: true }
+        ),
+        env.ai.run('testModel', { prompt: 'parsed' }),
+      ]);
+      assert.strictEqual(rawResp instanceof Response, true);
+      assert.deepStrictEqual(await rawResp.json(), {
+        response: 'slow raw response',
+      });
+      assert.deepStrictEqual(parsedResp, { response: 'model response' });
+    }
+
+    {
       // Test error properties
       const err = await env.ai._parseError(
         Response.json({

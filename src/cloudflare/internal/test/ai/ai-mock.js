@@ -134,6 +134,43 @@ export default class AiMock extends WorkerEntrypoint {
       await scheduler.wait(1e8);
     }
 
+    if (modelName === 'slowRawModel') {
+      await scheduler.wait(50);
+      return Response.json(
+        { response: 'slow raw response' },
+        {
+          headers: {
+            'content-type': 'application/json',
+            'cf-aig-log-id': 'log-slow-raw',
+            ...respHeaders,
+          },
+        }
+      );
+    }
+
+    if (modelName === 'gatewayInputErrorModel') {
+      return Response.json(
+        {
+          internalCode: 7003,
+          httpCode: 400,
+          name: 'AiGatewayError',
+          description: 'User Input Error',
+          message:
+            'Model execution failed (User Input Error): unsupported parameter reasoning_effort',
+          retryable: false,
+          requestId: 'aig-req-123',
+        },
+        {
+          status: 400,
+          headers: {
+            'content-type': 'application/json',
+            'cf-aig-log-id': 'log-err-7003',
+            ...respHeaders,
+          },
+        }
+      );
+    }
+
     if (modelName === 'inputErrorModel') {
       return Response.json(
         {
