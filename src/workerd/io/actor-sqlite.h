@@ -206,6 +206,10 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     bool getAlarmDirty();
     void setAlarmDirty();
 
+    // The alarm in the database outside this transaction and its parents, which a rollback of the
+    // outermost one would restore.
+    kj::Maybe<kj::Date> getCommittedAlarm();
+
     void setSomeWriteConfirmed(bool someWriteConfirmed);
     bool isSomeWriteConfirmed() const;
 
@@ -244,6 +248,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     bool alarmDirty = false;
     // True if any of the writes in this commit are confirmed writes.
     bool someWriteConfirmed = false;
+    // The alarm when the outermost transaction began.
+    kj::Maybe<kj::Date> alarmBeforeTxn;
 
     void rollbackImpl();
     void commitImpl();
@@ -321,6 +327,17 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // True when a "move alarm later" request is currently in-flight via scheduleLaterAlarm().
   bool alarmLaterIsInFlight = false;
 
+  // How many requests scheduleLaterAlarm() has started, and how many of them have finished,
+  // successfully or not. sync() counts these rather than waiting for alarmLaterIsInFlight to
+  // clear, which may never happen while commits keep moving the alarm later.
+  uint64_t laterAlarmRequestsStarted = 0;
+  uint64_t laterAlarmRequestsFinished = 0;
+
+  // The last request scheduleLaterAlarm() started, which resolves once laterAlarmRequestsFinished
+  // counts it. armAlarmHandler() can replace alarmLaterInFlight with a request that finishes
+  // first, so sync() waits on this one instead.
+  kj::ForkedPromise<void> laterAlarmRequest = kj::Promise<void>(kj::READY_NOW).fork();
+
   // When a "move alarm later" request is already in-flight and we need to schedule
   // another one, we store the desired alarm time here. When the in-flight request
   // completes, it checks this variable and starts a new request if needed. The outer
@@ -354,6 +371,10 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // so it will be picked up when the current in-flight operation completes.
   void scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParent parentSpan);
 
+  // Resolves once `count` requests started by scheduleLaterAlarm() have finished, or once none is
+  // in flight.
+  kj::Promise<void> whenLaterAlarmRequestsFinished(uint64_t count);
+
   struct PrecommitAlarmState {
     // Promise for the completion of precommit alarm scheduling
     kj::Maybe<kj::Promise<void>> schedulingPromise;
@@ -362,6 +383,11 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // To be called just before committing the local sqlite db, to synchronously start any necessary
   // alarm scheduling:
   PrecommitAlarmState startPrecommitAlarmScheduling();
+
+  // The alarm in the database outside any explicit transaction that is open, which may still be
+  // rolled back. commitImpl() can wait for the alarm scheduler while one is open, and sync() can be
+  // called in one.
+  kj::Maybe<kj::Date> getCommittedAlarm();
 
   // Performs the rest of the asynchronous commit, to be waited on after committing the local
   // sqlite db.  Should be called in the same turn of the event loop as

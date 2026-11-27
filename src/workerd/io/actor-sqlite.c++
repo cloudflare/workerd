@@ -125,7 +125,9 @@ kj::Promise<void> ActorSqlite::ImplicitTxn::waitForCompletion() {
 
 ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(actorSqlite) {
   KJ_SWITCH_ONEOF(actorSqlite.currentTxn) {
-    KJ_CASE_ONEOF(_, NoTxn) {}
+    KJ_CASE_ONEOF(_, NoTxn) {
+      alarmBeforeTxn = actorSqlite.metadata.getAlarm();
+    }
     KJ_CASE_ONEOF(implicit, ImplicitTxn*) {
       // ActorSqlite::startTransaction() should have handled this case before constructing
       // ExplicitTxn.
@@ -139,6 +141,7 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
       depth = exp->depth + 1;
       alarmDirty = exp->alarmDirty;
       someWriteConfirmed = exp->someWriteConfirmed;
+      alarmBeforeTxn = exp->alarmBeforeTxn;
     }
   }
   actorSqlite.currentTxn = this;
@@ -180,6 +183,14 @@ bool ActorSqlite::ExplicitTxn::getAlarmDirty() {
 
 void ActorSqlite::ExplicitTxn::setAlarmDirty() {
   alarmDirty = true;
+}
+
+kj::Maybe<kj::Date> ActorSqlite::ExplicitTxn::getCommittedAlarm() {
+  // A nested transaction's outermost transaction can't have finished yet.
+  if (committed && parent == kj::none) {
+    return actorSqlite.metadata.getAlarm();
+  }
+  return alarmBeforeTxn;
 }
 
 void ActorSqlite::ExplicitTxn::setSomeWriteConfirmed(bool someWriteConfirmed) {
@@ -456,15 +467,27 @@ void ActorSqlite::scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParen
     return;
   }
 
+  // Requested before the state below changes, so that if scheduleRun() throws synchronously, no
+  // request is left in flight that later commits and sync() would wait on forever.
+  auto request = requestScheduledAlarm(newAlarmTime, alarmLaterInFlight.addBranch());
   alarmLaterIsInFlight = true;
-  alarmLaterInFlight = requestScheduledAlarm(newAlarmTime, alarmLaterInFlight.addBranch())
-                           .attach(parentSpan.newChild("actor_sqlite_alarm_sync"_kjc))
-                           .catch_([](kj::Exception&& e) {
+  ++laterAlarmRequestsStarted;
+  auto settled = kj::mv(request)
+                     .attach(parentSpan.newChild("actor_sqlite_alarm_sync"_kjc))
+                     .catch_([](kj::Exception&& e) {
     // If an exception occurs when scheduling the alarm later, it's OK -- the alarm will
     // eventually fire at the earlier time, and the rescheduling will be retried.
     // We catch here to prevent the chain from breaking on errors.
     LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm failed", e);
+  });
+  laterAlarmRequest = settled
+                          .then([weakThis = addWeakToThis()]() {
+    // Counted before the fork resolves, so that every branch sees it.
+    KJ_IF_SOME(self, weakThis.tryGet()) {
+      ++self.laterAlarmRequestsFinished;
+    }
   }).fork();
+  alarmLaterInFlight = laterAlarmRequest.addBranch().fork();
 
   commitTasks.add(alarmLaterInFlight.addBranch()
                       .then([this]() {
@@ -479,6 +502,21 @@ void ActorSqlite::scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParen
     // breaking the output gate.
     LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm drain failed", e);
   }));
+}
+
+kj::Promise<void> ActorSqlite::whenLaterAlarmRequestsFinished(uint64_t count) {
+  // The request counted on may never start, e.g. when a commit that moves the alarm earlier drops
+  // the pending time. That commit requests its own alarm before it commits.
+  if (laterAlarmRequestsFinished >= count || !alarmLaterIsInFlight) {
+    return kj::READY_NOW;
+  }
+  return laterAlarmRequest.addBranch().then(
+      [weakThis = addWeakToThis(), count]() -> kj::Promise<void> {
+    KJ_IF_SOME(self, weakThis.tryGet()) {
+      return self.whenLaterAlarmRequestsFinished(count);
+    }
+    return kj::READY_NOW;
+  });
 }
 
 ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
@@ -501,6 +539,13 @@ ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
         requestScheduledAlarm(metadata.getAlarm(), alarmLaterInFlight.addBranch());
   }
   return kj::mv(state);
+}
+
+kj::Maybe<kj::Date> ActorSqlite::getCommittedAlarm() {
+  KJ_IF_SOME(txn, currentTxn.tryGet<ExplicitTxn*>()) {
+    return txn->getCommittedAlarm();
+  }
+  return metadata.getAlarm();
 }
 
 kj::Promise<void> ActorSqlite::commitImpl(
@@ -592,7 +637,7 @@ kj::Promise<void> ActorSqlite::commitImpl(
   // Issue the commitCallback() request to persist the db state, then synchronously clear the
   // pending commit so that the next commitImpl() invocation starts its own set of precommit alarm
   // updates and db commit.
-  auto alarmStateForCommit = metadata.getAlarm();
+  auto alarmStateForCommit = getCommittedAlarm();
 
   // Capture the alarm version before going async to detect concurrent alarm changes. If the
   // alarmVersion changes while we are in-flight, we should skip attempting any move-later alarm
@@ -1151,8 +1196,30 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush(SpanParent parentSpan
   // formed. We join with the outputGate because there are a lot of edge cases where we break the
   // output gate and it's easiest to catch all of those instances here rather than updating
   // everything to also break lastCommit.
-  return kj::joinPromisesFailFast(
-      kj::arr(lastCommit.addBranch(), outputGate.wait(kj::mv(parentSpan))));
+  //
+  // sync() also waits for the alarm scheduler to have the alarm as of that commit. A commit that
+  // moves the alarm later requests the new time only once it has committed, so lastCommit can
+  // resolve first. Until that request finishes, the scheduler may have only the earlier alarm. Once
+  // that alarm's handler completes, or aborts without a retry, the scheduler drops it, so if the
+  // request is then canceled, e.g. by an abort, or fails, the new alarm is left only in the
+  // database.
+  //
+  // When the database has no alarm, sync() doesn't wait for the scheduler: if the scheduler still
+  // runs an alarm that the database no longer has, armAlarmHandler() cancels its handler and
+  // requests the deletion again.
+  kj::Promise<void> committed = lastCommit.addBranch();
+  if (getCommittedAlarm() != kj::none) {
+    committed = committed.then([weakThis = addWeakToThis()]() -> kj::Promise<void> {
+      KJ_IF_SOME(self, weakThis.tryGet()) {
+        // The commit either started a request, or, if one was in flight, left its time in
+        // pendingLaterAlarmTime for the request that starts once that one finishes.
+        return self.whenLaterAlarmRequestsFinished(
+            self.laterAlarmRequestsStarted + (self.pendingLaterAlarmTime == kj::none ? 0 : 1));
+      }
+      return kj::READY_NOW;
+    });
+  }
+  return kj::joinPromisesFailFast(kj::arr(kj::mv(committed), outputGate.wait(kj::mv(parentSpan))));
 }
 
 kj::Promise<kj::String> ActorSqlite::getCurrentBookmark(SpanParent parentSpan) {

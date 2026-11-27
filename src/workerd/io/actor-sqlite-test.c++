@@ -513,6 +513,59 @@ KJ_TEST("alarm scheduling does not start synchronously before nested explicit lo
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
+KJ_TEST("commit doesn't schedule an alarm that an open transaction then rolls back") {
+  ActorSqliteTest test;
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  // Moving the alarm earlier makes the commit wait for the scheduler, while a transaction opens.
+  test.setAlarm(oneMs);
+  auto fulfiller1Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]);
+  {
+    auto txn = test.startTransaction();
+    txn->setAlarm(threeMs, {}, nullptr);
+    fulfiller1Ms->fulfill();
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    txn->rollback().wait(test.ws);
+    commitFulfiller->fulfill();
+  }
+
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("open transaction's alarm is scheduled once the transaction's commit completes") {
+  ActorSqliteTest test;
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  // Moving the alarm earlier makes the commit wait for the scheduler, while a transaction opens.
+  test.setAlarm(oneMs);
+  auto fulfiller1Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]);
+  {
+    auto txn = test.startTransaction();
+    txn->setAlarm(threeMs, {}, nullptr);
+    fulfiller1Ms->fulfill();
+    auto commit1MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    txn->commit();
+    auto commit3MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+
+    commit1MsFulfiller->fulfill();
+    test.pollAndExpectCalls({});
+    commit3MsFulfiller->fulfill();
+  }
+
+  test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == threeMs);
+}
+
 KJ_TEST("synchronous alarm scheduling failure causes local db commit to throw synchronously") {
   ActorSqliteTest test({.monitorOutputGate = false});
   auto promise = test.gate.onBroken();
@@ -2424,6 +2477,255 @@ KJ_TEST("multiple sync() calls for same commit") {
   syncPromise1.wait(test.ws);
   syncPromise2.wait(test.ws);
   syncPromise3.wait(test.ws);
+}
+
+KJ_TEST("sync() waits for the alarm scheduler to get an alarm moved later") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  // The commit that moves the alarm later requests it from the scheduler once it has committed.
+  test.setAlarm(twoMs);
+  auto syncPromise = KJ_ASSERT_NONNULL(test.sync());
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  fulfiller2Ms->fulfill();
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+}
+
+KJ_TEST("sync() doesn't wait for the alarm scheduler to delete an alarm") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(kj::none);
+  auto syncPromise = KJ_ASSERT_NONNULL(test.sync());
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfillerNone = kj::mv(test.pollAndExpectCalls({"scheduleRun(none)"})[0]);
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+
+  fulfillerNone->fulfill();
+  test.pollAndExpectCalls({});
+}
+
+KJ_TEST("sync() waits for a move-later alarm request while a transaction deletes the alarm") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
+
+  // The transaction can still roll back, leaving the database with the 2ms alarm.
+  {
+    auto txn = test.startTransaction();
+    txn->setAlarm(kj::none, {}, nullptr);
+    auto syncPromise = KJ_ASSERT_NONNULL(test.sync());
+    KJ_ASSERT(!syncPromise.poll(test.ws));
+
+    fulfiller2Ms->fulfill();
+    KJ_ASSERT(syncPromise.poll(test.ws));
+    syncPromise.wait(test.ws);
+    txn->rollback().wait(test.ws);
+  }
+
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+}
+
+KJ_TEST("sync() waits for a move-later alarm request that an earlier commit started") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
+
+  // Neither a sync() with no writes pending nor one after a commit that leaves the alarm alone
+  // finishes before the request.
+  auto syncWithoutWrites = KJ_ASSERT_NONNULL(test.sync());
+  test.put("foo", "bar");
+  auto syncAfterPut = KJ_ASSERT_NONNULL(test.sync());
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(!syncWithoutWrites.poll(test.ws));
+  KJ_ASSERT(!syncAfterPut.poll(test.ws));
+
+  fulfiller2Ms->fulfill();
+  KJ_ASSERT(syncWithoutWrites.poll(test.ws));
+  KJ_ASSERT(syncAfterPut.poll(test.ws));
+  syncWithoutWrites.wait(test.ws);
+  syncAfterPut.wait(test.ws);
+}
+
+KJ_TEST("sync() waits for a move-later alarm request after an alarm handler requests it again") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
+
+  // The 1ms alarm runs while the 2ms request is in flight, so its handler is canceled once a second
+  // request for the 2ms alarm finishes. That request finishes first, since the mock scheduler
+  // doesn't wait for the one in flight.
+  auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+  KJ_ASSERT(armResult.is<ActorSqlite::CancelAlarmHandler>());
+  auto& cancelResult = armResult.get<ActorSqlite::CancelAlarmHandler>();
+  auto syncPromise = KJ_ASSERT_NONNULL(test.sync());
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  KJ_ASSERT(cancelResult.waitBeforeCancel.poll(test.ws));
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  fulfiller2Ms->fulfill();
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+  test.pollAndExpectCalls({});
+}
+
+KJ_TEST("sync() waits for a coalesced move-later alarm request, but not for later ones") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
+
+  // While the 2ms request is in flight, the 3ms commit leaves its time for the next request.
+  test.setAlarm(threeMs);
+  auto syncPromise = KJ_ASSERT_NONNULL(test.sync());
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  fulfiller2Ms->fulfill();
+  auto fulfiller3Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]);
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  // A commit after sync() leaves its time for the request after the 3ms one, which sync() doesn't
+  // wait for.
+  test.setAlarm(fourMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  fulfiller3Ms->fulfill();
+  auto fulfiller4Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(4ms)"})[0]);
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+
+  fulfiller4Ms->fulfill();
+}
+
+KJ_TEST(
+    "sync() stops waiting for a move-later alarm request that a commit moving it earlier drops") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(fiveMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfiller5Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(5ms)"})[0]);
+
+  // The 10ms commit leaves its time for the request after the 5ms one.
+  test.setAlarm(tenMs);
+  auto syncPromise = KJ_ASSERT_NONNULL(test.sync());
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  // Moving the alarm earlier drops the 10ms time; the 2ms commit requests its own alarm first.
+  test.setAlarm(twoMs);
+  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  fulfiller5Ms->fulfill();
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+
+  fulfiller2Ms->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+}
+
+KJ_TEST("sync() doesn't fail when the alarm scheduler fails to get an alarm moved later") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  auto syncPromise = KJ_ASSERT_NONNULL(test.sync());
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->reject(
+      KJ_EXCEPTION(FAILED, "a_rejected_scheduleRun"));
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+}
+
+KJ_TEST("sync() doesn't hang when the alarm scheduler throws on a move-later alarm request") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
+
+  // The 3ms commit leaves its time for the request after the 2ms one, which throws synchronously.
+  test.setAlarm(threeMs);
+  auto syncPromise = KJ_ASSERT_NONNULL(test.sync());
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  test.scheduleRunHandler = [](kj::Maybe<kj::Date>) -> kj::Promise<void> {
+    kj::throwException(KJ_EXCEPTION(FAILED, "a_sync_fail"));
+  };
+  fulfiller2Ms->fulfill();
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+
+  // The next commit that moves the alarm later requests it, rather than leaving it pending behind
+  // the request that threw.
+  test.scheduleRunHandler = kj::none;
+  test.setAlarm(fourMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(4ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
 }
 
 KJ_TEST("allowUnconfirmed setAlarm does not block output gate") {
