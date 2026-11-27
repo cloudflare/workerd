@@ -17,22 +17,33 @@ use capnp::message::HeapAllocator;
 use capnp::message::ReaderOptions;
 use trace::AlarmEventInfo;
 use trace::Attribute;
+use trace::DiagnosticChannelEvent;
 use trace::EmailEventInfo;
 use trace::EventInfo;
+use trace::Exception;
 use trace::FetchEventInfo;
 use trace::FetchResponseInfo;
 use trace::HibernatableWebSocketEventInfo;
 use trace::IdText;
 use trace::InvocationSpanContext;
 use trace::JsRpcEventInfo;
+use trace::Log;
 use trace::OnHibernateEventInfo;
+use trace::Onset;
+use trace::Outcome;
 use trace::QueueEventInfo;
+use trace::Return;
 use trace::ScheduledEventInfo;
+use trace::SpanClose;
 use trace::SpanContext;
 use trace::SpanId;
 use trace::SpanLinks;
+use trace::SpanOpen;
 use trace::SpanStatus;
+use trace::SpanUpdate;
+use trace::StreamDiagnosticsEvent;
 use trace::TagValue;
+use trace::TailEvent;
 use trace::TraceEventInfo;
 use trace::TraceFlags;
 use trace::TraceId;
@@ -136,6 +147,39 @@ mod ffi {
         /// As `span_context_round_trip`, for the info of a `Trace.Onset`, written back as an onset
         /// with only its info.
         fn event_info_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.DiagnosticChannelEvent`.
+        fn diagnostic_channel_event_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.StreamDiagnosticsEvent`.
+        fn stream_diagnostics_event_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.Log`.
+        fn log_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.Exception`.
+        fn exception_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.Return`.
+        fn return_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.SpanOpen`.
+        fn span_open_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.SpanClose`.
+        fn span_close_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.SpanUpdate`.
+        fn span_update_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.Onset`.
+        fn onset_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.Outcome`.
+        fn outcome_round_trip(message: &[u8]) -> RoundTrip;
+
+        /// As `span_context_round_trip`, for a `Trace.TailEvent`.
+        fn tail_event_round_trip(message: &[u8]) -> RoundTrip;
 
         /// Writes the `traceparent` of a span context to `out`, which has room for 55 bytes, and
         /// returns its length, or 0 if it has none.
@@ -280,13 +324,30 @@ fn written(builder: &Builder<HeapAllocator>) -> ffi::RoundTrip {
     }
 }
 
+/// What a `to_capnp` returns: nothing, or whether it could write the value.
+trait Written {
+    fn succeeded(self) -> bool;
+}
+
+impl Written for () {
+    fn succeeded(self) -> bool {
+        true
+    }
+}
+
+impl Written for capnp::Result<()> {
+    fn succeeded(self) -> bool {
+        self.is_ok()
+    }
+}
+
 /// Reads a flat message whose root is an `O`, converts it to the Rust type with `read`, and
 /// writes that back out with `write`. `read` returns `None` for a message the type rejects
 /// without an error.
-fn round_trip<O: capnp::traits::Owned, T>(
+fn round_trip<O: capnp::traits::Owned, T, W: Written>(
     message: &[u8],
     read: impl FnOnce(O::Reader<'_>) -> capnp::Result<Option<T>>,
-    write: impl FnOnce(&T, O::Builder<'_>),
+    write: impl FnOnce(&T, O::Builder<'_>) -> W,
 ) -> ffi::RoundTrip {
     let Some(reader) = read_flat(message) else {
         return rejected();
@@ -295,12 +356,14 @@ fn round_trip<O: capnp::traits::Owned, T>(
         return rejected();
     };
     let mut builder = Builder::new_default();
-    write(&value, builder.init_root::<O::Builder<'_>>());
+    if !write(&value, builder.init_root::<O::Builder<'_>>()).succeeded() {
+        return rejected();
+    }
     written(&builder)
 }
 
 fn span_context_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<span_context::Owned, _>(
+    round_trip::<span_context::Owned, _, _>(
         message,
         |reader| SpanContext::from_capnp(reader).map(Some),
         SpanContext::to_capnp,
@@ -308,7 +371,7 @@ fn span_context_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn invocation_span_context_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<invocation_span_context::Owned, _>(
+    round_trip::<invocation_span_context::Owned, _, _>(
         message,
         InvocationSpanContext::from_capnp,
         InvocationSpanContext::to_capnp,
@@ -316,7 +379,7 @@ fn invocation_span_context_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn span_status_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<span_status::Owned, _>(
+    round_trip::<span_status::Owned, _, _>(
         message,
         |reader| SpanStatus::from_capnp(reader).map(Some),
         SpanStatus::to_capnp,
@@ -324,7 +387,7 @@ fn span_status_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn tag_value_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<tag_value::Owned, _>(
+    round_trip::<tag_value::Owned, _, _>(
         message,
         |reader| TagValue::from_capnp(reader).map(Some),
         TagValue::to_capnp,
@@ -332,7 +395,7 @@ fn tag_value_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn attribute_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<attribute::Owned, _>(
+    round_trip::<attribute::Owned, _, _>(
         message,
         |reader| Attribute::from_capnp(reader).map(Some),
         Attribute::to_capnp,
@@ -340,7 +403,7 @@ fn attribute_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn span_links_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<span_links::Owned, _>(
+    round_trip::<span_links::Owned, _, _>(
         message,
         |reader| SpanLinks::from_capnp(reader).map(Some),
         SpanLinks::to_capnp,
@@ -348,7 +411,7 @@ fn span_links_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn fetch_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::fetch_event_info::Owned, _>(
+    round_trip::<rpc_trace::fetch_event_info::Owned, _, _>(
         message,
         |reader| FetchEventInfo::from_capnp(reader).map(Some),
         FetchEventInfo::to_capnp,
@@ -356,7 +419,7 @@ fn fetch_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn js_rpc_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::js_rpc_event_info::Owned, _>(
+    round_trip::<rpc_trace::js_rpc_event_info::Owned, _, _>(
         message,
         |reader| JsRpcEventInfo::from_capnp(reader).map(Some),
         JsRpcEventInfo::to_capnp,
@@ -364,7 +427,7 @@ fn js_rpc_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn scheduled_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::scheduled_event_info::Owned, _>(
+    round_trip::<rpc_trace::scheduled_event_info::Owned, _, _>(
         message,
         |reader| ScheduledEventInfo::from_capnp(reader).map(Some),
         ScheduledEventInfo::to_capnp,
@@ -372,7 +435,7 @@ fn scheduled_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn alarm_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::alarm_event_info::Owned, _>(
+    round_trip::<rpc_trace::alarm_event_info::Owned, _, _>(
         message,
         |reader| Ok(Some(AlarmEventInfo::from_capnp(reader))),
         AlarmEventInfo::to_capnp,
@@ -380,7 +443,7 @@ fn alarm_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn on_hibernate_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::on_hibernate_event_info::Owned, _>(
+    round_trip::<rpc_trace::on_hibernate_event_info::Owned, _, _>(
         message,
         |reader| OnHibernateEventInfo::from_capnp(reader).map(Some),
         OnHibernateEventInfo::to_capnp,
@@ -388,7 +451,7 @@ fn on_hibernate_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn queue_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::queue_event_info::Owned, _>(
+    round_trip::<rpc_trace::queue_event_info::Owned, _, _>(
         message,
         |reader| QueueEventInfo::from_capnp(reader).map(Some),
         QueueEventInfo::to_capnp,
@@ -396,7 +459,7 @@ fn queue_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn email_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::email_event_info::Owned, _>(
+    round_trip::<rpc_trace::email_event_info::Owned, _, _>(
         message,
         |reader| EmailEventInfo::from_capnp(reader).map(Some),
         EmailEventInfo::to_capnp,
@@ -404,7 +467,7 @@ fn email_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn trace_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::trace_event_info::Owned, _>(
+    round_trip::<rpc_trace::trace_event_info::Owned, _, _>(
         message,
         |reader| TraceEventInfo::from_capnp(reader).map(Some),
         TraceEventInfo::to_capnp,
@@ -412,7 +475,7 @@ fn trace_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn hibernatable_web_socket_event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::hibernatable_web_socket_event_info::Owned, _>(
+    round_trip::<rpc_trace::hibernatable_web_socket_event_info::Owned, _, _>(
         message,
         |reader| HibernatableWebSocketEventInfo::from_capnp(reader).map(Some),
         |info, builder| info.to_capnp(builder),
@@ -420,7 +483,7 @@ fn hibernatable_web_socket_event_info_round_trip(message: &[u8]) -> ffi::RoundTr
 }
 
 fn trace_preview_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::trace_preview_info::Owned, _>(
+    round_trip::<rpc_trace::trace_preview_info::Owned, _, _>(
         message,
         |reader| TracePreview::from_capnp(reader).map(Some),
         TracePreview::to_capnp,
@@ -428,7 +491,7 @@ fn trace_preview_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn fetch_response_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::fetch_response_info::Owned, _>(
+    round_trip::<rpc_trace::fetch_response_info::Owned, _, _>(
         message,
         |reader| Ok(Some(FetchResponseInfo::from_capnp(reader))),
         |info, builder| info.to_capnp(builder),
@@ -436,10 +499,98 @@ fn fetch_response_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
 }
 
 fn event_info_round_trip(message: &[u8]) -> ffi::RoundTrip {
-    round_trip::<rpc_trace::onset::Owned, _>(
+    round_trip::<rpc_trace::onset::Owned, _, _>(
         message,
         |reader| EventInfo::from_capnp(reader.get_info()?).map(Some),
         |info, builder| info.to_capnp(builder.init_info()),
+    )
+}
+
+fn diagnostic_channel_event_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::diagnostic_channel_event::Owned, _, _>(
+        message,
+        |reader| DiagnosticChannelEvent::from_capnp(reader).map(Some),
+        DiagnosticChannelEvent::to_capnp,
+    )
+}
+
+fn stream_diagnostics_event_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::stream_diagnostics_event::Owned, _, _>(
+        message,
+        |reader| StreamDiagnosticsEvent::from_capnp(reader).map(Some),
+        |event, builder| event.to_capnp(builder),
+    )
+}
+
+fn log_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::log::Owned, _, _>(
+        message,
+        |reader| Log::from_capnp(reader).map(Some),
+        Log::to_capnp,
+    )
+}
+
+fn exception_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::exception::Owned, _, _>(
+        message,
+        |reader| Exception::from_capnp(reader).map(Some),
+        Exception::to_capnp,
+    )
+}
+
+fn return_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::return_::Owned, _, _>(
+        message,
+        |reader| Return::from_capnp(reader).map(Some),
+        |ret, builder| ret.to_capnp(builder),
+    )
+}
+
+fn span_open_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::span_open::Owned, _, _>(
+        message,
+        |reader| SpanOpen::from_capnp(reader).map(Some),
+        SpanOpen::to_capnp,
+    )
+}
+
+fn span_close_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::span_close::Owned, _, _>(
+        message,
+        |reader| SpanClose::from_capnp(reader).map(Some),
+        |close, builder| close.to_capnp(builder),
+    )
+}
+
+fn span_update_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::span_update::Owned, _, _>(
+        message,
+        |reader| SpanUpdate::from_capnp(reader).map(Some),
+        SpanUpdate::to_capnp,
+    )
+}
+
+fn onset_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::onset::Owned, _, _>(
+        message,
+        |reader| Onset::from_capnp(reader).map(Some),
+        Onset::to_capnp,
+    )
+}
+
+fn outcome_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::outcome::Owned, _, _>(
+        message,
+        |reader| Outcome::from_capnp(reader).map(Some),
+        |outcome, builder| outcome.to_capnp(builder),
+    )
+}
+
+fn tail_event_round_trip(message: &[u8]) -> ffi::RoundTrip {
+    round_trip::<rpc_trace::tail_event::Owned, _, _>(
+        message,
+        |reader| TailEvent::from_capnp(reader).map(Some),
+        TailEvent::to_capnp,
     )
 }
 

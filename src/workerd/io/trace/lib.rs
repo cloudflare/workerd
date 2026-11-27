@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! The trace data model of `workerd/io/trace.h` in Rust: trace and span ids, trace flags, span
-//! contexts, span status, tag values, attributes, span links and the event infos of an onset, with
-//! their text, byte and capnp forms.
+//! contexts, span status, tag values, attributes, span links, the event infos of an onset and the
+//! events of a streaming tail session, with their text, byte and capnp forms.
 //!
 //! The C++ types stay, and write and read these as this crate does:
 //! `trace-types-differential-test` keeps the two in step. Random ids are drawn by C++ only.
@@ -15,6 +15,7 @@ mod event;
 mod ids;
 mod link;
 mod status;
+mod tail;
 
 pub use attribute::Attribute;
 pub use attribute::TagValue;
@@ -45,3 +46,23 @@ pub use link::SpanLink;
 pub use link::SpanLinks;
 pub use status::SpanStatus;
 pub use status::SpanStatusCode;
+pub use tail::DiagnosticChannelEvent;
+pub use tail::ErrorInfo;
+pub use tail::EventOutcome;
+pub use tail::Exception;
+pub use tail::ExceptionCode;
+pub use tail::ExecutionModel;
+pub use tail::Log;
+pub use tail::LogLevel;
+pub use tail::Onset;
+pub use tail::Outcome;
+pub use tail::Return;
+pub use tail::ScriptVersion;
+pub use tail::SpanClose;
+pub use tail::SpanOpen;
+pub use tail::SpanOpenInfo;
+pub use tail::SpanUpdate;
+pub use tail::StreamDiagnosticsEvent;
+pub use tail::TailEvent;
+pub use tail::TailEventKind;
+pub use tail::WorkerInfo;

@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Checks that the Rust trace crate writes and reads ids, span contexts, span status, tag values,
-// attributes, span links and event infos as trace.c++ does, over generated and mutated inputs, so
+// attributes, span links, event infos and tail events as trace.c++ does, over generated and mutated inputs, so
 // that the two implementations stay in step.
 
 #include <workerd/io/trace.h>
@@ -553,12 +553,12 @@ KJ_TEST("SpanLinks capnp is read and written as the C++ does") {
   expectMixed(accepted, CAPNP_ROUNDS);
 }
 
-// Reads an info as `T(reader)` and writes it back with `copyTo`, as C++ does for each type of
-// event info.
-template <typename Info, typename T>
-auto readWriteInfo() {
+// Reads a value as `Type(reader)` and writes it back with `copyTo`, as C++ does for most of the
+// trace types.
+template <typename Type, typename T>
+auto readWriteCopy() {
   return [](T::Reader reader, capnp::MessageBuilder& out) {
-    Info(reader).copyTo(out.initRoot<T>());
+    Type(reader).copyTo(out.initRoot<T>());
     return true;
   };
 }
@@ -584,12 +584,14 @@ void randomScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Builder builder, R
   builder.setCron(randomText(random, random.below(8)));
 }
 
-// The largest alarm time, in milliseconds either side of 1970, that C++ holds as a `kj::Date`.
-constexpr int64_t ALARM_LIMIT = std::numeric_limits<int64_t>::max() / 1'000'000;
+// The most milliseconds, either side of zero, that C++ holds in nanoseconds, as a `kj::Date` or a
+// `kj::Duration`.
+constexpr int64_t MILLISECONDS_LIMIT = std::numeric_limits<int64_t>::max() / 1'000'000;
 
 void randomAlarmEventInfo(rpc::Trace::AlarmEventInfo::Builder builder, Random& random) {
-  static constexpr int64_t EDGES[] = {ALARM_LIMIT, -ALARM_LIMIT, ALARM_LIMIT + 1, -ALARM_LIMIT - 1,
-    std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::min()};
+  static constexpr int64_t EDGES[] = {MILLISECONDS_LIMIT, -MILLISECONDS_LIMIT,
+    MILLISECONDS_LIMIT + 1, -MILLISECONDS_LIMIT - 1, std::numeric_limits<int64_t>::max(),
+    std::numeric_limits<int64_t>::min()};
   if (random.below(8) == 0) {
     builder.setScheduledTimeMs(EDGES[random.below(kj::size(EDGES))]);
   } else {
@@ -641,7 +643,7 @@ void randomHibernatableWebSocketEventInfo(
 // milliseconds.
 bool alarmOverflows(rpc::Trace::AlarmEventInfo::Reader reader) {
   auto ms = reader.getScheduledTimeMs();
-  return ms > ALARM_LIMIT || ms < -ALARM_LIMIT;
+  return ms > MILLISECONDS_LIMIT || ms < -MILLISECONDS_LIMIT;
 }
 
 // A reason the schema doesn't know: C++ keeps its number, which the Rust enum cannot hold.
@@ -651,28 +653,28 @@ bool unknownReason(rpc::Trace::OnHibernateEventInfo::Reader reader) {
 
 KJ_TEST("FetchEventInfo capnp is read and written as the C++ does") {
   auto accepted = expectSameCapnp<rpc::Trace::FetchEventInfo>(randomFetchEventInfo,
-      readWriteInfo<FetchEventInfo, rpc::Trace::FetchEventInfo>(),
+      readWriteCopy<FetchEventInfo, rpc::Trace::FetchEventInfo>(),
       ffi::fetch_event_info_round_trip);
   expectMixed(accepted, CAPNP_ROUNDS);
 }
 
 KJ_TEST("JsRpcEventInfo capnp is read and written as the C++ does") {
   auto accepted = expectSameCapnp<rpc::Trace::JsRpcEventInfo>(randomJsRpcEventInfo,
-      readWriteInfo<JsRpcEventInfo, rpc::Trace::JsRpcEventInfo>(),
+      readWriteCopy<JsRpcEventInfo, rpc::Trace::JsRpcEventInfo>(),
       ffi::js_rpc_event_info_round_trip);
   expectMostlyAccepted(accepted);
 }
 
 KJ_TEST("ScheduledEventInfo capnp is read and written as the C++ does") {
   auto accepted = expectSameCapnp<rpc::Trace::ScheduledEventInfo>(randomScheduledEventInfo,
-      readWriteInfo<ScheduledEventInfo, rpc::Trace::ScheduledEventInfo>(),
+      readWriteCopy<ScheduledEventInfo, rpc::Trace::ScheduledEventInfo>(),
       ffi::scheduled_event_info_round_trip);
   expectMostlyAccepted(accepted);
 }
 
 KJ_TEST("AlarmEventInfo capnp is read and written as the C++ does") {
   auto counts = expectSameCapnp<rpc::Trace::AlarmEventInfo>(randomAlarmEventInfo,
-      readWriteInfo<AlarmEventInfo, rpc::Trace::AlarmEventInfo>(), ffi::alarm_event_info_round_trip,
+      readWriteCopy<AlarmEventInfo, rpc::Trace::AlarmEventInfo>(), ffi::alarm_event_info_round_trip,
       alarmOverflows);
   // Without pointers, nothing is rejected.
   KJ_ASSERT(counts.skipped > 0 && counts.accepted + counts.skipped == CAPNP_ROUNDS, counts.accepted,
@@ -681,7 +683,7 @@ KJ_TEST("AlarmEventInfo capnp is read and written as the C++ does") {
 
 KJ_TEST("OnHibernateEventInfo capnp is read and written as the C++ does") {
   auto counts = expectSameCapnp<rpc::Trace::OnHibernateEventInfo>(randomOnHibernateEventInfo,
-      readWriteInfo<OnHibernateEventInfo, rpc::Trace::OnHibernateEventInfo>(),
+      readWriteCopy<OnHibernateEventInfo, rpc::Trace::OnHibernateEventInfo>(),
       ffi::on_hibernate_event_info_round_trip, unknownReason);
   // Without pointers, nothing is rejected.
   KJ_ASSERT(counts.skipped > 0 && counts.accepted + counts.skipped == CAPNP_ROUNDS, counts.accepted,
@@ -690,21 +692,21 @@ KJ_TEST("OnHibernateEventInfo capnp is read and written as the C++ does") {
 
 KJ_TEST("QueueEventInfo capnp is read and written as the C++ does") {
   auto accepted = expectSameCapnp<rpc::Trace::QueueEventInfo>(randomQueueEventInfo,
-      readWriteInfo<QueueEventInfo, rpc::Trace::QueueEventInfo>(),
+      readWriteCopy<QueueEventInfo, rpc::Trace::QueueEventInfo>(),
       ffi::queue_event_info_round_trip);
   expectMostlyAccepted(accepted);
 }
 
 KJ_TEST("EmailEventInfo capnp is read and written as the C++ does") {
   auto accepted = expectSameCapnp<rpc::Trace::EmailEventInfo>(randomEmailEventInfo,
-      readWriteInfo<EmailEventInfo, rpc::Trace::EmailEventInfo>(),
+      readWriteCopy<EmailEventInfo, rpc::Trace::EmailEventInfo>(),
       ffi::email_event_info_round_trip);
   expectMostlyAccepted(accepted);
 }
 
 KJ_TEST("TraceEventInfo capnp is read and written as the C++ does") {
   auto accepted = expectSameCapnp<rpc::Trace::TraceEventInfo>(randomTraceEventInfo,
-      readWriteInfo<TraceEventInfo, rpc::Trace::TraceEventInfo>(),
+      readWriteCopy<TraceEventInfo, rpc::Trace::TraceEventInfo>(),
       ffi::trace_event_info_round_trip);
   expectMostlyAccepted(accepted);
 }
@@ -712,7 +714,7 @@ KJ_TEST("TraceEventInfo capnp is read and written as the C++ does") {
 KJ_TEST("HibernatableWebSocketEventInfo capnp is read and written as the C++ does") {
   auto accepted = expectSameCapnp<rpc::Trace::HibernatableWebSocketEventInfo>(
       randomHibernatableWebSocketEventInfo,
-      readWriteInfo<HibernatableWebSocketEventInfo, rpc::Trace::HibernatableWebSocketEventInfo>(),
+      readWriteCopy<HibernatableWebSocketEventInfo, rpc::Trace::HibernatableWebSocketEventInfo>(),
       ffi::hibernatable_web_socket_event_info_round_trip);
   // Scrambling makes an unknown type now and then, which both reject.
   expectMostlyAccepted(accepted);
@@ -724,7 +726,7 @@ KJ_TEST("TracePreview capnp is read and written as the C++ does") {
     builder.setId(randomText(random, random.below(8)));
     builder.setSlug(randomText(random, random.below(8)));
     builder.setName(randomText(random, random.below(8)));
-  }, readWriteInfo<TracePreview, rpc::Trace::TracePreviewInfo>(), ffi::trace_preview_round_trip);
+  }, readWriteCopy<TracePreview, rpc::Trace::TracePreviewInfo>(), ffi::trace_preview_round_trip);
   expectMostlyAccepted(accepted);
 }
 
@@ -732,7 +734,7 @@ KJ_TEST("FetchResponseInfo capnp is read and written as the C++ does") {
   auto accepted = expectSameCapnp<rpc::Trace::FetchResponseInfo>(
       [](rpc::Trace::FetchResponseInfo::Builder builder, Random& random) {
     builder.setStatusCode(random.next());
-  }, readWriteInfo<FetchResponseInfo, rpc::Trace::FetchResponseInfo>(),
+  }, readWriteCopy<FetchResponseInfo, rpc::Trace::FetchResponseInfo>(),
       ffi::fetch_response_info_round_trip);
   KJ_ASSERT(accepted == CAPNP_ROUNDS);
 }
@@ -774,6 +776,18 @@ void randomOnsetInfo(rpc::Trace::Onset::Info::Builder builder, Random& random) {
   }
 }
 
+// An onset info on which C++ and Rust are known to differ.
+bool onsetInfoDiffers(rpc::Trace::Onset::Info::Reader info) {
+  switch (info.which()) {
+    case rpc::Trace::Onset::Info::ALARM:
+      return alarmOverflows(info.getAlarm());
+    case rpc::Trace::Onset::Info::ON_HIBERNATE:
+      return unknownReason(info.getOnHibernate());
+    default:
+      return false;
+  }
+}
+
 KJ_TEST("Onset info capnp is read and written as the C++ does") {
   // C++ reads and writes the info only as part of an onset, so the messages are onsets, and only
   // their infos are compared.
@@ -786,16 +800,346 @@ KJ_TEST("Onset info capnp is read and written as the C++ does") {
     out.initRoot<rpc::Trace::Onset>().setInfo(written.getRoot<rpc::Trace::Onset>().getInfo());
     return true;
   }, ffi::event_info_round_trip, [](rpc::Trace::Onset::Reader reader) {
-    auto info = reader.getInfo();
-    switch (info.which()) {
-      case rpc::Trace::Onset::Info::ALARM:
-        return alarmOverflows(info.getAlarm());
-      case rpc::Trace::Onset::Info::ON_HIBERNATE:
-        return unknownReason(info.getOnHibernate());
-      default:
-        return false;
-    }
+    return onsetInfoDiffers(reader.getInfo());
   });
+  expectMostlyAccepted(counts.accepted);
+  KJ_ASSERT(counts.skipped > 0);
+}
+
+// Tail events. An enum value the schema doesn't know is kept by C++ and rejected by Rust, so the
+// tests skip the messages that have one.
+
+int64_t randomTimestamp(Random& random) {
+  return random.below(8) == 0 ? static_cast<int64_t>(random.next())
+                              : static_cast<int64_t>(random.next() % 4'000'000'000'000'000'000);
+}
+
+// A count of milliseconds, now and then one past what C++ holds as a `kj::Duration`.
+uint64_t randomMilliseconds(Random& random) {
+  static constexpr uint64_t EDGES[] = {MILLISECONDS_LIMIT, MILLISECONDS_LIMIT + 1, UINT64_MAX};
+  if (random.below(8) == 0) return EDGES[random.below(kj::size(EDGES))];
+  return random.next() % 1'000'000'000;
+}
+
+void randomDiagnosticChannelEvent(
+    rpc::Trace::DiagnosticChannelEvent::Builder builder, Random& random) {
+  builder.setTimestampNs(randomTimestamp(random));
+  builder.setChannel(randomText(random, random.below(8)));
+  auto message = builder.initMessage(random.below(8));
+  for (auto& b: message) b = random.next();
+}
+
+void randomStreamDiagnosticsEvent(
+    rpc::Trace::StreamDiagnosticsEvent::Builder builder, Random& random) {
+  if (random.below(8) == 0) {
+    builder.getDiagnostic().setUndefined();
+  } else {
+    builder.getDiagnostic().initDroppedEvents().setCount(random.below(1000) + 1);
+  }
+}
+
+void randomErrorInfo(rpc::Trace::ErrorInfo::Builder builder, Random& random) {
+  builder.setName(randomText(random, random.below(8)));
+  builder.setMessage(randomText(random, random.below(8)));
+  if (random.below(2) == 0) builder.setStack(randomText(random, random.below(12)));
+}
+
+void randomLog(rpc::Trace::Log::Builder builder, Random& random) {
+  builder.setTimestampNs(randomTimestamp(random));
+  builder.setLogLevel(static_cast<rpc::Trace::Log::Level>(random.below(5)));
+  builder.setMessage(randomText(random, random.below(16)));
+  builder.setTruncated(random.below(4) == 0);
+  if (random.below(2) == 0) {
+    auto slots = builder.initErrorInfo(random.below(4));
+    for (auto slot: slots) {
+      if (random.below(2) == 0) {
+        slot.setNone();
+      } else {
+        randomErrorInfo(slot.initInfo(), random);
+      }
+    }
+  }
+}
+
+void randomException(rpc::Trace::Exception::Builder builder, Random& random) {
+  builder.setTimestampNs(randomTimestamp(random));
+  builder.setName(randomText(random, random.below(8)));
+  builder.setMessage(randomText(random, random.below(8)));
+  if (random.below(2) == 0) builder.setStack(randomText(random, random.below(12)));
+  switch (random.below(3)) {
+    case 0:
+      builder.getCode().setNone();
+      break;
+    case 1:
+      builder.getCode().setText(randomText(random, random.below(6)));
+      break;
+    default:
+      builder.getCode().setNumber(random.float64());
+  }
+}
+
+void randomReturn(rpc::Trace::Return::Builder builder, Random& random) {
+  if (random.below(2) == 0) {
+    builder.getInfo().setEmpty();
+  } else {
+    builder.getInfo().initFetch().setStatusCode(random.next());
+  }
+}
+
+void randomSpanOpen(rpc::Trace::SpanOpen::Builder builder, Random& random) {
+  builder.setOperationName(randomText(random, random.below(8)));
+  builder.setSpanId(random.id());
+  switch (random.below(4)) {
+    case 0:
+      builder.getInfo().setEmpty();
+      break;
+    case 1:
+      randomFetchEventInfo(builder.getInfo().initFetch(), random);
+      break;
+    case 2:
+      randomJsRpcEventInfo(builder.getInfo().initJsRpc(), random);
+      break;
+    default: {
+      auto attributes = builder.getInfo().initCustom(random.below(3));
+      for (auto attribute: attributes) randomAttribute(attribute, random);
+    }
+  }
+}
+
+void randomSpanClose(rpc::Trace::SpanClose::Builder builder, Random& random) {
+  builder.setOutcome(static_cast<EventOutcome>(random.below(14)));
+}
+
+void randomSpanUpdate(rpc::Trace::SpanUpdate::Builder builder, Random& random) {
+  if (random.below(2) == 0) {
+    builder.getInfo().setName(randomText(random, random.below(8)));
+  } else {
+    auto status = builder.getInfo().initStatus();
+    status.setCode(static_cast<rpc::SpanStatusCode>(random.below(3)));
+    status.getMessage().setText(randomText(random, random.below(8)));
+  }
+}
+
+void randomOnset(rpc::Trace::Onset::Builder builder, Random& random) {
+  builder.setExecutionModel(static_cast<rpc::Trace::ExecutionModel>(random.below(3)));
+  builder.setSpanId(random.id());
+  if (random.below(2) == 0) builder.setScriptName(randomText(random, random.below(8)));
+  if (random.below(2) == 0) {
+    auto version = builder.initScriptVersion();
+    version.getId().setUpper(random.next());
+    version.getId().setLower(random.next());
+    if (random.below(2) == 0) version.setTag(randomText(random, random.below(6)));
+    if (random.below(2) == 0) version.setMessage(randomText(random, random.below(6)));
+  }
+  if (random.below(2) == 0) builder.setDispatchNamespace(randomText(random, random.below(8)));
+  if (random.below(2) == 0) builder.setScriptId(randomText(random, random.below(8)));
+  if (random.below(2) == 0) {
+    auto tags = builder.initScriptTags(random.below(3));
+    for (auto i: kj::indices(tags)) tags.set(i, randomText(random, random.below(6)));
+  }
+  if (random.below(2) == 0) builder.setEntryPoint(randomText(random, random.below(8)));
+  if (random.below(2) == 0) {
+    auto preview = builder.initPreview();
+    preview.setId(randomText(random, random.below(6)));
+    preview.setSlug(randomText(random, random.below(6)));
+    preview.setName(randomText(random, random.below(6)));
+  }
+  if (random.below(2) == 0) builder.setDurableObjectId(randomText(random, random.below(8)));
+  randomOnsetInfo(builder.initInfo(), random);
+  auto attributes = builder.initAttributes(random.below(3));
+  for (auto attribute: attributes) randomAttribute(attribute, random);
+}
+
+void randomOutcome(rpc::Trace::Outcome::Builder builder, Random& random) {
+  builder.setOutcome(static_cast<EventOutcome>(random.below(14)));
+  builder.setCpuTime(randomMilliseconds(random));
+  builder.setWallTime(randomMilliseconds(random));
+}
+
+void randomTailEvent(rpc::Trace::TailEvent::Builder builder, Random& random) {
+  auto context = builder.initSpanContext();
+  randomTraceId(context.initTraceId(), random);
+  if (random.below(2) == 0) {
+    context.getInfo().setSpanId(random.id());
+  } else {
+    context.getInfo().setEmpty();
+  }
+  if (random.below(2) == 0) randomTraceFlags(context.initTraceFlags(), random);
+  randomTraceId(builder.initInvocationId(), random);
+  builder.setTimestampNs(randomTimestamp(random));
+  builder.setSequence(random.next());
+  auto event = builder.getEvent();
+  switch (random.below(12)) {
+    case 0:
+      randomOnset(event.initOnset(), random);
+      break;
+    case 1:
+      randomOutcome(event.initOutcome(), random);
+      break;
+    case 2:
+      randomSpanOpen(event.initSpanOpen(), random);
+      break;
+    case 3:
+      randomSpanClose(event.initSpanClose(), random);
+      break;
+    case 4: {
+      auto attributes = event.initAttribute(random.below(3));
+      for (auto attribute: attributes) randomAttribute(attribute, random);
+      break;
+    }
+    case 5:
+      randomReturn(event.initReturn(), random);
+      break;
+    case 6:
+      randomDiagnosticChannelEvent(event.initDiagnosticChannelEvent(), random);
+      break;
+    case 7:
+      randomException(event.initException(), random);
+      break;
+    case 8:
+      randomLog(event.initLog(), random);
+      break;
+    case 9:
+      randomStreamDiagnosticsEvent(event.initStreamDiagnostics(), random);
+      break;
+    case 10:
+      randomSpanUpdate(event.initSpanUpdate(), random);
+      break;
+    default: {
+      auto links = event.initSpanLinks().initLinks(random.below(2));
+      for (auto link: links) {
+        randomTraceId(link.initContext().initTraceId(), random);
+        link.getContext().getInfo().setSpanId(random.id());
+      }
+    }
+  }
+}
+
+bool unknownOutcome(EventOutcome outcome) {
+  return static_cast<uint16_t>(outcome) > static_cast<uint16_t>(EventOutcome::ABORTED);
+}
+
+bool unknownLevel(rpc::Trace::Log::Reader reader) {
+  return static_cast<uint16_t>(reader.getLogLevel()) > 4;
+}
+
+// C++ leaves the count unset for a diagnostic the schema doesn't know, and asserts in debug builds
+// that a count is positive.
+bool streamDiagnosticsDiffers(rpc::Trace::StreamDiagnosticsEvent::Reader reader) {
+  auto diagnostic = reader.getDiagnostic();
+  switch (diagnostic.which()) {
+    case rpc::Trace::StreamDiagnosticsEvent::Diagnostic::UNDEFINED:
+      return false;
+    case rpc::Trace::StreamDiagnosticsEvent::Diagnostic::DROPPED_EVENTS:
+      return diagnostic.getDroppedEvents().getCount() == 0;
+  }
+  return true;
+}
+
+bool outcomeDiffers(rpc::Trace::Outcome::Reader reader) {
+  return unknownOutcome(reader.getOutcome()) || reader.getCpuTime() > MILLISECONDS_LIMIT ||
+      reader.getWallTime() > MILLISECONDS_LIMIT;
+}
+
+bool onsetDiffers(rpc::Trace::Onset::Reader reader) {
+  return static_cast<uint16_t>(reader.getExecutionModel()) > 2 ||
+      onsetInfoDiffers(reader.getInfo());
+}
+
+bool tailEventDiffers(rpc::Trace::TailEvent::Reader reader) {
+  auto event = reader.getEvent();
+  switch (event.which()) {
+    case rpc::Trace::TailEvent::Event::ONSET:
+      return onsetDiffers(event.getOnset());
+    case rpc::Trace::TailEvent::Event::OUTCOME:
+      return outcomeDiffers(event.getOutcome());
+    case rpc::Trace::TailEvent::Event::SPAN_CLOSE:
+      return unknownOutcome(event.getSpanClose().getOutcome());
+    case rpc::Trace::TailEvent::Event::LOG:
+      return unknownLevel(event.getLog());
+    case rpc::Trace::TailEvent::Event::STREAM_DIAGNOSTICS:
+      return streamDiagnosticsDiffers(event.getStreamDiagnostics());
+    default:
+      return false;
+  }
+}
+
+KJ_TEST("DiagnosticChannelEvent capnp is read and written as the C++ does") {
+  auto accepted = expectSameCapnp<rpc::Trace::DiagnosticChannelEvent>(randomDiagnosticChannelEvent,
+      readWriteCopy<DiagnosticChannelEvent, rpc::Trace::DiagnosticChannelEvent>(),
+      ffi::diagnostic_channel_event_round_trip);
+  expectMostlyAccepted(accepted);
+}
+
+KJ_TEST("StreamDiagnosticsEvent capnp is read and written as the C++ does") {
+  auto counts = expectSameCapnp<rpc::Trace::StreamDiagnosticsEvent>(randomStreamDiagnosticsEvent,
+      readWriteCopy<StreamDiagnosticsEvent, rpc::Trace::StreamDiagnosticsEvent>(),
+      ffi::stream_diagnostics_event_round_trip, streamDiagnosticsDiffers);
+  // Both reject an undefined diagnostic.
+  KJ_ASSERT(counts.skipped > 0 && counts.accepted > CAPNP_ROUNDS / 2 &&
+          counts.accepted + counts.skipped < CAPNP_ROUNDS,
+      counts.accepted, counts.skipped);
+}
+
+KJ_TEST("Log capnp is read and written as the C++ does") {
+  auto counts = expectSameCapnp<rpc::Trace::Log>(
+      randomLog, readWriteCopy<Log, rpc::Trace::Log>(), ffi::log_round_trip, unknownLevel);
+  expectMostlyAccepted(counts.accepted);
+  KJ_ASSERT(counts.skipped > 0);
+}
+
+KJ_TEST("Exception capnp is read and written as the C++ does") {
+  auto accepted = expectSameCapnp<rpc::Trace::Exception>(randomException,
+      readWriteCopy<Exception, rpc::Trace::Exception>(), ffi::exception_round_trip);
+  expectMostlyAccepted(accepted);
+}
+
+KJ_TEST("Return capnp is read and written as the C++ does") {
+  auto accepted = expectSameCapnp<rpc::Trace::Return>(
+      randomReturn, readWriteCopy<Return, rpc::Trace::Return>(), ffi::return_round_trip);
+  expectMostlyAccepted(accepted);
+}
+
+KJ_TEST("SpanOpen capnp is read and written as the C++ does") {
+  auto accepted = expectSameCapnp<rpc::Trace::SpanOpen>(
+      randomSpanOpen, readWriteCopy<SpanOpen, rpc::Trace::SpanOpen>(), ffi::span_open_round_trip);
+  expectMostlyAccepted(accepted);
+}
+
+KJ_TEST("SpanClose capnp is read and written as the C++ does") {
+  auto counts = expectSameCapnp<rpc::Trace::SpanClose>(randomSpanClose,
+      readWriteCopy<SpanClose, rpc::Trace::SpanClose>(), ffi::span_close_round_trip,
+      [](rpc::Trace::SpanClose::Reader reader) { return unknownOutcome(reader.getOutcome()); });
+  // Without pointers, nothing is rejected.
+  KJ_ASSERT(counts.skipped > 0 && counts.accepted + counts.skipped == CAPNP_ROUNDS, counts.accepted,
+      counts.skipped);
+}
+
+KJ_TEST("SpanUpdate capnp is read and written as the C++ does") {
+  auto accepted = expectSameCapnp<rpc::Trace::SpanUpdate>(randomSpanUpdate,
+      readWriteCopy<SpanUpdate, rpc::Trace::SpanUpdate>(), ffi::span_update_round_trip);
+  expectMostlyAccepted(accepted);
+}
+
+KJ_TEST("Onset capnp is read and written as the C++ does") {
+  auto counts = expectSameCapnp<rpc::Trace::Onset>(
+      randomOnset, readWriteCopy<Onset, rpc::Trace::Onset>(), ffi::onset_round_trip, onsetDiffers);
+  expectMostlyAccepted(counts.accepted);
+  KJ_ASSERT(counts.skipped > 0);
+}
+
+KJ_TEST("Outcome capnp is read and written as the C++ does") {
+  auto counts = expectSameCapnp<rpc::Trace::Outcome>(randomOutcome,
+      readWriteCopy<Outcome, rpc::Trace::Outcome>(), ffi::outcome_round_trip, outcomeDiffers);
+  // Without pointers, nothing is rejected.
+  KJ_ASSERT(counts.skipped > 0 && counts.accepted + counts.skipped == CAPNP_ROUNDS, counts.accepted,
+      counts.skipped);
+}
+
+KJ_TEST("TailEvent capnp is read and written as the C++ does") {
+  auto counts = expectSameCapnp<rpc::Trace::TailEvent>(randomTailEvent,
+      readWriteCopy<TailEvent, rpc::Trace::TailEvent>(), ffi::tail_event_round_trip,
+      tailEventDiffers);
   expectMostlyAccepted(counts.accepted);
   KJ_ASSERT(counts.skipped > 0);
 }

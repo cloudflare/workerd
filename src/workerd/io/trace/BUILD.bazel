@@ -11,6 +11,8 @@ wd_rust_crate(
     ),
     visibility = ["//visibility:public"],
     deps = [
+        "//src/workerd/io:outcome_capnp_rust",
+        "//src/workerd/io:script-version_capnp_rust",
         "//src/workerd/io:trace_capnp_rust",
         "//src/workerd/io:worker-interface_capnp_rust",
         "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp_rust",

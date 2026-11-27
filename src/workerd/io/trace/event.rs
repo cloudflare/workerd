@@ -13,11 +13,13 @@ use worker_interface_capnp::trace::onset;
 
 use crate::attribute::list_len;
 
-fn text(reader: capnp::Result<capnp::text::Reader<'_>>) -> capnp::Result<Vec<u8>> {
+/// The bytes of a text field.
+pub fn text(reader: capnp::Result<capnp::text::Reader<'_>>) -> capnp::Result<Vec<u8>> {
     Ok(reader?.as_bytes().to_vec())
 }
 
-fn as_text(bytes: &[u8]) -> capnp::text::Reader<'_> {
+/// Bytes as a text field.
+pub fn as_text(bytes: &[u8]) -> capnp::text::Reader<'_> {
     capnp::text::Reader::from(bytes)
 }
 
