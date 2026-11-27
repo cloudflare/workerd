@@ -9,6 +9,7 @@ wd_rust_crate(
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
         "//src/workerd/io/frankenvalue:ffi.rs@cxx",
         "//src/workerd/server/factory:bootstrap-hdrs",
+        "//src/workerd/server/factory:loop-io",
         "//src/workerd/server/factory:per-process-hdrs",
         "//src/workerd/server/factory:worker-factory-hdrs",
         "//src/workerd/util:thread-scopes",

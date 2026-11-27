@@ -303,6 +303,16 @@ pub mod ffi {
         type ProcessState;
     }
 
+    #[namespace = "workerd::server"]
+    unsafe extern "C++" {
+        include!("workerd/server/factory/loop-io.h");
+
+        /// The I/O the factories on one loop share (factory/loop-io.h): the loop's timer and
+        /// clock, a tokio-backed `kj::Network` over the loop, the disk and entropy. Every factory
+        /// built over it holds a reference.
+        type LoopIo;
+    }
+
     #[namespace = "workerd::server::cli"]
     unsafe extern "C++" {
         include!("workerd/server/factory/bootstrap.h");
@@ -326,16 +336,18 @@ pub mod ffi {
         /// handle are dropped.
         fn process_start(options: &ProcessOptions) -> Result<KjArc<ProcessState>>;
 
-        /// The worker factory over `config` on `process`, with its own I/O over `event_loop`'s
-        /// timer (a tokio-backed `kj::Network`, the disk, entropy), which it owns and drops
-        /// after itself. `config` is an encoded message (segment table, then segments) in 8-byte
-        /// words. An error means the process failed to start.
-        ///
-        /// The factory dies before the Runtime (the timer and the loop must outlive everything
-        /// on them).
+        /// The I/O of the factories on `event_loop`, which must be this thread's. It dies before
+        /// the Runtime (the timer and the loop must outlive everything on them), and so does every
+        /// factory built over it, since each holds a reference.
+        fn loop_io_new(event_loop: Pin<&mut TokioAsyncIoContext>) -> Result<KjRc<LoopIo>>;
+
+        /// The worker factory over `config` on `process` and `io`, holding a reference to both,
+        /// which it drops after itself, the process's first. `config` is an encoded message
+        /// (segment table, then segments) in 8-byte words. An error means the process failed to
+        /// start.
         fn factory_new(
             process: &ProcessState,
-            event_loop: Pin<&mut TokioAsyncIoContext>,
+            io: KjRc<LoopIo>,
             config: Vec<u64>,
             options: &FactoryOptions,
         ) -> Result<KjOwn<WorkerFactory>>;

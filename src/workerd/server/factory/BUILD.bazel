@@ -118,6 +118,23 @@ wd_cc_library(
     ],
 )
 
+# The I/O of the worker factories on one Rust-owned event loop (a tokio-backed network, the disk,
+# entropy). It depends on nothing of the server's, so the server crate's bridge can depend on it
+# whole.
+wd_cc_library(
+    name = "loop-io",
+    srcs = ["loop-io.c++"],
+    hdrs = ["loop-io.h"],
+    implementation_deps = [
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+        "//src/workerd/util:entropy",
+        "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
 # The declarations of :per-process the server crate's bridge needs (it holds a `ProcessState`).
 # Header-only, like :worker-factory-hdrs.
 wd_cc_library(
@@ -141,6 +158,7 @@ wd_cc_library(
         "//conditions:default": [],
     }),
     deps = [
+        ":loop-io",
         ":per-process-hdrs",
         ":worker-factory",
         "//src/workerd/io",
@@ -167,15 +185,14 @@ wd_cc_library(
     linkstatic = CC_LIBRARY_LINKSTATIC,
     deps = [
         ":bootstrap-hdrs",
+        ":loop-io",
         ":per-process",
         ":worker-factory",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/rust/cxx/kj-rs",
-        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
         "//src/workerd/server:json-logger",
         "//src/workerd/server/server:bridge.rs@cxx",
-        "//src/workerd/util:entropy",
         # :bootstrap exists only for the workerd binary, so it links the binary's kj::setupAsyncIo()
         # (the inspector and fallback-service threads' loops).
         "//src/workerd/util:setup-async-io",
