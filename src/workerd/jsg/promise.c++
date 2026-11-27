@@ -154,7 +154,14 @@ void UnhandledRejectionHandler::onMicrotasksCompleted(v8::Isolate* isolate, void
     // a rejected one, sets it again during processWarnings(), which also processes what the
     // handler reported.
     handler->scheduled = false;
+    // No JavaScript runs once execution terminates: the pending rejections are dropped, as V8
+    // drops the queued microtasks.
+    if (isolate->IsExecutionTerminating()) {
+      handler->unhandledRejections.clear();
+    }
   });
+  // V8 calls this after a checkpoint that execution terminated, too.
+  if (isolate->IsExecutionTerminating()) return;
   auto& js = Lock::from(isolate);
   KJ_TRY {
     handler->processWarnings(js);
@@ -163,7 +170,11 @@ void UnhandledRejectionHandler::onMicrotasksCompleted(v8::Isolate* isolate, void
     js.requestExtraMicrotaskCheckpoint();
   }
   KJ_CATCH(exception) {
-    KJ_LOG(ERROR, "uncaught exception while processing unhandled rejections", exception);
+    // An event handler that terminates execution, for example by exceeding the CPU limit, is not
+    // an error.
+    if (!isolate->IsExecutionTerminating()) {
+      KJ_LOG(ERROR, "uncaught exception while processing unhandled rejections", exception);
+    }
   }
 }
 

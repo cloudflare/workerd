@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The Durable Object has its own service, so its own isolate: its unhandledrejection listener
+# does not see the rejections of the tests.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "unhandled-rejection-abort-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "unhandled-rejection-abort-test.js")],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+        bindings = [
+          (name = "CHAIN", durableObjectNamespace = (className = "Chain", serviceName = "chain")),
+        ],
+      )
+    ),
+    ( name = "chain",
+      worker = (
+        modules = [(name = "worker", esModule = embed "unhandled-rejection-abort-test-chain.js")],
+        compatibilityFlags = ["rpc", "unhandled_rejection_after_microtask_checkpoint"],
+        durableObjectNamespaces = [(className = "Chain", uniqueKey = "unhandled-rejection-chain")],
+        durableObjectStorage = (inMemory = void),
+      )
+    ),
+  ],
+);
