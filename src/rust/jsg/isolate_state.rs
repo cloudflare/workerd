@@ -54,6 +54,7 @@
 //! it. Such references are then released with [`ReleaseContext::Disposed`], one thread at a
 //! time.
 
+use std::cell::Cell;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -120,6 +121,18 @@ struct DropQueues {
     reason = "resets V8 handles and asks V8 whether the isolate is locked"
 )]
 impl IsolateState {
+    /// Releases `released` under the isolate lock. If it drops a resource whose Wrappable is bound
+    /// to no isolate and whose `Drop` panics, marks this isolate (see
+    /// `IsolateBase::setResourceDropPanicked()`), since the resource belongs to it.
+    fn release_locked(&self, released: impl Releasable) {
+        UNBOUND_DROP_PANICKED.set(false);
+        released.release(ReleaseContext::Locked);
+        if UNBOUND_DROP_PANICKED.replace(false) {
+            // SAFETY: this thread holds the isolate lock, so the isolate is alive.
+            unsafe { ffi::isolate_set_resource_drop_panicked(self.isolate) };
+        }
+    }
+
     pub(crate) fn new(isolate: v8::IsolatePtr) -> Arc<Self> {
         Arc::new(Self {
             isolate: isolate.as_ffi(),
@@ -237,7 +250,7 @@ impl IsolateState {
             self.this_thread_holds_lock_outside_scope()
         };
         if locked {
-            released.release(ReleaseContext::Locked);
+            self.release_locked(released);
             return;
         }
         let mut queues = self.lock_drop_queues();
@@ -288,7 +301,9 @@ impl IsolateState {
                 std::mem::take(&mut queues.awaiting_lock),
             )
         };
-        released.into_iter().for_each(Released::release_locked);
+        for released in released {
+            self.release_locked(released);
+        }
         slots.into_iter().for_each(reset_and_free);
     }
 
@@ -312,7 +327,9 @@ impl IsolateState {
         // References first, so the handles of resources they drop are reset, not left to
         // `Dispose`.
         let released = std::mem::take(&mut self.lock_drop_queues().released_awaiting_lock);
-        released.into_iter().for_each(Released::release_locked);
+        for released in released {
+            self.release_locked(released);
+        }
         let (released, slots) = {
             let mut queues = self.lock_drop_queues();
             self.closed.store(true, Ordering::Release);
@@ -322,7 +339,9 @@ impl IsolateState {
             )
         };
         // Queued by other threads meanwhile.
-        released.into_iter().for_each(Released::release_locked);
+        for released in released {
+            self.release_locked(released);
+        }
         slots.into_iter().for_each(reset_and_free);
     }
 
@@ -357,6 +376,8 @@ impl IsolateState {
             }
             for released in batch {
                 released.release(ReleaseContext::Disposed);
+                // There is no isolate left to mark, and this may run within a release of another.
+                UNBOUND_DROP_PANICKED.set(false);
             }
         }
     }
@@ -368,6 +389,17 @@ impl IsolateState {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+thread_local! {
+    /// Set by [`note_unbound_drop_panic`] while a release on this thread drops resources.
+    static UNBOUND_DROP_PANICKED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Records that the `Drop` of a resource whose Wrappable is bound to no isolate panicked. C++
+/// `~Wrappable` calls it, and the [`IsolateState`] releasing the resource marks its isolate.
+pub fn note_unbound_drop_panic() {
+    UNBOUND_DROP_PANICKED.set(true);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -390,13 +422,11 @@ impl Released {
     fn new<T: Releasable>(released: T) -> Self {
         Self(Box::new(move |context| released.release(context)))
     }
+}
 
+impl Releasable for Released {
     fn release(self, context: ReleaseContext) {
         (self.0)(context);
-    }
-
-    fn release_locked(self) {
-        self.release(ReleaseContext::Locked);
     }
 }
 
