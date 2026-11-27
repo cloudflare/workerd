@@ -236,6 +236,11 @@ wd_test(
 )
 
 wd_test(
+    src = "timeout-bookkeeping-test.wd-test",
+    data = ["timeout-bookkeeping-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-delete-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-delete-test.js"],
