@@ -296,6 +296,14 @@ pub mod ffi {
         type TokioAsyncIoContext = kj_rs_tokio::TokioAsyncIoContext;
     }
 
+    #[namespace = "workerd::server"]
+    unsafe extern "C++" {
+        include!("workerd/server/factory/per-process.h");
+
+        /// What the process sets up once and every factory shares (factory/per-process.h).
+        type ProcessState;
+    }
+
     #[namespace = "workerd::server::cli"]
     unsafe extern "C++" {
         include!("workerd/server/factory/bootstrap.h");
@@ -311,17 +319,32 @@ pub mod ffi {
             command: Box<PendingCommand>,
         ) -> Result<i32>;
 
-        /// Sets up what the process needs around the Rust server -- perfetto, autogates, V8
-        /// (platform and `jsg::V8System`), a tokio-backed `kj::Network` on the loop's timer --
-        /// and returns the worker factory over the config, which owns it all: dropping the
-        /// factory tears the rest down after it, in reverse, flushing the perfetto trace.
-        /// `config` is an encoded message (segment table, then segments) in 8-byte words.
-        /// `test` and `bench` are the options of those commands, at most one of them given. An
-        /// error means the process failed to start.
+        /// Sets up the process (`ProcessState::start`, factory/per-process.h) for `config` and the
+        /// options: perfetto, the async trace file, tcmalloc, the config's autogates, the test
+        /// and bench modes, and V8 with the config's flags. `config` is an encoded message
+        /// (segment table, then segments) in 8-byte words. `test` and `bench` are the options of
+        /// those commands, at most one of them given. Once per process: an error once V8 has
+        /// started; any other error means the process failed to start.
+        ///
+        /// Every factory built on it holds a reference, so it is torn down -- V8 disposed, the
+        /// async trace file ended, the perfetto trace flushed -- once the last factory and this
+        /// handle are dropped.
+        fn process_start(
+            config: &[u64],
+            options: &ServeOrTestOptions,
+            test: KjMaybe<&TestOptions>,
+            bench: KjMaybe<&BenchOptions>,
+        ) -> Result<KjArc<ProcessState>>;
+
+        /// The worker factory over `config` on `process`, with I/O of its own over
+        /// `event_loop`'s timer (a tokio-backed `kj::Network`, the disk, entropy), which it
+        /// drops after itself. The options are `process_start`'s. An error means the process
+        /// failed to start.
         ///
         /// The factory dies before the Runtime (the timer and the loop must outlive everything
         /// on them).
-        fn bootstrap(
+        fn factory_new(
+            process: &ProcessState,
             event_loop: Pin<&mut TokioAsyncIoContext>,
             config: Vec<u64>,
             options: &ServeOrTestOptions,
@@ -371,7 +394,7 @@ pub mod ffi {
 
         /// Everything shared by the workers of one server: the V8 system, the HTTP header
         /// table, the capnp factories, the channel token handler, the inspector. Created by the
-        /// C++ bootstrap (bootstrap.c++) for the lifetime of a run.
+        /// command line (`factory_new`) for the lifetime of a run.
         type WorkerFactory;
 
         /// The config, as the bytes of an encoded `Config` message the factory and the server

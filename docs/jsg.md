@@ -345,14 +345,14 @@ int main() {
 
 ### Real-World Reference: workerd Initialization
 
-For a production example, see how workerd initializes V8 in `src/workerd/server/factory/bootstrap.c++`:
+For a production example, see how workerd initializes V8 in `src/workerd/server/factory/per-process.c++`:
 
 ```cpp
-// From bootstrap.c++ (Bootstrap)
+// From per-process.c++ (ProcessState::Impl)
 platform = jsg::defaultPlatform(0);
 v8Platform = kj::heap<WorkerdPlatform>(*platform);
 v8System = kj::heap<jsg::V8System>(*v8Platform,
-    KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
+    KJ_MAP(flag, options.v8Flags) -> kj::StringPtr { return flag; }, platform.get());
 ```
 
 And how isolates are created in `src/workerd/server/factory/worker-factory.c++`:
