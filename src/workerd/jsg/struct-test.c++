@@ -16,6 +16,16 @@ struct SelfStruct {
   JSG_STRUCT(self, i);
 };
 
+struct RequiredStruct {
+  kj::String str;
+  Optional<kj::String> opt;
+  kj::Maybe<double> maybe;
+
+  static constexpr bool jsgRequiredMembers = true;
+
+  JSG_STRUCT(str, opt, maybe);
+};
+
 struct StructContext: public Object, public ContextGlobal {
   kj::String readTestStruct(TestStruct s) {
     return kj::str(s.str, ", ", s.num, ", ", s.box->value);
@@ -27,6 +37,9 @@ struct StructContext: public Object, public ContextGlobal {
     KJ_ASSERT(s.i == 123);
     return kj::mv(s.self);
   }
+  kj::String readRequiredStruct(RequiredStruct s) {
+    return kj::str(s.str, ", ", s.opt.orDefault(kj::str("none")), ", ", s.maybe.orDefault(-1));
+  }
   SelfStruct makeSelfStruct(Lock& js) {
     return {.self = {js.v8Isolate, v8::Object::New(js.v8Isolate)}, .i = 456};
   }
@@ -37,9 +50,11 @@ struct StructContext: public Object, public ContextGlobal {
     JSG_METHOD(makeTestStruct);
     JSG_METHOD(readSelfStruct);
     JSG_METHOD(makeSelfStruct);
+    JSG_METHOD(readRequiredStruct);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(StructIsolate, StructContext, NumberBox, TestStruct, SelfStruct);
+JSG_DECLARE_ISOLATE_TYPE(
+    StructIsolate, StructContext, NumberBox, TestStruct, SelfStruct, RequiredStruct);
 
 KJ_TEST("structs") {
   Evaluator<StructContext, StructIsolate> e(v8System);
@@ -62,6 +77,25 @@ KJ_TEST("structs") {
   e.expectEval(
       "JSON.stringify(readSelfStruct({i: 123, x: 'foo'}))", "string", "{\"i\":123,\"x\":\"foo\"}");
   e.expectEval("JSON.stringify(makeSelfStruct())", "string", "{\"i\":456}");
+}
+
+KJ_TEST("structs with required members") {
+  Evaluator<StructContext, StructIsolate> e(v8System);
+  e.expectEval("readRequiredStruct({str: 'foo', opt: 'bar', maybe: 1})", "string", "foo, bar, 1");
+  e.expectEval("readRequiredStruct({str: 'foo', maybe: null})", "string", "foo, none, -1");
+  e.expectEval("readRequiredStruct({str: 123, maybe: 1})", "string", "123, none, 1");
+  e.expectEval("readRequiredStruct({str: 'undefined', maybe: 1})", "string", "undefined, none, 1");
+
+  e.expectEval("readRequiredStruct({})", "throws",
+      "TypeError: Required member 'str' is missing from 'RequiredStruct'.");
+  e.expectEval("readRequiredStruct({str: undefined, opt: 'bar'})", "throws",
+      "TypeError: Required member 'str' is missing from 'RequiredStruct'.");
+  e.expectEval("readRequiredStruct({str: 'foo'})", "throws",
+      "TypeError: Required member 'maybe' is missing from 'RequiredStruct'.");
+
+  // Structs without jsgRequiredMembers convert an undefined member like any other value.
+  e.expectEval(
+      "readTestStruct({num: 123, box: new NumberBox(456)})", "string", "undefined, 123, 456");
 }
 
 }  // namespace

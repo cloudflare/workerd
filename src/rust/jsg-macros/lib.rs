@@ -76,6 +76,10 @@ use utils::typescript_options;
 /// `jsg::Cell` or `jsg::RefCell`, which make the handle strong before it leaves.
 /// Use `#[jsg_struct(name = "MyName")]` to override `Type::class_name()`
 /// metadata and the TypeScript declaration name; it does not define a JS class.
+/// With `#[jsg_struct(required_members)]`, like a C++ `JSG_STRUCT` with `jsgRequiredMembers`, a
+/// field that isn't optional is a Web IDL required member: an undefined value for it is a
+/// `TypeError` instead of being converted, so a missing `String` field doesn't become
+/// "undefined".
 #[proc_macro_attribute]
 pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
@@ -87,6 +91,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(err) => return err,
     };
     let custom_marker = has_flag(&attr, "custom_holds_no_gc_references");
+    let required_members = has_flag(&attr, "required_members");
     let rtti = describe_struct(name, &class_name, &typescript_options(attr), &named_fields);
 
     // Each public field's name, JavaScript name and type, in order.
@@ -119,6 +124,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                     js_name,
                     field_type,
                     &class_name,
+                    required_members,
                     &quote! { __jsg_shape.get(lock, obj, #index)? },
                 )
             });
@@ -198,16 +204,27 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The statements a `#[jsg_struct]`'s `FromJS::try_from_js` runs to convert the field's value,
 /// `prop`, and bind it to a local of the field's name. Like C++ JSG, an absent property reads as
 /// undefined, and a value that is not of the field's type is reported as that field's, while an
-/// error from converting one passes through.
+/// error from converting one passes through. With `required_members`, an undefined value for a
+/// field that isn't optional is a `TypeError`.
 fn struct_field_extraction(
     field_name: &syn::Ident,
     js_name: &str,
     field_type: &syn::Type,
     class_name: &str,
+    required_members: bool,
     prop: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
+    let require = required_members.then(|| {
+        let message = format!("Required member '{js_name}' is missing from '{class_name}'.");
+        quote! {
+            if !<#field_type as jsg::FromJS<'s>>::is_optional() && prop.is_undefined() {
+                return Err(jsg::Error::new_type_error(#message));
+            }
+        }
+    });
     quote! {
         let prop = #prop;
+        #require
         let Some(#field_name) = <#field_type as jsg::FromJS<'s>>::try_from_js(lock, prop)? else {
             return Err(jsg::Error::new_incorrect_type(
                 jsg::TypeErrorContext::StructField { field: #js_name, class: #class_name },
@@ -235,6 +252,8 @@ fn empty_struct_body(
             js_name,
             field_type,
             class_name,
+            // Every field is optional here, or the struct failed above.
+            false,
             &quote! { __jsg_undefined },
         )
     });

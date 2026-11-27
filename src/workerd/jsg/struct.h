@@ -78,6 +78,13 @@ static_assert(!NotV8Local<kj::Array<JsValue>>);
 static_assert(!NotV8Local<kj::Array<v8::Local<v8::Object>>>);
 static_assert(!NotV8Local<Dict<JsValue>>);
 
+// Whether a field of type T is a required member that a JSG_STRUCT with `jsgRequiredMembers`
+// rejects when its value is undefined. Optional and placeholder fields accept undefined. A
+// nullable (`kj::Maybe`) field is a required member that may be null, as it is when the whole
+// struct is converted from null or undefined.
+template <typename T>
+constexpr bool isRequiredStructMember = isUsableStructField<T> && !webidl::OptionalType<T>;
+
 // Converts one field of a JSG_STRUCT to/from the corresponding JavaScript property. Note that a
 // field wrapper's state is just its interned JS-visible name – the struct that declares the field,
 // the field's location within that struct and the field's type are supplied by StructWrapper at the
@@ -134,7 +141,8 @@ class FieldWrapper {
   }
 
   // `structType` identifies the struct declaring this field and is used for type error messages.
-  template <typename T>
+  // With `requireMember`, an undefined value throws a TypeError instead of being converted.
+  template <typename T, bool requireMember = false>
   T unwrap(auto& wrapper,
       v8::Isolate* isolate,
       v8::Local<v8::Context> context,
@@ -156,6 +164,13 @@ class FieldWrapper {
       // does not exist
       if (check(in->HasRealNamedProperty(context, fieldName))) {
         jsValue = check(in->GetRealNamedProperty(context, fieldName));
+      }
+    }
+    if constexpr (requireMember) {
+      if (jsValue->IsUndefined()) {
+        throwTypeError(isolate,
+            kj::str("Required member '", exportedName, "' is missing from '", typeName(structType),
+                "'."));
       }
     }
     return wrapper.template unwrap<T>(
@@ -201,6 +216,12 @@ class StructWrapper<T, StructFields<fields...>, kj::_::Indexes<indices...>> {
   static constexpr const std::type_info& getName(T*) {
     return typeid(T);
   }
+
+  // Whether `field` rejects an undefined value: it is a required member of a struct that sets
+  // `jsgRequiredMembers`.
+  template <auto field>
+  static constexpr bool requireMember =
+      requires { requires T::jsgRequiredMembers; } && isRequiredStructMember<FieldType<field>>;
 
   // A count of the JSG_STRUCT fields that are usable for the v8::DictionaryTemplate
   // version of wrap (i.e. not SelfRef, Unimplemented, or WontImplement).
@@ -289,7 +310,7 @@ class StructWrapper<T, StructFields<fields...>, kj::_::Indexes<indices...>> {
     //   it prescribes lexicographically-ordered member initialization, with base members ordered
     //   before derived members. Objects with mutating getters might be broken by this, but it
     //   doesn't seem worth fixing absent a compelling use case.
-    auto t = T{fieldWrappers[indices].template unwrap<FieldType<fields>>(
+    auto t = T{fieldWrappers[indices].template unwrap<FieldType<fields>, requireMember<fields>>(
         self, js.v8Isolate, context, in, typeid(T))...};
 
     // Note that if a `validate` function is provided, then it will be called after the struct is

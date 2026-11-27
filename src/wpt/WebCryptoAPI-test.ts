@@ -54,15 +54,7 @@ export default {
   },
   'derive_bits_keys/pbkdf2.js': supportFile,
   'derive_bits_keys/pbkdf2_vectors.js': supportFile,
-  'digest/digest.https.any.js': {
-    comment: 'They expect TypeError, we have NotSupportedError',
-    expectedFailures: [
-      'empty algorithm object with empty',
-      'empty algorithm object with short',
-      'empty algorithm object with medium',
-      'empty algorithm object with long',
-    ],
-  },
+  'digest/digest.https.any.js': {},
   'digest/digest.js': {},
   'digest/digest_test_data.js': {},
   'encrypt_decrypt/aes.js': supportFile,
@@ -96,8 +88,10 @@ export default {
   'generateKey/failures_RSASSA-PKCS1-v1_5.https.any.js': {},
   'generateKey/failures_X25519.https.any.js': {},
   'generateKey/failures_bad_algorithm.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
+    comment: 'workerd supports HMAC with MD5',
+    expectedFailures: [
+      /^Bad algorithm: generateKey\(\{hash: MD5, name: HMAC\}/,
+    ],
   },
   'generateKey/successes.js': supportFile,
   'generateKey/successes_AES-CBC.https.any.js': {},
