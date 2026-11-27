@@ -889,5 +889,159 @@ KJ_TEST("overdue nested timers retain their clock clamp after parent completion"
   test.expectDone();
 }
 
+KJ_TEST("delays are truncated, and NaN, negative and huge delays are clamped") {
+  TimerTest test(R"JS(
+    import { DurableObject } from 'cloudflare:workers';
+    globalThis.events = '';
+    export default class extends DurableObject {
+      async fetch() {
+        setTimeout(() => events += `fraction:${performance.now()};`, 10.9);
+        setTimeout(() => events += `nan:${performance.now()};`, NaN);
+        setTimeout(() => events += `negative:${performance.now()};`, -5);
+        setTimeout(() => events += `string:${performance.now()};`, '3');
+        // Clamped to 100 years, so neither fires during the test.
+        setTimeout(() => events += 'infinity;', Infinity);
+        setTimeout(() => events += 'huge;', 2 ** 53);
+        await scheduler.wait(20);
+        return new Response('OK');
+      }
+    }
+  )JS"_kj);
+
+  test.expectEvents("nan:0;negative:0;");
+  test.advanceTo(2);
+  test.expectEvents("nan:0;negative:0;");
+  test.advanceTo(3);
+  test.expectEvents("nan:0;negative:0;string:3;");
+  test.advanceTo(10);
+  test.expectEvents("nan:0;negative:0;string:3;fraction:10;");
+  test.advanceTo(20);
+  test.expectDone();
+  test.expectTimeoutCount(2);
+}
+
+KJ_TEST("equal deadlines fire in insertion order, ahead of zero delays set by their callbacks") {
+  TimerTest test(R"JS(
+    import { DurableObject } from 'cloudflare:workers';
+    globalThis.events = '';
+    export default class extends DurableObject {
+      async fetch() {
+        setTimeout(() => {
+          events += 'a;';
+          setTimeout(() => events += 'd;', 0);
+        }, 10);
+        setTimeout(() => events += 'b;', 10);
+        setTimeout(() => events += 'c;', 5);
+        await scheduler.wait(15);
+        return new Response('OK');
+      }
+    }
+  )JS"_kj);
+
+  test.advanceTo(5);
+  test.expectEvents("c;");
+  // d's deadline is 10, the clamped time in a's callback, but it was inserted after b.
+  test.advanceTo(10);
+  test.expectEvents("c;a;b;d;");
+  test.advanceTo(15);
+  test.expectDone();
+  test.expectTimeoutCount(0);
+}
+
+KJ_TEST("a timer cleared from its own callback finishes once") {
+  TimerTest test(R"JS(
+    import { DurableObject } from 'cloudflare:workers';
+    globalThis.events = '';
+    export default class extends DurableObject {
+      async fetch() {
+        const once = setTimeout(() => {
+          clearTimeout(once);
+          events += 'once;';
+        }, 10);
+        const interval = setInterval(() => {
+          events += 'interval;';
+          clearInterval(interval);
+          clearInterval(interval);
+        }, 5);
+        await scheduler.wait(30);
+        return new Response('OK');
+      }
+    }
+  )JS"_kj);
+
+  test.expectTimeoutCount(3);
+  test.advanceTo(5);
+  test.expectEvents("interval;");
+  test.expectTimeoutCount(2);
+  test.advanceTo(10);
+  test.expectEvents("interval;once;");
+  test.expectTimeoutCount(1);
+  test.advanceTo(30);
+  test.expectEvents("interval;once;");
+  test.expectDone();
+  test.expectTimeoutCount(0);
+}
+
+KJ_TEST("clearing a fired timer that waits on the input gate finishes it once") {
+  TimerTest test(R"JS(
+    import { DurableObject } from 'cloudflare:workers';
+    globalThis.events = '';
+    export default class extends DurableObject {
+      async fetch() {
+        const outer = setTimeout(() => events += 'outer;', 10);
+        await this.ctx.blockConcurrencyWhile(async () => {
+          await scheduler.wait(20);
+          clearTimeout(outer);
+          clearTimeout(outer);
+          events += 'cleared;';
+        });
+        return new Response('OK');
+      }
+    }
+  )JS"_kj);
+
+  test.expectTimeoutCount(2);
+  // The outer timer has fired, but its callback waits for the critical section.
+  test.advanceTo(10);
+  test.expectEvents("");
+  test.expectTimeoutCount(2);
+  test.advanceTo(20);
+  test.expectEvents("cleared;");
+  test.expectDone();
+  test.expectTimeoutCount(0);
+  test.advanceTo(100);
+  test.expectEvents("cleared;");
+}
+
+KJ_TEST("an interval is rescheduled after its callback throws") {
+  TimerTest test(R"JS(
+    import { DurableObject } from 'cloudflare:workers';
+    globalThis.events = '';
+    export default class extends DurableObject {
+      async fetch() {
+        let ticks = 0;
+        const interval = setInterval(() => {
+          ++ticks;
+          events += `tick:${performance.now()};`;
+          if (ticks === 3) clearInterval(interval);
+          if (ticks === 1) throw new Error('interval callback failed');
+        }, 10);
+        await scheduler.wait(35);
+        return new Response('OK');
+      }
+    }
+  )JS"_kj);
+
+  test.advanceTo(10);
+  test.expectEvents("tick:10;");
+  test.advanceTo(20);
+  test.expectEvents("tick:10;tick:20;");
+  test.advanceTo(30);
+  test.expectEvents("tick:10;tick:20;tick:30;");
+  test.advanceTo(35);
+  test.expectDone();
+  test.expectTimeoutCount(0);
+}
+
 }  // namespace
 }  // namespace workerd
