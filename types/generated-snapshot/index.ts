@@ -16843,7 +16843,7 @@ export declare namespace Rpc {
                   : T extends BaseType
                     ? T
                     : T extends {
-                          [key: string | number]: unknown;
+                          [key: string | number]: any;
                         }
                       ? {
                           [K in keyof T]: Unstubify<T[K]>;

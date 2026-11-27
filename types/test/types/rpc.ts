@@ -68,6 +68,13 @@ interface NonSerializableInterface {
   field: ReadableStream<string>;
 }
 
+interface InterfaceWithStub {
+  counter: RpcStub<TestCounter>;
+  nested: {
+    counter: RpcStub<TestCounter>;
+  };
+}
+
 class TestCounter extends RpcTarget {
   constructor(private val = 0) {
     super();
@@ -305,6 +312,11 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
         fieldCallback: (p: string) => 5,
       },
     };
+  }
+
+  methodAcceptsInterfaceWithStub(arg: InterfaceWithStub): number {
+    void arg;
+    return 1;
   }
 
   nonSerializable1() {
@@ -699,6 +711,14 @@ export default <ExportedHandler<Env>>{
       expectTypeOf(
         oInterface.fieldSubLevelInterface.fieldCallback
       ).toEqualTypeOf<RpcStub<(p: string) => number>>(); // stubified
+
+      // Verify `interface` parameters containing RpcStub are unstubified
+      expectTypeOf(
+        s.methodAcceptsInterfaceWithStub({
+          counter: new TestCounter(1),
+          nested: { counter: new TestCounter(2) },
+        })
+      ).toMatchTypeOf<Promise<number>>();
 
       expectTypeOf(s.nonSerializable1).returns.toBeNever();
       // Note: Since one of the object's members is non-serializable,
