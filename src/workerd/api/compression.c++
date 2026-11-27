@@ -727,11 +727,20 @@ void ZstdEncoderContext::work() {
   JSG_REQUIRE(mode == ZlibMode::ZSTD_ENCODE, Error, "Mode should be ZSTD_ENCODE"_kj);
   JSG_REQUIRE(cctx_.get() != nullptr, Error, "Zstd context should not be null"_kj);
 
+  // When a frame ends exactly at the end of the output buffer, the sync loop and the stream's
+  // JavaScript loop call again with no new input in case more output is pending. With ZSTD_e_end,
+  // that call would begin a new frame and end it at once, appending an empty frame to the output.
+  if (frameEndedAtOutputEnd_ && flush_ == ZSTD_e_end && input_.pos == input_.size) {
+    frameEndedAtOutputEnd_ = false;
+    return;
+  }
+
   lastResult = ZSTD_compressStream2(cctx_.get(), &output_, &input_, flush_);
 
   if (ZSTD_isError(lastResult)) {
     error_ = ZSTD_getErrorCode(lastResult);
   }
+  frameEndedAtOutputEnd_ = lastResult == 0 && flush_ == ZSTD_e_end && output_.pos == output_.size;
 }
 
 kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
@@ -741,6 +750,7 @@ kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
       return kj::mv(err);
     }
   }
+  frameEndedAtOutputEnd_ = false;
   return kj::none;
 }
 

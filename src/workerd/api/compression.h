@@ -562,6 +562,9 @@ class ZstdEncoderContext final: public ZstdContext {
   size_t lastResult = 0;
   kj::Own<ZSTD_CCtx> cctx_;
   ZSTD_ErrorCode error_ = ZSTD_error_no_error;
+  // The last call ended a frame and filled the output buffer exactly, so the caller will call
+  // again with no new input to look for more output.
+  bool frameEndedAtOutputEnd_ = false;
 };
 
 class ZstdDecoderContext final: public ZstdContext {
