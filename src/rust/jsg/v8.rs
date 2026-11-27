@@ -386,6 +386,9 @@ pub mod ffi {
         -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
+        // Local<SharedArrayBuffer>
+        pub unsafe fn local_shared_array_buffer_get_backing_store(buffer: &Local) -> usize;
+
         // Local<WasmModuleObject>
         pub unsafe fn local_wasm_module_object_get_compiled_module(
             module: &Local,
@@ -1711,6 +1714,7 @@ pub struct BigUint64Array;
 pub struct Uint8ClampedArray;
 pub struct ArrayBuffer;
 pub struct ArrayBufferView;
+pub struct SharedArrayBuffer;
 /// Marker for `v8::WasmModuleObject` handles: a `WebAssembly.Module`.
 pub struct WasmModuleObject;
 
@@ -2759,6 +2763,7 @@ impl_local_cast!(Promise: Object, Value; is_promise);
 impl_local_cast!(Array: Object, Value; is_array);
 impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
 impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
+impl_local_cast!(SharedArrayBuffer: Object, Value; is_shared_array_buffer);
 impl_local_cast!(WasmModuleObject: Object, Value; is_wasm_module_object);
 impl_local_cast!(TypedArray: ArrayBufferView, Object, Value; is_typed_array);
 impl_local_cast!(Uint8Array: TypedArray, ArrayBufferView, Object, Value; is_uint8_array);
@@ -3023,6 +3028,18 @@ impl ArrayBuffer {
         // JavaScript. The slice does not outlive `fill`.
         let result = fill(unsafe { buffer.as_mut_slice(lock) });
         Some((buffer, result))
+    }
+}
+
+impl Local<'_, SharedArrayBuffer> {
+    /// Returns the `BackingStore` of this `SharedArrayBuffer`, which keeps its memory alive
+    /// independently of this handle. Its bytes are shared: see [`BackingStore::as_slice`].
+    pub fn backing_store(&self) -> BackingStore {
+        // SAFETY: handle is valid within the current HandleScope; the returned pointer
+        // is a freshly heap-allocated shared_ptr that we uniquely own.
+        let ptr = unsafe { ffi::local_shared_array_buffer_get_backing_store(self.raw()) };
+        // SAFETY: the FFI guarantees a non-null pointer on success.
+        unsafe { BackingStore::from_raw(ptr) }
     }
 }
 

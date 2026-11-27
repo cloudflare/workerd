@@ -174,6 +174,18 @@ struct IoFuture;
 struct IoCallback;
 struct IoOwnedSlot;
 struct WaitUntilFuture;
+struct LogfwdrMessage;
+
+// Like io_context_write_logfwdr(), but builds the serialized message with `message` only when it
+// is written: in a Durable Object, once the output gate opens, in IoContext::run(), so that what
+// it reads, such as the time, is read then. A message that fails to build, or is not exactly one
+// serialized message, then fails a waitUntil task rather than this call.
+void io_context_write_logfwdr_with(
+    uint64_t id, uint32_t channel, ::rust::Box<LogfwdrMessage> message);
+
+// LimitEnforcer::newAnalyticsEngineRequest(), which throws a JSG error if the write is over a
+// limit.
+void io_context_new_analytics_engine_request(uint64_t id);
 
 // IoContext::awaitIoAndRun(): waits for `future` as a task of the IoContext, holding a pending
 // event, then runs `callback` with its output in IoContext::run(), in the critical section and

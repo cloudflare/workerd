@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
 import { DurableObject } from 'cloudflare:workers';
+import unsafe from 'workerd:unsafe';
 
 // The binding writes each data point to the "analytics" service, as the JSON encoding of its
 // AnalyticsEngineEvent message, and that service passes it on to this worker's fetch handler.
@@ -134,6 +135,10 @@ export const indexes = testCase(async (env) => {
   await index(new TextEncoder().encode('ab').buffer, bytes('ab'));
   await index(new TextEncoder().encode('u8'), bytes('u8'));
   await index(new DataView(new Uint8Array([1, 2]).buffer), [1, 2]);
+  const shared = new SharedArrayBuffer(3);
+  new Uint8Array(shared).set([7, 8, 9]);
+  await index(shared, [7, 8, 9]);
+  await index(new Uint8Array(shared, 1), [8, 9]);
   await index(null, []);
   await index(undefined, []);
   await index(42, bytes('42'));
@@ -155,6 +160,10 @@ export const blobs = testCase(async (env) => {
   await assertWrites(ae, [{ blobs: [1, true] }], {
     blob1: bytes('1'),
     blob2: bytes('true'),
+  });
+  // A lone surrogate is written as its three WTF-8 bytes, not as U+FFFD.
+  await assertWrites(ae, [{ blobs: ['a\ud800b'] }], {
+    blob1: [0x61, 0xed, 0xa0, 0x80, 0x62],
   });
   const half = 'a'.repeat(8000);
   await assertWrites(ae, [{ blobs: [half, half] }], {
@@ -214,6 +223,53 @@ export const order = testCase(async (env) => {
     blob1: bytes('b'),
   });
   assert.deepStrictEqual(read, ['indexes', 'doubles', 'blobs']);
+});
+
+// The arrays convert differently in Rust, which reads the elements ahead, up to the first object,
+// and then reads the rest up to the array's length at that time; C++ reads and converts one element
+// at a time, up to the length it read first. analytics-engine-rust-test.wd-test enables the
+// TEST_WORKERD autogate with the Rust AnalyticsEngine's, as the @all-autogates variant does, so it
+// tells which one runs.
+export const arrayConversion = testCase(async (env) => {
+  const ae = env.aebinding;
+  const rust = unsafe.isTestAutogateEnabled();
+
+  // A getter on a later element runs before an earlier element fails to convert, and its
+  // exception is the one thrown.
+  const read = [];
+  const doubles = [1n];
+  Object.defineProperty(doubles, 1, {
+    enumerable: true,
+    get() {
+      read.push(1);
+      throw new Error('element 1 getter');
+    },
+  });
+  await assertThrows(
+    ae,
+    [{ doubles }],
+    rust
+      ? 'Error: element 1 getter'
+      : 'TypeError: Cannot convert a BigInt value to a number'
+  );
+  assert.deepStrictEqual(read, rust ? [1] : []);
+
+  // An element that converting an earlier one appends is converted.
+  const blobs = [
+    {
+      toString() {
+        blobs.push('appended');
+        return 'first';
+      },
+    },
+  ];
+  await assertWrites(
+    ae,
+    [{ blobs }],
+    rust
+      ? { blob1: bytes('first'), blob2: bytes('appended') }
+      : { blob1: bytes('first') }
+  );
 });
 
 // A data point over a limit throws from writeDataPoint(), and is not written.

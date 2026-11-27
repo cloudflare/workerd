@@ -163,6 +163,95 @@ KJ_TEST("in a Durable Object, write_logfwdr() waits for the output gate") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+KJ_TEST("write_logfwdr_with() builds the message as it writes it") {
+  LogfwdrLog log;
+  constexpr int64_t fixedNanos = 1'000'000'000'000;
+  auto params = recordingParams(log);
+  params.fixedNow = kj::UNIX_EPOCH + fixedNanos * kj::NANOSECONDS;
+  TestFixture fixture(kj::mv(params));
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto message = serialize("built");
+    write_logfwdr_with(isolateOf(env), 7, slice(message), false);
+    KJ_EXPECT(log.writes.size() == 1);
+  });
+  KJ_ASSERT(log.writes.size() == 1);
+  KJ_EXPECT(log.writes[0] == "7: built");
+  auto times = logfwdr_build_times();
+  KJ_ASSERT(times.size() == 1);
+  KJ_EXPECT(times[0] == fixedNanos, times[0]);
+}
+
+KJ_TEST("write_logfwdr_with() fails if the build panics or builds anything but one message") {
+  LogfwdrLog log;
+  TestFixture fixture(recordingParams(log));
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto message = serialize("hello");
+    KJ_EXPECT_THROW_MESSAGE("building a logfwdr message panicked: the build was told to panic",
+        write_logfwdr_with(isolateOf(env), 7, slice(message), true));
+    KJ_EXPECT_THROW_MESSAGE("the serialized message is empty",
+        write_logfwdr_with(isolateOf(env), 7, slice(nullptr), false));
+    KJ_EXPECT_THROW_MESSAGE("not a whole number of words",
+        write_logfwdr_with(isolateOf(env), 7, slice(message.first(message.size() - 1)), false));
+  });
+  KJ_EXPECT(log.writes.size() == 0);
+  KJ_EXPECT(logfwdr_build_times().size() == 3);
+}
+
+KJ_TEST("in a Durable Object, write_logfwdr_with() builds the message once the output gate opens") {
+  LogfwdrLog log;
+  TestFixture fixture(recordingParams(log, Worker::Actor::Id(kj::str("logfwdr-with-actor"))));
+  auto gate = kj::newPromiseAndFulfiller<void>();
+  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(gate.promise), nullptr);
+
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto message = serialize("after the gate");
+    write_logfwdr_with(isolateOf(env), 3, slice(message), false);
+  });
+  fixture.pollEventLoop();
+  KJ_EXPECT(log.writes.size() == 0);
+  KJ_EXPECT(logfwdr_build_times().size() == 0);
+
+  gate.fulfiller->fulfill();
+  blocker.wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_ASSERT(log.writes.size() == 1);
+  KJ_EXPECT(log.writes[0] == "3: after the gate");
+  // The build ran in the IoContext.
+  auto times = logfwdr_build_times();
+  KJ_ASSERT(times.size() == 1);
+  KJ_EXPECT(times[0] >= 0, times[0]);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("in a Durable Object, write_logfwdr_with() drops the build if the IoContext goes first") {
+  LogfwdrLog log;
+  TestFixture fixture(recordingParams(log, Worker::Actor::Id(kj::str("logfwdr-dropped-actor"))));
+  auto gate = kj::newPromiseAndFulfiller<void>();
+  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(gate.promise), nullptr);
+
+  {
+    auto context = fixture.newIoContext();
+    auto request = fixture.newIncomingRequest(*context);
+    fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+      auto message = serialize("never written");
+      write_logfwdr_with(isolateOf(env), 3, slice(message), false);
+    });
+  }
+  gate.fulfiller->fulfill();
+  blocker.wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_EXPECT(log.writes.size() == 0);
+  KJ_EXPECT(logfwdr_build_times().size() == 0);
+}
+
+KJ_TEST("new_analytics_engine_request() asks the request's limit enforcer") {
+  TestFixture fixture;
+  fixture.runInIoContext(
+      [&](const TestFixture::Environment& env) { new_analytics_engine_request(isolateOf(env)); });
+}
+
 KJ_TEST("a request that Rust delivers records the Rust caller's location") {
   TestFixture fixture;
   auto context = fixture.newIoContext();

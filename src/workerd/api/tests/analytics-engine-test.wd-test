@@ -22,7 +22,9 @@ const mainWorker :Workerd.Worker = (
     (name = "worker", esModule = embed "analytics-engine-test.js"),
   ],
   # The fetch handler settles promises that the tests created.
-  compatibilityFlags = ["experimental", "nodejs_compat", "handle_cross_request_promise_resolution"],
+  compatibilityFlags = [
+    "experimental", "nodejs_compat", "handle_cross_request_promise_resolution", "unsafe_module",
+  ],
 
   durableObjectNamespaces = [
     (className = "Writer", uniqueKey = "analytics-engine-test-writer"),
@@ -35,6 +37,10 @@ const mainWorker :Workerd.Worker = (
   ]
 );
 
-const unitTests :Workerd.Config = (
-    services = [ (name = "main", worker = .mainWorker), (name = "analytics", worker = .analyticsWorker) ],
-);
+# analytics-engine-rust-test.wd-test runs these services against the Rust AnalyticsEngine.
+const unitTests :Workerd.Config = (services = .services);
+
+const services :List(Workerd.Service) = [
+  (name = "main", worker = .mainWorker),
+  (name = "analytics", worker = .analyticsWorker),
+];
