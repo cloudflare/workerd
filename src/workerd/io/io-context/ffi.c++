@@ -10,6 +10,7 @@
 #include <workerd/jsg/inspector.h>
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/worker/bridge.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <v8-inspector.h>
 
@@ -39,6 +40,12 @@ void incoming_request_delivered(IncomingRequest& request,
   location.columnNumber = column;
   request.delivered(kj::str(kj::from<kj_rs::Rust>(eventType).asChars()),
       DropQueuedCrossContextActions::NO, location);
+}
+
+void incoming_request_set_custom_event_info(IncomingRequest& request) {
+  KJ_IF_SOME(tracer, request.getWorkerTracer()) {
+    tracer.setEventInfo(request, tracing::CustomEventInfo());
+  }
 }
 
 void incoming_request_set_scheduled_event_info(
@@ -250,6 +257,33 @@ void io_context_await_io_and_run(
     }
     KJ_UNREACHABLE;
   });
+}
+
+void incoming_request_run_in_wait_until(
+    IncomingRequest& request, kj::Own<RunPrelude> prelude, ::rust::Box<WaitUntilRun> run) {
+  auto& context = request.getContext();
+  context.addWaitUntil(
+      context.run([prelude = kj::mv(prelude), run = kj::mv(run)](
+                      Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
+    TRACE_EVENT("workerd", perfetto::StaticString(prelude->spanName().cStr()));
+    auto traceScope = context.makeRequestTraceScope(lock);
+    auto handles = prelude->run(lock, context);
+    auto ffiHandles =
+        KJ_MAP(handle, handles) { return ::workerd::rust::jsg::to_ffi(kj::mv(handle)); };
+    switch (wait_until_run_start(reinterpret_cast<uintptr_t>(lock.getIsolate()), *run,
+        ::rust::Slice<const ::workerd::rust::jsg::Local>(ffiHandles.begin(), ffiHandles.size()))) {
+      case IoCallbackOutcome::Succeeded:
+        return wait_until_run_wait(kj::mv(run));
+      case IoCallbackOutcome::Failed:
+        // As in io_context_await_io_and_run(): run() logs the exception as uncaught and fails
+        // the task with it.
+        throwPendingToRun();
+      case IoCallbackOutcome::Panicked:
+        // As in io_context_await_io_and_run().
+        KJ_FAIL_ASSERT("the function of IoContext::IncomingRequest::run_in_wait_until() panicked");
+    }
+    KJ_UNREACHABLE;
+  }));
 }
 
 ReentryCallback::ReentryCallback(IoContext& context, ::rust::Box<ReentryFn> function)

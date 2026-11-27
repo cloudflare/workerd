@@ -21,10 +21,10 @@ headers.
 Assisted-by: Codex:gpt-5.6-sol
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 35b658eb7e8129664e6b8430386f781119f5a9d3..790d2fcc82ee19c428f23d699abd6899d27a43ca 100644
+index 41653d6c812eedaac9bd456e98fc6001945ef9a7..b25cf2d4370c1ab52a4f3bb68100eeb7f5b520fe 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -190,9 +190,13 @@ v8_flag(name = "v8_enable_experimental_tq_to_tsa")
+@@ -195,9 +195,13 @@ v8_flag(name = "v8_enable_experimental_tq_to_tsa")
  
  # Mirrors the GN arg of the same name: selects metagen's instance types and
  # object layouts. When off, the metagen action is not part of the build graph.

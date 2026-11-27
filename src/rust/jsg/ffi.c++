@@ -989,7 +989,7 @@ uintptr_t local_array_buffer_view_data(const Local& view, size_t& byte_length) {
 }
 
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view) {
-  return to_ffi(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer());
+  return to_ffi(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->GetBuffer());
 }
 
 size_t local_array_buffer_view_element_size(const Local& view) {

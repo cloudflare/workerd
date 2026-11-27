@@ -8,10 +8,10 @@ Tells us if a string is already flattened or not.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-primitive.h b/include/v8-primitive.h
-index fe7a5f83a46a71ad7b8e3ea5341a0921632643e6..6f33e4c2420f3b0887537be97915f9dffefa1ae1 100644
+index 826b18dc4c020cdd420b411403ef33ad3943cf2a..521447fe3a8e2c47f9c18c2ec640a1b45fab0017 100644
 --- a/include/v8-primitive.h
 +++ b/include/v8-primitive.h
-@@ -165,6 +165,11 @@ class V8_EXPORT String : public Name {
+@@ -167,6 +167,11 @@ class V8_EXPORT String : public Name {
     */
    bool ContainsOnlyOneByte() const;
  
@@ -24,10 +24,10 @@ index fe7a5f83a46a71ad7b8e3ea5341a0921632643e6..6f33e4c2420f3b0887537be97915f9df
      enum {
        kNone = 0,
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 467e5e7d45f44c82e43c91f1a7f3dadeeab0a356..ff8785d4235d6d6e30d2c9868247d0093122abb0 100644
+index add389bf0ab199c1aeb5a39551766ba52685b21e..3b4b3e5c3091dc36992193035ece71812567d682 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -6021,6 +6021,10 @@ bool String::IsOneByte() const {
+@@ -6014,6 +6014,10 @@ bool String::IsOneByte() const {
    return Utils::OpenDirectHandle(this)->IsOneByteRepresentation();
  }
  

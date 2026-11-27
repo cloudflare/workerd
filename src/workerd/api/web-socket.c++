@@ -367,9 +367,8 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js,
           package.closedOutgoingConnection)),
       outgoingMemory(getOutgoingMemoryTarget(js)),
       outgoingMessages(ioContext.createObject<OutgoingMessagesMap>()),
-      autoResponseStatusOwner(ioContext.createObject<AutoResponse>()),
-      autoResponseStatus(*autoResponseStatusOwner) {
-  autoResponseStatus.isClosed = farNative->closedOutgoing;
+      autoResponseStatus(ioContext.createObject<AutoResponse>()) {
+  autoResponseStatus->isClosed = farNative->closedOutgoing;
 }
 
 // This constructor is used when reinstantiating a websocket that had been hibernating, which is
@@ -386,8 +385,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(
       farNative(nullptr),
       outgoingMemory(getOutgoingMemoryTarget(js)),
       outgoingMessages(IoContext::current().createObject<OutgoingMessagesMap>()),
-      autoResponseStatusOwner(IoContext::current().createObject<AutoResponse>()),
-      autoResponseStatus(*autoResponseStatusOwner) {
+      autoResponseStatus(IoContext::current().createObject<AutoResponse>()) {
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<AwaitingAcceptanceOrCoupling>(kj::mv(native));
   farNative = IoContext::current().addObject(kj::mv(nativeObj));
@@ -402,8 +400,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js, WebSocket& shell, 
       farNative(nullptr),
       outgoingMemory(getOutgoingMemoryTarget(js)),
       outgoingMessages(IoContext::current().createObject<OutgoingMessagesMap>()),
-      autoResponseStatusOwner(IoContext::current().createObject<AutoResponse>()),
-      autoResponseStatus(*autoResponseStatusOwner) {
+      autoResponseStatus(IoContext::current().createObject<AutoResponse>()) {
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<AwaitingConnection>();
   farNative = IoContext::current().addObject(kj::mv(nativeObj));
@@ -1154,7 +1151,7 @@ void LegacyWebSocketAdapter::close(
 
   native.closedOutgoing = true;
   closedOutgoingForHib = true;
-  autoResponseStatus.isClosed = true;
+  autoResponseStatus->isClosed = true;
   ensurePumping(js);
 }
 
@@ -1265,13 +1262,10 @@ void LegacyWebSocketAdapter::serializeAttachment(jsg::Lock& js, jsg::JsValue att
 void LegacyWebSocketAdapter::setAutoResponseStatus(
     kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) {
   autoResponseTimestamp = time;
-  KJ_IF_SOME(context, IoContext::tryCurrent()) {
-    autoResponseStatus.ongoingAutoResponse.emplace(
-        context.addObject(kj::heap(kj::mv(autoResponsePromise))));
-  } else {
-    // Called outside an IoContext (e.g. from the hibernation manager's readLoop).
-    // Use plain kj::Own; the caller manages the promise lifecycle.
-    autoResponseStatus.ongoingAutoResponse.emplace(kj::heap(kj::mv(autoResponsePromise)));
+  // If the IoContext that owned the auto-response state is gone, the pump that would have waited
+  // for `autoResponsePromise` went with it.
+  KJ_IF_SOME(status, autoResponseStatus.tryGetWithoutCurrentContext()) {
+    status.ongoingAutoResponse = kj::mv(autoResponsePromise);
   }
 }
 
@@ -1292,13 +1286,13 @@ void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
     kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pumpCompletion;
     if (accepted.isHibernatable()) {
       auto completion = kj::newPromiseAndFulfiller<void>();
-      autoResponseStatus.maybePumpCompletion =
+      autoResponseStatus->maybePumpCompletion =
           completion.promise.catch_([](kj::Exception&&) {}).fork();
       pumpCompletion = kj::mv(completion.fulfiller);
     }
     auto promise = kj::evalNow([&, pumpCompletion = kj::mv(pumpCompletion)]() mutable {
       return accepted.wrapIo([&](kj::Rc<kj::WebSocket> socket) {
-        return pump(context, *outgoingMessages, kj::mv(socket), native, autoResponseStatus,
+        return pump(context, *outgoingMessages, kj::mv(socket), native, *autoResponseStatus,
             observer, kj::mv(pumpCompletion));
       });
     });
@@ -1365,20 +1359,26 @@ void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
 
 kj::Promise<void> LegacyWebSocketAdapter::sendAutoResponse(
     kj::String message, kj::WeakRc<kj::WebSocket> ws, kj::Promise<void> writeBarrier) {
-  if (autoResponseStatus.isClosed) {
+  KJ_IF_SOME(status, autoResponseStatus.tryGetWithoutCurrentContext()) {
+    if (status.isClosed) {
+      return kj::READY_NOW;
+    } else if (status.isPumping) {
+      auto completion = kj::newPromiseAndFulfiller<void>();
+      status.pendingAutoResponseDeque.push(
+          AutoResponse::Pending{kj::mv(message), kj::mv(completion.fulfiller)});
+      return kj::mv(completion.promise);
+    }
+  } else if (closedOutgoingForHib) {
+    // The IoContext that owned the auto-response state is gone, and its pump with it, but
+    // `closedOutgoingForHib` still records whether a close was sent.
     return kj::READY_NOW;
-  } else if (autoResponseStatus.isPumping) {
-    auto completion = kj::newPromiseAndFulfiller<void>();
-    autoResponseStatus.pendingAutoResponseDeque.push(
-        AutoResponse::Pending{kj::mv(message), kj::mv(completion.fulfiller)});
-    return kj::mv(completion.promise);
-  } else {
-    return writeBarrier.then([message = kj::mv(message), ws = kj::mv(ws)]() mutable {
-      return KJ_REQUIRE_NONNULL(ws.tryGet(), "WebSocket destroyed before auto-response")
-          .send(message)
-          .attach(kj::mv(message));
-    });
   }
+
+  return writeBarrier.then([message = kj::mv(message), ws = kj::mv(ws)]() mutable {
+    return KJ_REQUIRE_NONNULL(ws.tryGet(), "WebSocket destroyed before auto-response")
+        .send(message)
+        .attach(kj::mv(message));
+  });
 }
 
 namespace {
@@ -1457,15 +1457,8 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
 
   // If we have a ongoingAutoResponse, we must co_await it here because there's a ws.send()
   // in progress. Otherwise there can occur ws.send() race problems.
-  KJ_IF_SOME(promiseHolder, autoResponse.ongoingAutoResponse) {
-    KJ_SWITCH_ONEOF(promiseHolder) {
-      KJ_CASE_ONEOF(ioOwned, IoOwn<kj::Promise<void>>) {
-        co_await *ioOwned;
-      }
-      KJ_CASE_ONEOF(owned, kj::Own<kj::Promise<void>>) {
-        co_await *owned;
-      }
-    }
+  KJ_IF_SOME(promise, autoResponse.ongoingAutoResponse) {
+    co_await promise;
     autoResponse.ongoingAutoResponse = kj::none;
   }
 
@@ -1545,9 +1538,9 @@ kj::Maybe<jsg::ExternalMemoryAdjustment> LegacyWebSocketAdapter::chargeOutgoing(
 }
 
 size_t LegacyWebSocketAdapter::getPendingAutoResponseCount() {
-  auto count =
-      autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
-  autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
+  auto& status = *autoResponseStatus;
+  auto count = status.pendingAutoResponseDeque.size() - status.queuedAutoResponses;
+  status.queuedAutoResponses = status.pendingAutoResponseDeque.size();
   return count;
 }
 
@@ -1668,7 +1661,7 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
 
               native.closedOutgoing = true;
               closedOutgoingForHib = true;
-              autoResponseStatus.isClosed = true;
+              autoResponseStatus->isClosed = true;
               ensurePumping(js);
             }
             dispatchReportOnly(
@@ -1826,6 +1819,12 @@ bool LegacyWebSocketAdapter::peerIsAwaitingCoupling(jsg::Lock& js) {
 WebSocket::HibernationPackage LegacyWebSocketAdapter::buildPackageForHibernation() {
   // TODO(cleanup): It would be great if we could limit this so only the HibernationManager
   // (or a derived class) could call it.
+  // Called without a current IoContext. If the one that owned the auto-response state is gone,
+  // its pump went with it, so there is nothing to wait for.
+  kj::Maybe<kj::ForkedPromise<void>> maybePumpCompletion;
+  KJ_IF_SOME(status, autoResponseStatus.tryGetWithoutCurrentContext()) {
+    maybePumpCompletion = kj::mv(status.maybePumpCompletion);
+  }
   return WebSocket::HibernationPackage{
     .url = kj::mv(url),
     .protocol = kj::mv(protocol),
@@ -1834,7 +1833,7 @@ WebSocket::HibernationPackage LegacyWebSocketAdapter::buildPackageForHibernation
     .maybeTags = kj::none,
     .closedOutgoingConnection = closedOutgoingForHib,
     .allowHalfOpen = allowHalfOpen,
-    .maybePumpCompletion = kj::mv(autoResponseStatus.maybePumpCompletion),
+    .maybePumpCompletion = kj::mv(maybePumpCompletion),
   };
 }
 
@@ -1951,7 +1950,7 @@ void LegacyWebSocketAdapter::visitForMemoryInfo(jsg::MemoryTracker& tracker) con
   tracker.trackFieldWithSize("IoOwn<Native>", sizeof(IoOwn<Native>));
   tracker.trackField("error", error);
   tracker.trackFieldWithSize("IoOwn<OutgoingMessagesMap>", sizeof(IoOwn<OutgoingMessagesMap>));
-  tracker.trackField("autoResponseStatus", autoResponseStatus);
+  tracker.trackFieldWithSize("IoOwn<AutoResponse>", sizeof(IoOwn<AutoResponse>));
 }
 
 }  // namespace workerd::api

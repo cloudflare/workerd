@@ -23,6 +23,18 @@ struct CacheContext: public Object, public ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(CacheIsolate, CacheContext);
 
+struct CountingObserver final: public CompilationObserver {
+  mutable uint found = 0;
+  mutable uint rejected = 0;
+
+  void onCompileCacheFound(v8::Isolate*) const override {
+    ++found;
+  }
+  void onCompileCacheRejected(v8::Isolate*) const override {
+    ++rejected;
+  }
+};
+
 KJ_TEST("builtin bundle caches accept the legacy and UTF-8 module source encodings") {
   CacheIsolate isolate(v8System, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](CacheIsolate::Lock& js) {
@@ -98,7 +110,7 @@ KJ_TEST("runtime UTF-8 module loading consumes embedded ESM caches") {
   CacheIsolate isolate(v8System, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](CacheIsolate::Lock& js) {
     JSG_WITHIN_CONTEXT_SCOPE(js, js.newContext<CacheContext>().getHandle(js), [&](jsg::Lock& js) {
-      CompilationObserver observer;
+      CountingObserver observer;
       auto registry = ModuleRegistryImpl<CacheIsolate_TypeWrapper>::install(
           js.v8Isolate, js.v8Context(), observer);
       Bundle::Reader bundle = CACHE_TEST_BUNDLE;
@@ -106,10 +118,6 @@ KJ_TEST("runtime UTF-8 module loading consumes embedded ESM caches") {
       for (auto i: kj::indices(expectedValues)) {
         auto fixture = bundle.getModules()[i];
         auto source = kj::str(fixture.getSrc().asChars());
-        // V8 checks source length, not content. Invalid syntax at the same UTF-16 length makes
-        // successful loading prove that the runtime consumed the cache instead of recompiling.
-        KJ_ASSERT(source[0] == '/');
-        source[0] = ')';
         auto path = kj::Path::parse(fixture.getName());
         registry->add(path,
             ModuleRegistry::ModuleInfo(
@@ -121,6 +129,8 @@ KJ_TEST("runtime UTF-8 module loading consumes embedded ESM caches") {
         v8::String::Utf8Value text(js.v8Isolate, value);
         KJ_EXPECT(*text == expectedValues[i], fixture.getName(), *text);
       }
+      KJ_EXPECT(observer.found == kj::size(expectedValues));
+      KJ_EXPECT(observer.rejected == 0);
     });
   });
 }

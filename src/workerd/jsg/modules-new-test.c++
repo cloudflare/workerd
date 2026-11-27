@@ -866,6 +866,61 @@ KJ_TEST("A worker bundle module can shadow node:process") {
 
 // ======================================================================================
 
+// Records the external string buffers the isolate asks for.
+class RecordingExternalStringAllocator final: public ExternalStringAllocator {
+ public:
+  RecordingExternalStringAllocator(kj::Vector<kj::ArrayPtr<const char>>& allocated)
+      : allocated(allocated) {}
+
+  void* allocate(size_t size) override {
+    void* ptr = operator new(size);
+    allocated.add(kj::arrayPtr(static_cast<const char*>(ptr), size));
+    return ptr;
+  }
+  void deallocate(void* ptr) override {
+    operator delete(ptr);
+  }
+
+ private:
+  kj::Vector<kj::ArrayPtr<const char>>& allocated;
+};
+
+KJ_TEST("A bundle module's source is copied into the isolate's external string allocator") {
+  // The registry's buffer is on the process heap, which the isolate's strings must not refer
+  // to. The isolate compiles from a copy that its external string allocator placed.
+  kj::Vector<kj::ArrayPtr<const char>> allocated;
+  auto source = "export default 'copied source';"_kj;
+  {
+    TestIsolate isolate(v8System, newIsolateGroup(), 123, kj::heap<IsolateObserver>(),
+        kj::heap<RecordingExternalStringAllocator>(allocated));
+    isolate.runInLockScope([&](auto& lock) {
+      IsolateBase::from(lock.v8Isolate).setUsingNewModuleRegistry();
+      JSG_WITHIN_CONTEXT_SCOPE(
+          lock, lock.template newContext<TestContext>().getHandle(lock), [&](jsg::Lock& js) {
+        CompilationObserver compilationObserver;
+        ModuleRegistry::Builder registryBuilder(BASE);
+        ModuleBundle::BundleBuilder bundleBuilder(BASE);
+        bundleBuilder.addEsmModule(
+            "foo", kj::arc<OwnedAscii>(kj::heapArray<const char>(source.asArray())));
+        registryBuilder.add(bundleBuilder.finish());
+        auto registry = registryBuilder.finish();
+        auto attached = registry->attachToIsolate(js, compilationObserver);
+
+        js.tryCatch([&] {
+          auto val = ModuleRegistry::resolve(js, "foo");
+          KJ_ASSERT(kj::str(val) == "copied source"_kj);
+        }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+
+        KJ_ASSERT(allocated.size() == 1);
+        KJ_EXPECT(allocated[0] == source.asArray());
+        KJ_EXPECT(allocated[0].begin() != source.begin());
+      });
+    });
+  }
+}
+
+// ======================================================================================
+
 KJ_TEST("A worker bundle module can shadow node:process via dynamic import") {
   // Companion to "A worker bundle module can shadow node:process", which only
   // exercises the static resolve path (ModuleRegistry::resolve -> resolveCallback).

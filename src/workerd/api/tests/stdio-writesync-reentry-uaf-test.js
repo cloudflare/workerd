@@ -2,22 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-395: heap use-after-free in
-// writeStdio() via re-entrant console.log getter.
-//
-// writeStdio() used to capture a kj::ArrayPtr aliasing StdioFile::lineBuffer's
-// heap backing store, then perform JS property lookups (console / console.log)
-// that can run user-defined getters. A getter that calls fs.writeSync(1, ...)
-// re-enters StdioFile::write, which can grow lineBuffer and free the old
-// backing store, leaving writeStdio reading freed memory.
-//
-// Without the fix, this crashes under ASAN with:
-//   heap-use-after-free READ at src/workerd/io/worker-fs.c++
-//
-// With the fix, writeStdio copies the bytes into an owned kj::String before
-// any JS property access, and StdioFile::write moves lineBuffer into a local
-// before calling writeStdio, so re-entrant writes cannot invalidate the
-// buffer.
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-395: a heap use-after-free
+// in the former C++ stdio line buffer (StdioFile in io/worker-fs.c++), via a
+// console.log getter that re-enters fs.writeSync(1, ...). Stdio is now
+// line-buffered in internal_fs_stdio.ts; these tests keep re-entrant and
+// mutating console.log calls covered.
 
 import * as fs from 'node:fs';
 import assert from 'node:assert';
@@ -28,17 +17,15 @@ export const stdioWriteSyncReentryUafTest = {
     let armed = false;
     let getterFired = false;
 
-    // Install a getter on console.log that re-enters StdioFile::write
-    // when armed. This forces lineBuffer to grow (and potentially
-    // reallocate), which would free the buffer that writeStdio() captured.
+    // Install a getter on console.log that re-enters fs.writeSync when
+    // armed, growing the pending partial line while a line is logged.
     Object.defineProperty(console, 'log', {
       configurable: true,
       get() {
         if (armed) {
           armed = false;
           getterFired = true;
-          // Write a large buffer with no newline to force
-          // lineBuffer.addAll() to grow, freeing the old backing store.
+          // Write a large buffer with no newline to grow the pending line.
           const big = Buffer.alloc(4000, 0x42);
           fs.writeSync(1, big);
         }
@@ -47,14 +34,11 @@ export const stdioWriteSyncReentryUafTest = {
     });
 
     try {
-      // Step 1: Prime lineBuffer with non-newline data (buffered, no
-      // flush).
+      // Step 1: Prime the pending line with non-newline data.
       fs.writeSync(1, Buffer.from('AAAAA'));
 
-      // Step 2: Arm the getter and trigger the newline path.
-      // writeStdio(lineBuffer.asPtr()) -> console.get("log") runs getter
-      // -> re-entrant write grows lineBuffer -> old backing store freed
-      // -> writeStdio reads from owned copy (safe).
+      // Step 2: Arm the getter and complete the line, so that logging it
+      // runs the getter.
       armed = true;
       fs.writeSync(1, Buffer.from('X\n'));
 
@@ -63,7 +47,7 @@ export const stdioWriteSyncReentryUafTest = {
       // exercising the vulnerable path).
       assert.ok(
         getterFired,
-        'console.log getter should have fired during writeStdio'
+        'console.log getter should have fired during the write'
       );
     } finally {
       // Restore console.log
@@ -73,11 +57,10 @@ export const stdioWriteSyncReentryUafTest = {
   },
 };
 
-// The tests below cover the caller's buffer rather than lineBuffer.
-// StdioFile::write() logs each complete line through console.log, which
-// can run user code. That code can detach or shrink the ArrayBuffer being
-// written. StdioFile::write() must not read the caller's bytes after the
-// first console.log call, so it copies them up front.
+// The tests below cover the caller's buffer rather than the pending line.
+// A write logs each complete line through console.log, which can run user
+// code. That code can detach or shrink the ArrayBuffer being written, so the
+// write must not read the caller's bytes after the first console.log call.
 
 // Writes `view` to stdout. The first console.log call runs `mutate`. Returns
 // the lines that reached console.log.

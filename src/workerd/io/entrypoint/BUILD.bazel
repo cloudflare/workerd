@@ -9,6 +9,7 @@ wd_rust_crate(
         "ffi.rs",
         "lib.rs",
         "scheduled.rs",
+        "test.rs",
     ],
     cxx_bridge_deps = [
         "//src/rust/worker:bridge",
@@ -22,7 +23,11 @@ wd_rust_crate(
     link_deps = [":ffi"],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/rust/jsg",
+        "//src/rust/kj",
         "//src/rust/worker",
+        "//src/workerd/api/test-api",
+        "//src/workerd/io:outcome_capnp_rust",
         "//src/workerd/io/io-context",
         "//src/workerd/util/perfetto",
     ],

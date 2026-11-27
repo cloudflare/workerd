@@ -114,8 +114,7 @@ kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) 
 // compile, and the result is shared by every isolate that compiles the module:
 //
 //  * Pure-ASCII source (the overwhelmingly common case — bundlers typically
-//    escape non-ASCII): the original buffer directly backs a one-byte external
-//    string. Zero copies.
+//    escape non-ASCII): the original buffer is the one-byte representation.
 //  * Non-ASCII source whose code points all fit in Latin-1: transcoded once to
 //    a one-byte buffer, matching the representation V8 itself would choose for
 //    the same text.
@@ -126,6 +125,8 @@ kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) 
 // sources. Since the encoding choice is a pure function of the source bytes,
 // every isolate replica sharing the registry agrees on it, keeping the shared
 // compile cache consistent.
+//
+// See sourceString() for how each isolate's V8 string refers to the result.
 struct EncodedSource {
   // Borrowed process-lifetime ASCII or UTF-16, or owned ASCII/Latin-1 or UTF-16.
   ExternalStringSource repr;
@@ -178,6 +179,28 @@ EncodedSource encodeSource(kj::Arc<OwnedAscii>&& source) {
     return {.repr = kj::mv(source)};
   }
   return transcodeSource(sourcePtr);
+}
+
+// The V8 string to compile an EncodedSource from. Borrowed text is in storage the embedder
+// vouches for, so the string refers to it directly. Owned text is on the process heap, which
+// an isolate's strings must not point into: the isolate gets its own copy from its external
+// string allocator.
+v8::Local<v8::String> sourceString(Lock& js, const ExternalStringSource& repr) {
+  KJ_SWITCH_ONEOF(repr) {
+    KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+      return newExternalOneByteString(js, oneByte);
+    }
+    KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+      return newExternalTwoByteString(js, twoByte);
+    }
+    KJ_CASE_ONEOF(oneByte, kj::Arc<OwnedAscii>) {
+      return copyToExternalOneByteString(js, oneByte->asPtr());
+    }
+    KJ_CASE_ONEOF(twoByte, kj::Arc<OwnedUtf16>) {
+      return copyToExternalTwoByteString(js, twoByte->asPtr());
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 using UnencodedSource =
@@ -246,7 +269,7 @@ class EsModule final: public Module {
     v8::ScriptOrigin origin(js.str(id().getHref()), resourceLineOffset, resourceColumnOffset,
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
 
-    return compileModule(js, newExternalString(js, getEncodedSource().repr), origin, observer,
+    return compileModule(js, sourceString(js, getEncodedSource().repr), origin, observer,
         [&](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> {
       if (type() == Type::BUNDLE) return codeCacheKey;
       // Memoize the encoded source's key with the definition, independently of cache policy.
@@ -328,9 +351,8 @@ class EsModule final: public Module {
   // EncodedSource; its only reader is the initializer itself.
   mutable UnencodedSource source;
 
-  // The source encoded into a V8-compatible external-string representation
-  // (see EncodedSource). Computed on first compile and shared across isolates;
-  // each V8 string retains an Arc to owned backing storage.
+  // The source encoded into a one-byte or two-byte representation (see
+  // EncodedSource). Computed on first compile and shared across isolates.
   kj::Lazy<EncodedSource> encodedSource;
 
   // The key of this module's entry in the isolate's code cache, computed from

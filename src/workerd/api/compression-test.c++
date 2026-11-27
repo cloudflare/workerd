@@ -4,6 +4,7 @@
 
 #include "compression.h"
 
+#include <kj/filesystem.h>
 #include <kj/test.h>
 
 namespace workerd::api {
@@ -158,6 +159,34 @@ KJ_TEST("CodecStage brotli rejects corrupt, trailing and truncated input") {
     KJ_EXPECT_THROW_MESSAGE("incomplete data", stage.end());
   }
 }
+
+#if __linux__
+size_t countThreads() {
+  return kj::newDiskFilesystem()
+      ->getRoot()
+      .openSubdir(kj::Path({"proc", "self", "task"}))
+      ->listNames()
+      .size();
+}
+
+KJ_TEST("Zstd compression ignores nbWorkers and starts no threads") {
+  ZstdEncoderContext ctx(ZlibMode::ZSTD_ENCODE);
+  KJ_ASSERT(ctx.initialize(ZSTD_CONTENTSIZE_UNKNOWN) == kj::none);
+  KJ_ASSERT(ctx.setParams(ZSTD_c_nbWorkers, 8) == kj::none);
+
+  // Enough input, of unknown total size, that multithreaded compression would start its workers.
+  auto input = pattern(1024 * 1024);
+  auto output = kj::heapArray<kj::byte>(ZSTD_compressBound(input.size()));
+  ctx.setInputBuffer(input);
+  ctx.setOutputBuffer(output);
+  ctx.setFlush(ZSTD_e_continue);
+
+  size_t before = countThreads();
+  ctx.work();
+  KJ_ASSERT(ctx.getError() == kj::none);
+  KJ_EXPECT(countThreads() == before);
+}
+#endif
 
 }  // namespace
 }  // namespace workerd::api

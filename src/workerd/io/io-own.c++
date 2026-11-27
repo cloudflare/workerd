@@ -119,6 +119,14 @@ size_t DeleteQueue::getQueuedActionCountForTest() const {
   return 0;
 }
 
+bool DeleteQueue::canAccessWithoutCurrentContext() const {
+  KJ_REQUIRE(ownerExecutor->isCurrent(), "IoOwn accessed outside its IoContext's thread");
+  if (IoContext::hasCurrent() && IoContext::current().deleteQueue.queue.get() != this) {
+    return false;
+  }
+  return reverseIoOwnValidity->isValid();
+}
+
 void DeleteQueue::checkFarGet(const DeleteQueue& deleteQueue, const std::type_info& type) {
   IoContext::current().checkFarGet(deleteQueue, type);
 }

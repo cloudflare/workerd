@@ -162,11 +162,7 @@ Serialized serialize(jsg::Lock& js,
       // can detach the ArrayBuffer. Mutations before batch encoding remain visible.
       v8::Local<v8::ArrayBufferView> view = source;
       Serialized result;
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
       result.own = view->GetBuffer()->GetBackingStore();
-#else
-      result.own = view->Buffer()->GetBackingStore();
-#endif
       result.data = source.asArrayPtr();
       return kj::mv(result);
     } else {
@@ -641,7 +637,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     KJ_IF_SOME(f, queueHandler.queue) {
       auto promise =
           f(lock, js.alloc<QueueController>(event.addRef()),
-              jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
+              jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx(js))
               .then([event = event.addRef(), weakContext = context.getWeakRef()]() mutable {
         event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
         auto& context = KJ_REQUIRE_NONNULL(

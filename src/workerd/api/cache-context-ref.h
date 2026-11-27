@@ -31,6 +31,9 @@ class CacheContextRef {
 
   using JsgRttiDelegate = jsg::Ref<CacheContext>;
 
+  // The JavaScript object, for code that has no TypeWrapper to convert this with.
+  jsg::JsObject getHandle(jsg::Lock& js);
+
   static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
       jsg::Lock& js,
       v8::Local<v8::Context> context,

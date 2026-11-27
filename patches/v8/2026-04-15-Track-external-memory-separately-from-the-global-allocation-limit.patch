@@ -28,10 +28,10 @@ flag and all of its conditional branches.
 Co-authored-by: Divy Srivastava <divy@cloudflare.com>
 
 diff --git a/src/heap/heap-controller.cc b/src/heap/heap-controller.cc
-index 12b4139eca1ad1448f18273edd3966560b988d0d..3861e1a30d6ecfa44529cf26579715968c96f3c7 100644
+index f7671d8a9966b20642711e243d41d346708bd9df..f01563519a02c713c8f4126ac94c5fae1caf8a48 100644
 --- a/src/heap/heap-controller.cc
 +++ b/src/heap/heap-controller.cc
-@@ -279,7 +279,7 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
+@@ -280,7 +280,7 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
  
    const double global_growing_factor =
        std::max(v8_growing_factor, embedder_growing_factor);
@@ -40,7 +40,7 @@ index 12b4139eca1ad1448f18273edd3966560b988d0d..3861e1a30d6ecfa44529cf2657971596
        std::min(global_growing_factor,
                 v8_flags.external_memory_max_growing_factor.value());
    DCHECK_GT(global_growing_factor, 0);
-@@ -296,9 +296,11 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
+@@ -297,9 +297,11 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
              old_gen_consumed_bytes_at_last_gc, v8_mutator_speed,
              total_size_excluding_external_at_last_gc_, limit_factor);
  
@@ -55,7 +55,7 @@ index 12b4139eca1ad1448f18273edd3966560b988d0d..3861e1a30d6ecfa44529cf2657971596
      computed_global_allocation_limit =
          MemoryController<GlobalMemoryTrait>::ComputeSqrtLimit(
              global_consumed_bytes_at_last_gc, global_mutator_speed,
-@@ -309,9 +311,10 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
+@@ -310,9 +312,10 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
  
      const size_t global_consumed_bytes_baseline =
          old_gen_consumed_bytes_at_last_gc + embedder_size_at_last_gc_;
@@ -68,7 +68,7 @@ index 12b4139eca1ad1448f18273edd3966560b988d0d..3861e1a30d6ecfa44529cf2657971596
    }
  
    const size_t preliminary_old_generation_allocation_limit =
-@@ -351,7 +354,8 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
+@@ -352,7 +355,8 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
                   preliminary_old_generation_allocation_limit);
          dict.Add("old_gen_consumed_bytes_at_last_gc",
                   old_gen_consumed_bytes_at_last_gc);
@@ -78,7 +78,7 @@ index 12b4139eca1ad1448f18273edd3966560b988d0d..3861e1a30d6ecfa44529cf2657971596
          dict.Add("embedder_mutator_speed", embedder_speed);
          dict.Add("global_allocation_limit", global_allocation_limit());
          dict.Add("next_global_allocation_limit", next_global_allocation_limit);
-@@ -494,8 +498,8 @@ size_t HeapLimits::OldGenerationConsumedBytesAtLastGC() const {
+@@ -496,8 +500,8 @@ size_t HeapLimits::OldGenerationConsumedBytesAtLastGC() const {
  }
  
  uint64_t HeapLimits::GlobalConsumedBytesAtLastGC() const {
@@ -90,10 +90,10 @@ index 12b4139eca1ad1448f18273edd3966560b988d0d..3861e1a30d6ecfa44529cf2657971596
  
  size_t HeapLimits::PromotedSinceLastGC(size_t old_generation_size) const {
 diff --git a/src/heap/heap.cc b/src/heap/heap.cc
-index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46153edba1 100644
+index 49a20f24db717eee32173a3c23dc873c1169b53d..00ec2d7dba3099a4fa33789f33987a53d90db26d 100644
 --- a/src/heap/heap.cc
 +++ b/src/heap/heap.cc
-@@ -1387,6 +1387,50 @@ void Heap::PreciseCollectAllGarbage(GCFlags gc_flags,
+@@ -1371,6 +1371,50 @@ void Heap::PreciseCollectAllGarbage(GCFlags gc_flags,
    CollectAllGarbage(gc_flags, gc_reason, gc_callback_flags);
  }
  
@@ -144,7 +144,7 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
  uint64_t Heap::external_memory_hard_limit() {
    return limits()->external_memory_low_since_last_gc() +
           limits()->max_old_generation_size() / 2;
-@@ -1845,6 +1889,8 @@ void Heap::StartIncrementalMarking(GCFlags gc_flags,
+@@ -1847,6 +1891,8 @@ void Heap::StartIncrementalMarking(GCFlags gc_flags,
          dict.Add("old_gen_allocation_limit",
                   limits()->old_generation_allocation_limit());
          dict.Add("old_gen_consumed_bytes", OldGenerationConsumedBytes());
@@ -153,7 +153,7 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
          dict.Add("old_gen_space_available", OldGenerationSpaceAvailable());
          dict.Add("global_allocation_limit",
                   limits()->global_allocation_limit());
-@@ -2911,19 +2957,26 @@ void Heap::EnsureMinimumRemainingAllocationLimit(size_t at_least_remaining) {
+@@ -2829,19 +2875,26 @@ void Heap::EnsureMinimumRemainingAllocationLimit(size_t at_least_remaining) {
  
    // At least with ArrayBufferExtensions, external memory could overflow size_t
    // on 32-bit. Use a saturated cast here to defend against this.
@@ -187,7 +187,7 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
                     HeapLimits::GlobalMemorySizeFromV8Size(at_least_remaining),
                 limits()->global_allocation_limit());
    new_global_allocation_limit = std::clamp(new_global_allocation_limit,
-@@ -3547,7 +3600,7 @@ bool Heap::HasLowAllocationRate() {
+@@ -3464,7 +3517,7 @@ bool Heap::HasLowAllocationRate() {
  }
  
  size_t Heap::OldGenerationSpaceAvailable() {
@@ -196,7 +196,7 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
    if (limits()->old_generation_allocation_limit() <= bytes) return 0;
    return limits()->old_generation_allocation_limit() -
           static_cast<size_t>(bytes);
-@@ -5343,8 +5396,8 @@ size_t Heap::EmbedderSizeOfObjects() const {
+@@ -5274,8 +5327,8 @@ size_t Heap::EmbedderSizeOfObjects() const {
  }
  
  uint64_t Heap::GlobalSizeOfObjects() const {
@@ -207,7 +207,7 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
  }
  
  size_t Heap::GlobalWastedBytes() const { return OldGenerationWastedBytes(); }
-@@ -5374,7 +5427,8 @@ uint64_t Heap::AllocatedExternalMemorySinceMarkCompact() const {
+@@ -5305,7 +5358,8 @@ uint64_t Heap::AllocatedExternalMemorySinceMarkCompact() const {
  }
  
  bool Heap::AllocationLimitOvershotByLargeMargin() const {
@@ -217,7 +217,7 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
    if (incremental_marking()->IsMajorMarking()) {
      // No interleaved GCs, so we count young gen as part of old gen.
      old_generation_consumed += YoungGenerationConsumedBytes();
-@@ -5416,7 +5470,7 @@ uint64_t GetFixedMarginForInputHandlingBytes() {
+@@ -5347,7 +5401,7 @@ uint64_t GetFixedMarginForInputHandlingBytes() {
  
  bool Heap::AllocationLimitOvershotByFixedMargin(
      const uint64_t overshoot_margin) const {
@@ -226,7 +226,7 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
    if (incremental_marking()->IsMajorMarking()) {
      // No interleaved GCs, so we count young gen as part of old gen.
      old_generation_size += YoungGenerationConsumedBytes();
-@@ -5487,7 +5541,9 @@ bool Heap::ShouldExpandOldGenerationOnSlowAllocation(LocalHeap* local_heap,
+@@ -5418,7 +5472,9 @@ bool Heap::ShouldExpandOldGenerationOnSlowAllocation(LocalHeap* local_heap,
    if (always_allocate()) {
      return true;
    }
@@ -237,7 +237,7 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
      return true;
    }
    // We reached the old generation or global allocation limit.
-@@ -7019,20 +7075,11 @@ uint64_t Heap::UpdateExternalMemory(int64_t delta) {
+@@ -6961,20 +7017,11 @@ uint64_t Heap::UpdateExternalMemory(int64_t delta) {
    if (ReachedHeapLimit()) {
      CollectGarbageWithRetry(local_heap, space,
                              GarbageCollectionReason::kExternalMemoryPressure);
@@ -263,7 +263,7 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
    }
    return total_after;
  }
-@@ -7544,20 +7591,12 @@ void Heap::FinishSweepingIfOutOfWork(CompleteSweepingReason reason) {
+@@ -7515,20 +7562,12 @@ void Heap::FinishSweepingIfOutOfWork(CompleteSweepingReason reason) {
      DCHECK_IMPLIES(!delay_sweeper_tasks_for_testing_,
                     !sweeper()->HasUnsweptPagesForMajorSweeping());
      EnsureSweepingCompleted(SweepingForcedFinalizationMode::kV8Only, reason);
@@ -291,10 +291,10 @@ index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46
    // Ensure that sweeping is also completed for the C++ managed heap if it's
    // out of work.
 diff --git a/src/heap/heap.h b/src/heap/heap.h
-index 0a763b72ed6156fc73f523b6fb7e3f4060c9f13c..2bd83f7c801d60bb5dcc68fa85e0c3e7d43dc499 100644
+index 71ed142a0d2726adb05cf1ea970681190102e9de..65798fe275df88c4c6da8838fa06f4d28c4f43c9 100644
 --- a/src/heap/heap.h
 +++ b/src/heap/heap.h
-@@ -1029,6 +1029,10 @@ class Heap final {
+@@ -1027,6 +1027,10 @@ class Heap final {
        LocalHeap* local_heap, AllocationSpace space,
        GarbageCollectionReason gc_reason);
  
@@ -305,7 +305,7 @@ index 0a763b72ed6156fc73f523b6fb7e3f4060c9f13c..2bd83f7c801d60bb5dcc68fa85e0c3e7
    using GetExternallyAllocatedMemoryInBytesCallback =
        v8::Isolate::GetExternallyAllocatedMemoryInBytesCallback;
  
-@@ -1958,6 +1962,14 @@ class Heap final {
+@@ -1956,6 +1960,14 @@ class Heap final {
    // GC statistics. ============================================================
    // ===========================================================================
  

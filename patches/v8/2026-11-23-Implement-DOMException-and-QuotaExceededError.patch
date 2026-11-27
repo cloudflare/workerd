@@ -24,7 +24,7 @@ InitializeExperimentalGlobal(), which is skipped in an isolate that
 creates a snapshot: an embedder's snapshot would otherwise lack them.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 0106a2c4fd04183a185ebccdb296beac86258798..ddf771201d0a2b436f2d28fb59f8ac13b74e060d 100644
+index 448171a20a769ac9076eb5c2ec8831ec90b64292..96b4f45e9918ca4b98c7c3a97bb99f95081ffa15 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -4090,6 +4090,7 @@ filegroup(
@@ -36,10 +36,10 @@ index 0106a2c4fd04183a185ebccdb296beac86258798..ddf771201d0a2b436f2d28fb59f8ac13
          "src/builtins/builtins-object-gen.h",
          "src/builtins/builtins-promise-gen.cc",
 diff --git a/BUILD.gn b/BUILD.gn
-index d3915ff91a09da61f88cfca949e0f66652fe687e..597da828dddd2c7795a4043b70c65a169f27c25c 100644
+index 5048257c7c899ad88829eeca1b800abd266b3180..089db3f1f8bff39ecdb4dc3a98441620170b44c9 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -3811,6 +3811,7 @@ v8_cluster_source_set("v8_initializers") {
+@@ -3826,6 +3826,7 @@ v8_cluster_source_set("v8_initializers") {
      "src/builtins/builtins-conversion-gen.cc",
      "src/builtins/builtins-data-view-gen.h",
      "src/builtins/builtins-date-gen.cc",
@@ -164,10 +164,10 @@ index 4d6a0b0d41889d50474df54545991d13e89a5e32..c74a3ad8399d44b4999e1d6abf290d07
     * Returns true if this value is a RegExp.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index b65302af06294fb1e45baea617f4f0df0c1c08a0..5c5c319c8a062ed41dc7fe928c55bee1ae29890a 100644
+index 758a4d6cfd08e86d096b4bbd17b5ff8dd4b2583f..d893c68ab3dd2862b7dfda81fbbe134f3ff59d53 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -4151,6 +4151,20 @@ bool Value::IsNativeError() const {
+@@ -4145,6 +4145,20 @@ bool Value::IsNativeError() const {
    return IsJSError(*Utils::OpenDirectHandle(this));
  }
  
@@ -188,7 +188,7 @@ index b65302af06294fb1e45baea617f4f0df0c1c08a0..5c5c319c8a062ed41dc7fe928c55bee1
  bool Value::IsRegExp() const {
    return IsJSRegExp(*Utils::OpenDirectHandle(this));
  }
-@@ -4635,6 +4649,17 @@ void v8::BooleanObject::CheckCast(v8::Value* that) {
+@@ -4629,6 +4643,17 @@ void v8::BooleanObject::CheckCast(v8::Value* that) {
                    "Value is not a BooleanObject");
  }
  
@@ -206,7 +206,7 @@ index b65302af06294fb1e45baea617f4f0df0c1c08a0..5c5c319c8a062ed41dc7fe928c55bee1
  void v8::RegExp::CheckCast(v8::Value* that) {
    auto obj = *Utils::OpenDirectHandle(that);
    Utils::ApiCheck(i::IsJSRegExp(obj), "v8::RegExp::Cast()",
-@@ -11606,6 +11631,128 @@ DEFINE_ERROR(Error, error)
+@@ -11625,6 +11650,128 @@ DEFINE_ERROR(Error, error)
  
  #undef DEFINE_ERROR
  
@@ -357,10 +357,10 @@ index 843d757ff4b8431da12660301ef9e07310671a2f..adf64bbbec3ba1a644b05a2331cea295
    V(Map, JSMap)                                 \
    V(Set, JSSet)                                 \
 diff --git a/src/builtins/builtins-definitions.h b/src/builtins/builtins-definitions.h
-index b1d82f663ff88ec94de4719a9f2e597e30221c8f..467e819a1f70897a2a7af9d240a5ce21aecbca28 100644
+index e33f93675cdb999bf08f0c986dfafecc2b10bce5..73bc2e23124bdc573cbb85dc6bc00906dfc8cf90 100644
 --- a/src/builtins/builtins-definitions.h
 +++ b/src/builtins/builtins-definitions.h
-@@ -811,6 +811,16 @@ constexpr int kGearboxGenericBuiltinIdOffset = -2;
+@@ -813,6 +813,16 @@ constexpr int kGearboxGenericBuiltinIdOffset = -2;
    CPP(ErrorPrototypeToString, JSParameterCount(0))                             \
    CPP(ErrorIsError, JSParameterCount(1))                                       \
                                                                                 \
@@ -606,15 +606,15 @@ index 951802913d7c4d48504cc63f6e756e3f480fb3ec..2ad896629dae86dd5306c55ef94a9a60
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/common/message-template.h b/src/common/message-template.h
-index e3b63554a796bcf261c083922bdc48d3eddd272b..2202566f7f643fb2974a9cc2e048fe9593fccaf3 100644
+index 891cfd94622b87043742f4440e6358b8a2a10b4a..a16d78f3a6760253f00f79cb9a09551cb41171aa 100644
 --- a/src/common/message-template.h
 +++ b/src/common/message-template.h
-@@ -786,7 +786,24 @@ namespace internal {
-   T(SuppressedErrorDuringDisposal, "An error was suppressed during disposal")  \
-   T(ExpectAnObjectWithUsing,                                                   \
+@@ -780,7 +780,24 @@ namespace internal {
      "An object is expected with `using` "                                      \
--    "declarations")
-+    "declarations")                                                            \
+     "declarations")                                                            \
+   T(DefineDisallowedPrivateMethod,                                             \
+-    "Cannot add private methods of class %, object is not extensible")
++    "Cannot add private methods of class %, object is not extensible")         \
 +  /* DOMException and QuotaExceededError. Last, so that adding them changes no \
 +     other template's id, which bytecode expectations record. */               \
 +  T(QuotaExceededErrorNonFinite,                                               \
@@ -636,10 +636,10 @@ index e3b63554a796bcf261c083922bdc48d3eddd272b..2202566f7f643fb2974a9cc2e048fe95
  enum class MessageTemplate {
  #define TEMPLATE(NAME, STRING) k##NAME,
 diff --git a/src/debug/debug-evaluate.cc b/src/debug/debug-evaluate.cc
-index 0f27ba101f10e132ce8da5c6640559de51b27d29..381b46011f806b520c9d8d6b22d064baadf9d498 100644
+index cf76ce5bae585ee24608a35d661f6e029d00b1cf..92348fc77858566e3d2ef0a4b4a46563597361f1 100644
 --- a/src/debug/debug-evaluate.cc
 +++ b/src/debug/debug-evaluate.cc
-@@ -919,6 +919,13 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtin id) {
+@@ -929,6 +929,13 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtin id) {
      case Builtin::kFunctionPrototypeLegacyCallerSetter:
      // Error builtins.
      case Builtin::kErrorConstructor:
@@ -654,10 +654,10 @@ index 0f27ba101f10e132ce8da5c6640559de51b27d29..381b46011f806b520c9d8d6b22d064ba
      case Builtin::kRegExpConstructor:
      // Reflect builtins.
 diff --git a/src/execution/messages.cc b/src/execution/messages.cc
-index 1635529959a9fbe59c587934710356dc8d50904c..84705786212cdd535466caf30ae1a4ac4eaaa185 100644
+index 013ffa40ca5273bee15244ef0f25bbccc04d1246..08bf3668b5b5bff825c41adc769b0dd31e4f9a98 100644
 --- a/src/execution/messages.cc
 +++ b/src/execution/messages.cc
-@@ -588,6 +588,199 @@ MaybeHandle<JSObject> ErrorUtils::Construct(
+@@ -589,6 +589,199 @@ MaybeHandle<JSObject> ErrorUtils::Construct(
  
  namespace {
  
@@ -907,10 +907,10 @@ index 0e63e762dbae2b3135ce92a4eb888ec6923fabec..e07755cb65ae341c72ae7b1fd2404220
      kPreferOriginalMessage,
      kCurrentMessageProperty
 diff --git a/src/heap/setup-heap-internal.cc b/src/heap/setup-heap-internal.cc
-index 16f43412efc6c3f70bb6f156d2a28679998e083a..b330b9fc2bef86467e4a30f68951ced1be7f7b6f 100644
+index e30f707372ef44178ff9bc59005d176416057517..42a9503be2178f09c8991ce7bb2965378e3e8df2 100644
 --- a/src/heap/setup-heap-internal.cc
 +++ b/src/heap/setup-heap-internal.cc
-@@ -1469,6 +1469,26 @@ void Heap::CreateInitialMutableObjects() {
+@@ -1438,6 +1438,26 @@ void Heap::CreateInitialMutableObjects() {
  
    set_detached_contexts(roots.empty_weak_array_list());
  
@@ -938,10 +938,10 @@ index 16f43412efc6c3f70bb6f156d2a28679998e083a..b330b9fc2bef86467e4a30f68951ced1
    set_functions_marked_for_manual_optimization(roots.undefined_value());
    set_functions_marked_for_disabled_eager_inlining(roots.undefined_value());
 diff --git a/src/init/bootstrapper.cc b/src/init/bootstrapper.cc
-index 617c53e20e2391f8c4eb1936be4511052bcf006f..b3c21d00f30b6f242f24c03da932a539f60840da 100644
+index 471156fa3b383cb4a2a5f3e742be5eeea05637cc..c03ee470e97357eecc38219aa4d14f8db491fdb7 100644
 --- a/src/init/bootstrapper.cc
 +++ b/src/init/bootstrapper.cc
-@@ -1434,6 +1434,54 @@ static void InstallWithIntrinsicDefaultProto(Isolate* isolate,
+@@ -1412,6 +1412,54 @@ static void InstallWithIntrinsicDefaultProto(Isolate* isolate,
                                   kReleaseStore);
  }
  
@@ -996,7 +996,7 @@ index 617c53e20e2391f8c4eb1936be4511052bcf006f..b3c21d00f30b6f242f24c03da932a539
  void InstallError(Isolate* isolate, DirectHandle<JSObject> global,
                    DirectHandle<String> name, int context_index,
                    Builtin error_constructor, int error_function_length) {
-@@ -1487,38 +1535,145 @@ void InstallError(Isolate* isolate, DirectHandle<JSObject> global,
+@@ -1465,38 +1513,145 @@ void InstallError(Isolate* isolate, DirectHandle<JSObject> global,
      }
    }
  
@@ -1169,7 +1169,7 @@ index 617c53e20e2391f8c4eb1936be4511052bcf006f..b3c21d00f30b6f242f24c03da932a539
  #ifdef V8_TEMPORAL_SUPPORT
  
  namespace {
-@@ -3377,6 +3532,9 @@ void Genesis::InitializeGlobal(DirectHandle<JSGlobalObject> global_object,
+@@ -3355,6 +3510,9 @@ void Genesis::InitializeGlobal(DirectHandle<JSGlobalObject> global_object,
                 Context::SUPPRESSED_ERROR_FUNCTION_INDEX,
                 Builtin::kSuppressedErrorConstructor, 3);
  
@@ -1180,7 +1180,7 @@ index 617c53e20e2391f8c4eb1936be4511052bcf006f..b3c21d00f30b6f242f24c03da932a539
    // TODO(ishell): microtask queue pointer will be moved from native context
    // to the embedder data array so we don't need an empty embedder data array.
 diff --git a/src/logging/runtime-call-stats.h b/src/logging/runtime-call-stats.h
-index 6d6d0d4b277fa739fe1c32dcb5df61c1fc6e29a9..24fa8326d5dd794e173793bbfe1504568b8e299d 100644
+index 147f8713823350e16350319b35f6897130185088..3833afa572b487d48f5174c3356ccf5d9a8893e2 100644
 --- a/src/logging/runtime-call-stats.h
 +++ b/src/logging/runtime-call-stats.h
 @@ -57,6 +57,7 @@ namespace v8::internal {
@@ -1200,7 +1200,7 @@ index 6d6d0d4b277fa739fe1c32dcb5df61c1fc6e29a9..24fa8326d5dd794e173793bbfe150456
    V(ReferenceError_New)                                    \
    V(RegExp_Exec)                                           \
 diff --git a/src/objects/contexts.h b/src/objects/contexts.h
-index 1859939e43f4a821134f530216f1bd43b62ed30d..956b7dfa0b0a253a79ebe6aa64b9f1a7b221f707 100644
+index 9a7875297a1a3e271a61aa05813f69b61510f5d9..8481c30356f6d3034782e136aacdab031987ca74 100644
 --- a/src/objects/contexts.h
 +++ b/src/objects/contexts.h
 @@ -158,6 +158,7 @@ enum ContextLookupFlags {
@@ -1221,10 +1221,10 @@ index 1859939e43f4a821134f530216f1bd43b62ed30d..956b7dfa0b0a253a79ebe6aa64b9f1a7
    V(SYNTAX_ERROR_FUNCTION_INDEX, JSFunction, syntax_error_function)            \
    V(TYPE_ERROR_FUNCTION_INDEX, JSFunction, type_error_function)                \
 diff --git a/src/objects/objects.cc b/src/objects/objects.cc
-index 1bc672bb9cf37f70444e1f70cd2a30fd6d9790b5..d2b7097a7d63f7a0ab19b5bbc8261fbef32c8499 100644
+index 4799dc47d2aa64a25061bd0879d0d1339e38665d..dbf0e87504e809d9e0e3fe6d3a299c09cb8e5422 100644
 --- a/src/objects/objects.cc
 +++ b/src/objects/objects.cc
-@@ -539,11 +539,21 @@ DirectHandle<String> NoSideEffectsErrorToString(
+@@ -532,11 +532,21 @@ DirectHandle<String> NoSideEffectsErrorToString(
    DirectHandle<Name> name_key = isolate->factory()->name_string();
    DirectHandle<Object> name =
        JSReceiver::GetDataProperty(isolate, error, name_key);
@@ -1247,10 +1247,10 @@ index 1bc672bb9cf37f70444e1f70cd2a30fd6d9790b5..d2b7097a7d63f7a0ab19b5bbc8261fbe
  
    if (name_str->length() == 0) return msg_str;
 diff --git a/src/roots/roots.h b/src/roots/roots.h
-index 926135995c273e6334b81648c83dadd423fa85e6..f6982db0a3fb34d5f651b0ab9087bdecf94765e4 100644
+index 7904a0c8dacd8dc7cb146555522e7d91fe6150b9..cef2b670e434f2e37c01df455c470fce24f46406 100644
 --- a/src/roots/roots.h
 +++ b/src/roots/roots.h
-@@ -422,6 +422,15 @@ class RootVisitor;
+@@ -420,6 +420,15 @@ class RootVisitor;
    BUILTINS_WITH_SFI_ROOTS_LIST(V)                                              \
    TRUSTED_ROOT_LIST(V)
  
@@ -1264,14 +1264,14 @@ index 926135995c273e6334b81648c83dadd423fa85e6..f6982db0a3fb34d5f651b0ab9087bdec
 +    QuotaExceededErrorRequestedSymbol)
 +
  // These root references can be updated by the mutator.
- #define STRONG_MUTABLE_MOVABLE_ROOT_LIST(V)                                 \
-   /* Caches */                                                              \
-@@ -467,7 +476,8 @@ class RootVisitor;
-     ErrorStackGetterSharedFun)                                              \
-   V(FunctionTemplateInfo, error_stack_setter_fun_template,                  \
-     ErrorStackSetterSharedFun)                                              \
+ #define STRONG_MUTABLE_MOVABLE_ROOT_LIST(V)                                  \
+   /* Caches */                                                               \
+@@ -465,7 +474,8 @@ class RootVisitor;
+     ErrorStackGetterSharedFun)                                               \
+   V(FunctionTemplateInfo, error_stack_setter_fun_template,                   \
+     ErrorStackSetterSharedFun)                                               \
 -  V(Object, promise_context_tag, PromiseContextTag)
-+  V(Object, promise_context_tag, PromiseContextTag)                         \
++  V(Object, promise_context_tag, PromiseContextTag)                          \
 +  DOM_EXCEPTION_SLOT_ROOT_LIST(V)
  
  // Entries in this list are limited to Smis and are not visited during GC.

@@ -2,27 +2,27 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Line buffering of writes to the stdio file descriptors. The same module
-// runs under the C++ implementation (fs-stdio-cpp.wd-test) and the TypeScript
-// one (fs-stdio-ts.wd-test). The TS_STDIO autogate, which user code cannot
-// read, selects between them, so each cell says which one it is meant to run
-// through its USING_TS_IMPL binding.
+// Line buffering of writes to the stdio file descriptors.
 
-import { env } from 'cloudflare:workers';
 import { Buffer } from 'node:buffer';
-import { appendFileSync, writeFile, writeFileSync, writeSync } from 'node:fs';
+import {
+  appendFileSync,
+  promises,
+  write,
+  writeFile,
+  writeFileSync,
+  writeSync,
+  writev,
+  writevSync,
+} from 'node:fs';
 import { deepStrictEqual, strictEqual } from 'node:assert';
 
-const usingTsImpl = env.USING_TS_IMPL === true;
-
 // Runs fn with console.log replaced, returning the lines it logged with any
-// stdio prefix removed, and the stack of the first call.
+// stdio prefix removed.
 async function capture(fn) {
   const lines = [];
-  let stack;
   const log = console.log;
   console.log = (msg) => {
-    stack ??= new Error().stack;
     lines.push(String(msg).replace(/^std(out|err): ?/, ''));
   };
   try {
@@ -32,15 +32,8 @@ async function capture(fn) {
   } finally {
     console.log = log;
   }
-  return { lines, stack };
+  return { lines };
 }
-
-export const whichImpl = {
-  async test() {
-    const { stack } = await capture(() => writeSync(1, 'x\n'));
-    strictEqual(stack.includes('internal_fs_stdio'), usingTsImpl);
-  },
-};
 
 export const splitsLines = {
   async test() {
@@ -99,5 +92,25 @@ export const writeFileToStdio = {
     const cb = await capture(() => writeFile(1, 'c\n', done.resolve));
     strictEqual(await done.promise, null);
     deepStrictEqual(cb.lines, ['c']);
+  },
+};
+
+// The file system discards writes to stdio, so every node:fs write API must
+// send the stdio fds to internal_fs_stdio.ts.
+export const otherWritePaths = {
+  async test() {
+    const wrote = Promise.withResolvers();
+    const wrotev = Promise.withResolvers();
+    let written;
+    const { lines } = await capture(() => {
+      writevSync(1, [Buffer.from('a\n'), Buffer.from('b\n')]);
+      write(1, 'c\n', (err, n) => wrote.resolve([err, n]));
+      writev(2, [Buffer.from('d\n')], (err, n) => wrotev.resolve([err, n]));
+      written = promises.writeFile(1, 'e\n');
+    });
+    deepStrictEqual(lines, ['a', 'b', 'c', 'd', 'e']);
+    deepStrictEqual(await wrote.promise, [null, 2]);
+    deepStrictEqual(await wrotev.promise, [null, 2]);
+    strictEqual(await written, undefined);
   },
 };

@@ -36,6 +36,7 @@ pub mod bridge {
         include!("workerd/io/io-context/ffi.h");
 
         type IncomingRequest = io_context::IncomingRequest;
+        type RunPrelude = io_context::RunPrelude;
     }
 
     unsafe extern "C++" {
@@ -54,6 +55,10 @@ pub mod bridge {
             scheduled_time: KjDate,
             cron: &[u8],
         ) -> Result<()>;
+
+        fn invocation_take_test_handler_lookup(
+            invocation: Pin<&mut Invocation>,
+        ) -> KjOwn<RunPrelude>;
     }
 
     extern "Rust" {
@@ -66,6 +71,12 @@ pub mod bridge {
             cron: &[u8],
         ) -> Result<Box<ScheduledEvent>>;
         async fn scheduled_event_finish(event: Box<ScheduledEvent>) -> Result<ScheduledResult>;
+
+        type TestEvent;
+
+        /// Starts the test event of `invocation`: see `runTest()` in `ffi.h`.
+        fn test_event_start(invocation: KjOwn<Invocation>) -> Result<Box<TestEvent>>;
+        async fn test_event_finish(event: Box<TestEvent>) -> Result<bool>;
     }
 }
 
@@ -97,5 +108,20 @@ fn scheduled_event_start(
 async fn scheduled_event_finish(
     event: Box<ScheduledEvent>,
 ) -> Result<bridge::ScheduledResult, KjException> {
+    event.0.await
+}
+
+/// What a test event that Rust has started finishes with: whether the test passed.
+type TestFinish = Pin<Box<dyn Future<Output = Result<bool, KjException>>>>;
+
+/// A test event that Rust has started, until it finishes.
+pub struct TestEvent(TestFinish);
+
+fn test_event_start(invocation: KjOwn<bridge::Invocation>) -> Result<Box<TestEvent>, KjException> {
+    let finished = crate::test::start(crate::Invocation::new(invocation))?;
+    Ok(Box::new(TestEvent(Box::pin(finished))))
+}
+
+async fn test_event_finish(event: Box<TestEvent>) -> Result<bool, KjException> {
     event.0.await
 }

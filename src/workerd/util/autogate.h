@@ -89,10 +89,6 @@ namespace workerd::util {
   /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
      startup snapshot, and the real Worker's isolate is then created from it. */                   \
   V(STARTUP_SNAPSHOT)                                                                              \
-  /* Writes to the stdio file descriptors (0, 1, 2) through node:fs are line-buffered and          \
-     logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
-     than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
-  V(TS_STDIO)                                                                                      \
   /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
      (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
   V(TS_URL)                                                                                        \
@@ -168,7 +164,13 @@ namespace workerd::util {
   V(RUST_ENTRYPOINT_SCHEDULED)                                                                     \
   /* MIME types are parsed and serialized by the Rust crate in util/mimetype/ rather than the      \
      C++ code in util/mimetype-legacy.c++. See util/mimetype.c++. */                               \
-  V(RUST_MIMETYPE)
+  V(RUST_MIMETYPE)                                                                                 \
+  /* The `ctx` of a stateless entrypoint is the Rust ExecutionContext                              \
+     (src/workerd/api/execution-context/) rather than the C++ class in api/global-scope.h. The     \
+     C++ implementation is retained for rollback. The gate is read when a ctx is created, so       \
+     toggling it at runtime can leave a non-class handler's reused ctx of one class while new      \
+     ones are of the other. */                                                                     \
+  V(RUST_EXECUTION_CONTEXT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

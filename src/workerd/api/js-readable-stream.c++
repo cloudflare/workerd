@@ -796,7 +796,7 @@ JsReadableStream::StreamImpl newBackingStream(
 
 }  // namespace
 
-JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer) {
+JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock& js, kj::Arc<Buffer> buffer) {
   // Use newMemorySource() rather than newSystemStream() wrapping a memory input stream:
   // it reads the Buffer's bytes in place, so every stream derived from this Buffer -- rewinds
   // and tee branches alike -- shares the one allocation.
@@ -820,7 +820,7 @@ JsReadableStream::JsReadableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject> obj)
       }) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, kj::Array<const kj::byte> data)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(data)))) {}
+    : impl(bufferBackedImpl(js, kj::arc<Buffer>(js, kj::mv(data)))) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, kj::String data)
     : JsReadableStream(js, webstreams::stringToBytes(kj::mv(data))) {}
@@ -829,7 +829,7 @@ JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource
     : JsReadableStream(js, view.getHandle(js).copy()) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(blob)))) {}
+    : impl(bufferBackedImpl(js, kj::arc<Buffer>(js, kj::mv(blob)))) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams)
     : JsReadableStream(js, urlSearchParams->toString()) {}
@@ -990,13 +990,13 @@ JsReadableStream JsReadableStream::addRef(jsg::Lock& js) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return JsReadableStream(Impl{
           .stream = StreamImpl(stream.addRef()),
-          .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
+          .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Arc<Buffer>& b) { return b.addRef(); }),
         });
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
         return JsReadableStream(Impl{
           .stream = StreamImpl(obj.addRef(js)),
-          .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
+          .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Arc<Buffer>& b) { return b.addRef(); }),
         });
       }
     }
@@ -1440,8 +1440,8 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       auto branches = stream->tee(js);
       // Both branches share the retransmit buffer (if any) so they remain independently rewindable.
-      auto buffer1 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
-      auto buffer2 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
+      auto buffer1 = i.maybeOwnedBuffer.map([](kj::Arc<Buffer>& b) { return b.addRef(); });
+      auto buffer2 = i.maybeOwnedBuffer.map([](kj::Arc<Buffer>& b) { return b.addRef(); });
 
       // tee() consumes `this`: the original stream is now locked/disturbed and unusable, so
       // represent that by nullifying. Everything needed for the result has already been extracted
@@ -1474,8 +1474,8 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
       // TS-backed streams cannot currently be buffer-backed (bufferBackedImpl always
       // constructs the legacy arm; design-doc open question F), but carry the buffer
       // through anyway so this arm stays correct if F ever changes that.
-      auto buffer1 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
-      auto buffer2 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
+      auto buffer1 = i.maybeOwnedBuffer.map([](kj::Arc<Buffer>& b) { return b.addRef(); });
+      auto buffer2 = i.maybeOwnedBuffer.map([](kj::Arc<Buffer>& b) { return b.addRef(); });
 
       // Same consumption contract as the legacy arm: the original JS stream object is
       // left locked by the tee (spec behavior); this wrapper drops its handle.
@@ -1517,7 +1517,7 @@ JsReadableStream JsReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreD
       auto detached = stream->detach(js, ignoreDisturbed == IgnoreDisturbed::YES);
       return JsReadableStream(Impl{
         .stream = StreamImpl(kj::mv(detached)),
-        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
+        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Arc<Buffer>& b) { return b.addRef(); }),
       });
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
@@ -1530,7 +1530,7 @@ JsReadableStream JsReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreD
           JSG_TRY_CAST_OBJECT(detached), "detachReadableStream did not return a stream");
       return JsReadableStream(Impl{
         .stream = StreamImpl(detachedObj.addRef(js)),
-        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
+        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Arc<Buffer>& b) { return b.addRef(); }),
       });
     }
   }

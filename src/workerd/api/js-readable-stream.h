@@ -50,6 +50,11 @@ class JsReadableStream final {
   // Holds the in-memory data backing a buffer-backed (rewindable) JsReadableStream.  `owned`
   // is always kj-heap memory: the streams built from it are read on the kj event loop without
   // the isolate lock, so the bytes must not sit in the V8 sandbox.
+  //
+  // A Buffer is shared through kj::Arc, not kj::Rc: the native source a stream is built from
+  // holds a reference that is dropped on the request's thread without the isolate lock, while
+  // the JsReadableStreams holding the others belong to the isolate, which another thread may
+  // hold at the same time.
   struct Buffer {
     kj::Array<const kj::byte> owned;
     kj::ArrayPtr<const kj::byte> view;
@@ -66,7 +71,7 @@ class JsReadableStream final {
 
   struct Impl {
     StreamImpl stream;
-    kj::Maybe<kj::Rc<Buffer>> maybeOwnedBuffer;
+    kj::Maybe<kj::Arc<Buffer>> maybeOwnedBuffer;
   };
 
   // The result of tee(): two independent branches that each read the same data.
@@ -339,7 +344,7 @@ class JsReadableStream final {
   // source is constructed through the same compatibility-flag dispatch as create(), so under the
   // typescript_implemented_streams flag buffer-backed streams are TypeScript-backed like every
   // other stream.
-  static Impl bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer);
+  static Impl bufferBackedImpl(jsg::Lock& js, kj::Arc<Buffer> buffer);
 
   kj::Maybe<Impl> impl;
   // Cache the result of isDisturbed() so that repeated calls don't dispatch to the JS

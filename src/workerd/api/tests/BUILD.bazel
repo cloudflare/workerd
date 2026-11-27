@@ -333,6 +333,16 @@ wd_test(
 )
 
 wd_test(
+    src = "test-controller-test.wd-test",
+    data = ["test-controller-test.js"],
+)
+
+wd_test(
+    src = "test-controller-immutable-prototypes-test.wd-test",
+    data = ["test-controller-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-test.js"],
@@ -550,6 +560,16 @@ wd_test(
 wd_test(
     src = "ctx-access-test.wd-test",
     data = ["ctx-access-test.js"],
+)
+
+wd_test(
+    src = "ctx-shape-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "ctx-shape.js",
+        "ctx-shape-flagged.js",
+        "ctx-shape-test.js",
+    ],
 )
 
 wd_test(
@@ -901,6 +921,14 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-shared-buffer-test.wd-test",
+    data = [
+        "crypto-shared-buffer-non-pedantic-test.js",
+        "crypto-shared-buffer-test.js",
+    ],
+)
+
+wd_test(
     src = "crypto-sha3-test.wd-test",
     data = ["crypto-sha3-test.js"],
 )
@@ -1041,6 +1069,18 @@ wd_test(
     src = "htmlrewriter-abort-between-requests-test.wd-test",
     args = ["--experimental"],
     data = ["htmlrewriter-abort-between-requests-test.js"],
+)
+
+wd_test(
+    src = "htmlrewriter-security-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-security-test.js"],
+)
+
+wd_test(
+    src = "htmlrewriter-security-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-security-test.js"],
 )
 
 wd_test(

@@ -9,7 +9,8 @@
 //! `jsg`.
 //!
 //! It also binds `IoContext::IncomingRequest` ([`IncomingRequest`]), for the code that delivers an
-//! event: [`incoming_request_delivered`], [`incoming_request_finish_scheduled`] and
+//! event: [`incoming_request_delivered`], [`incoming_request_finish_scheduled`],
+//! [`incoming_request_run_in_wait_until`], [`incoming_request_set_custom_event_info`] and
 //! [`incoming_request_set_scheduled_event_info`] are the calls on it, made as C++ makes them.
 
 mod ffi;
@@ -34,11 +35,15 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 pub use ffi::DeliveredLocation;
+pub use ffi::RunError;
 use ffi::bridge;
 pub use ffi::bridge::IncomingRequest;
+pub use ffi::bridge::RunPrelude;
 pub use ffi::bridge::incoming_request_finish_scheduled;
+pub use ffi::bridge::incoming_request_set_custom_event_info;
 pub use ffi::bridge::incoming_request_set_scheduled_event_info;
 pub use ffi::incoming_request_delivered;
+pub use ffi::incoming_request_run_in_wait_until;
 use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;
