@@ -1390,9 +1390,17 @@ export const misc = {
         name: 'TypeError',
       }
     );
+
+    strictEqual(Buffer.alloc(3, 5, 'utf8').toString('hex'), '050505');
+    strictEqual(Buffer.alloc(3, 0, 'utf8').toString('hex'), '000000');
+    strictEqual(
+      Buffer.alloc(3, Buffer.from([7]), 'utf8').toString('hex'),
+      '070707'
+    );
+    strictEqual(Buffer.alloc(3, 'ab', 'utf8').toString('hex'), '616261');
+    strictEqual(Buffer.alloc(2, 'ff', 'hex').toString('hex'), 'ffff');
   },
 };
-
 export const arrayBuffers = {
   test(ctrl, env, ctx) {
     const LENGTH = 16;
