@@ -310,7 +310,10 @@ wd_cc_library(
     visibility = [":__subpackages__"],
     deps = [
         ":channel-token_capnp",
+        "//src/rust/cxx/kj-rs",
         "//src/workerd/io",
+        "//src/workerd/server/channel-token-codec",
+        "//src/workerd/server/channel-token-codec:ffi.rs@cxx",
         "//src/workerd/util:entropy",
     ],
 )
@@ -454,6 +457,25 @@ kj_test(
 
 kj_test(
     src = "channel-token-test.c++",
+    deps = [
+        ":channel-token",
+    ],
+)
+
+# The C++ handler against a copy of the C++ codec it replaced.
+kj_test(
+    src = "channel-token-legacy-test.c++",
+    deps = [
+        ":channel-token",
+        "//src/workerd/util:entropy",
+        "@ssl",
+    ],
+)
+
+# The C++ handler against tokens that its C++ encoder wrote.
+kj_test(
+    src = "channel-token-golden-test.c++",
+    data = ["//src/workerd/server/channel-token-codec:golden-tokens.txt"],
     deps = [
         ":channel-token",
     ],

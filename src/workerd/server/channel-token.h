@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/io-channels.h>
+#include <workerd/server/channel-token-codec/ffi.rs.h>
 #include <workerd/server/channel-token.capnp.h>
 
 #include <capnp/message.h>
@@ -19,6 +20,11 @@ namespace workerd::server {
 //
 // Note that all `Frankenvalue`s here are expected to contain cap tables holding live instances
 // of `SubrequestChannel`, `ActorClassChannel`, and `RpcChannel`.
+//
+// The encoding and crypto of a token, the `ChannelToken` message and its envelope, are the Rust
+// codec's (channel-token-codec/). The handler serializes the cap tables of the Frankenvalues in a
+// token, which hold live channels, resolves what a token points at, and implements the restored
+// channels.
 class ChannelTokenHandler: public kj::PtrTarget {
  public:
   kj::Weak<ChannelTokenHandler> addWeak() {
@@ -124,32 +130,11 @@ class ChannelTokenHandler: public kj::PtrTarget {
       IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 
  private:
-  // Annoyingly the OpenSSL/BoringSSL headers don't seem to define these as static constants.
-  static constexpr uint AES_KEY_SIZE = 32;
-  static constexpr uint AES_IV_SIZE = 12;
-  static constexpr uint AES_MAC_SIZE = 16;
-
-  // The key ID is the 16-byte prefix of a SHA-256 hash of the secret key.
-  static constexpr uint KEY_ID_SIZE = 16;
-
   Resolver& resolver;
-  byte tokenKey[AES_KEY_SIZE];
-  byte keyId[KEY_ID_SIZE];
-
-  struct TokenHeader {
-    uint32_t magic;
-    byte iv[AES_IV_SIZE];
-    byte keyId[KEY_ID_SIZE];
-  };
-  static_assert(sizeof(TokenHeader) == 32);
+  ::rust::Box<channel_token_codec::TokenKey> key;
 
   // Throws `DOMDataCloneError` if `usage` is STORAGE but `persistent` is `Persistent::NO`.
   static void requireStorable(IoChannelFactory::ChannelTokenUsage usage, Persistent persistent);
-
-  // Encode/decode the `persistence` union, which records whether the target worker allowed
-  // irrevocable stub storage when the token was minted.
-  static void encodePersistent(ChannelToken::Builder builder, Persistent persistent);
-  static Persistent decodePersistent(ChannelToken::Reader reader);
 
   // Implementation for both `encode` methods.
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeChannelTokenImpl(
@@ -163,18 +148,30 @@ class ChannelTokenHandler: public kj::PtrTarget {
       Frankenvalue& value,
       rpc::Frankenvalue::Builder valueBuilder,
       kj::Vector<kj::Promise<void>>& promises);
-  kj::Array<byte> serializeTokenImpl(
-      IoChannelFactory::ChannelTokenUsage usage, capnp::MessageBuilder& message);
+
+  // Encode a token through the codec. `props` and `restoreArg` are messages whose root is the
+  // Frankenvalue, its cap table complete.
+  kj::Array<byte> encodeServiceToken(ChannelToken::Type type,
+      IoChannelFactory::ChannelTokenUsage usage,
+      kj::StringPtr serviceName,
+      kj::Maybe<kj::StringPtr> entrypoint,
+      capnp::MessageBuilder& props,
+      Persistent persistent);
+  kj::Array<byte> encodeRestoredToken(ChannelToken::Type type,
+      IoChannelFactory::ChannelTokenUsage usage,
+      kj::ArrayPtr<const byte> vendorToken,
+      capnp::MessageBuilder& restoreArg,
+      Persistent persistent);
 
   // Implementation that dynamically returns a SubrequestChannel, ActorClassChannel, or RpcChannel,
   // which all inherit TokenizableChannel. The caller will immediately downcast to the right type.
   kj::Rc<IoChannelFactory::TokenizableChannel> decodeChannelTokenImpl(ChannelToken::Type type,
       IoChannelFactory::ChannelTokenUsage usage,
       kj::ArrayPtr<const byte> token);
-  kj::Rc<IoChannelFactory::TokenizableChannel> decodeChannelTokenImpl(ChannelToken::Type type,
-      IoChannelFactory::ChannelTokenUsage usage,
-      ChannelToken::Reader reader);
 
+  // Decode a Frankenvalue the codec read, a flat capnp message, decoding its cap table.
+  Frankenvalue decodeFrankenvalue(
+      IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> flat);
   Frankenvalue decodeFrankenvalue(
       IoChannelFactory::ChannelTokenUsage usage, rpc::Frankenvalue::Reader reader);
 
