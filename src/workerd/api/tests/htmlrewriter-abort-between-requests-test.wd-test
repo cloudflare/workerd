@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  modules = [(name = "worker", esModule = embed "htmlrewriter-abort-between-requests-test.js")],
+  compatibilityFlags = ["nodejs_compat", "experimental", "streams_enable_constructors"],
+  durableObjectNamespaces = [
+    (className = "Holder", uniqueKey = "6f1e0c3b9a2d4e5f8a7b6c5d4e3f2a1b"),
+  ],
+  durableObjectStorage = (inMemory = void),
+  bindings = [
+    (name = "HOLDER", durableObjectNamespace = "Holder"),
+    (name = "SOURCE", service = (name = "main", entrypoint = "source")),
+  ],
+);

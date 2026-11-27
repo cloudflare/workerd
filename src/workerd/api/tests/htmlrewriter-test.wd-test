@@ -1,5 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# htmlrewriter-test.js under each streams implementation.
+
 const unitTests :Workerd.Config = (
   services = [
     ( name = "htmlrewriter-test",
@@ -8,6 +10,14 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "htmlrewriter-test.js")
         ],
         compatibilityFlags = ["nodejs_compat", "experimental", "streams_enable_constructors", "transformstream_enable_standard_constructor", "original-transform-stream-backpressure"],
+      )
+    ),
+    ( name = "htmlrewriter-test-ts-streams",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "htmlrewriter-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "streams_enable_constructors", "transformstream_enable_standard_constructor", "original-transform-stream-backpressure", "typescript_implemented_streams"],
       )
     ),
   ],

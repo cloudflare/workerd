@@ -1069,6 +1069,18 @@ wd_test(
 )
 
 wd_test(
+    src = "htmlrewriter-stale-token-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-stale-token-test.js"],
+)
+
+wd_test(
+    src = "htmlrewriter-abort-between-requests-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-abort-between-requests-test.js"],
+)
+
+wd_test(
     src = "htmlrewriter-security-test.wd-test",
     args = ["--experimental"],
     data = ["htmlrewriter-security-test.js"],

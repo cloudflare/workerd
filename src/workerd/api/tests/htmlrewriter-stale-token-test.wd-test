@@ -1,0 +1,13 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "htmlrewriter-stale-token",
+      worker = (
+        modules = [(name = "worker", esModule = embed "htmlrewriter-stale-token-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental", "enable_weak_ref", "streams_enable_constructors"],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);

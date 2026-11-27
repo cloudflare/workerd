@@ -9,6 +9,12 @@ import {
   throws,
 } from 'node:assert';
 
+// Whether a TransformStream takes all of a test's writes before anything reads them. The
+// TypeScript streams' one holds at most one chunk until it is read, so their tests start reading
+// before they write.
+const transformStreamBuffers =
+  !globalThis.Cloudflare.compatibilityFlags['typescript_implemented_streams'];
+
 const arrayIterator = [][Symbol.iterator]();
 const arrayIteratorPrototype = Object.getPrototypeOf(
   Object.getPrototypeOf(arrayIterator)
@@ -598,6 +604,8 @@ export const manualWriting2 = {
       })
       .transform(new Response(readable));
 
+    // The read starts after the writes where the TransformStream buffers them.
+    const early = transformStreamBuffers ? undefined : response.text();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
 
@@ -606,9 +614,7 @@ export const manualWriting2 = {
     await writer.write(encoder.encode('</html>'));
     await writer.close();
 
-    // This variation uses the JavaScript TransformStream, so we can
-    // initiate the read after doing the writes.
-    const promise = response.text();
+    const promise = early ?? response.text();
 
     strictEqual(await promise, '<html>foo bar</html>');
   },
@@ -629,6 +635,8 @@ export const streamingReplacement = {
       })
       .transform(new Response(readable));
 
+    // The read starts after the writes where the TransformStream buffers them.
+    const early = transformStreamBuffers ? undefined : response.text();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
 
@@ -637,9 +645,7 @@ export const streamingReplacement = {
     await writer.write(encoder.encode('</html>'));
     await writer.close();
 
-    // This variation uses the JavaScript TransformStream, so we can
-    // initiate the read after doing the writes.
-    const promise = response.text();
+    const promise = early ?? response.text();
     strictEqual(
       await promise,
       `<html>the quick brown fox jumped over the lazy dog bar</html>`
@@ -662,6 +668,8 @@ export const streamingReplacementHTML = {
       })
       .transform(new Response(readable));
 
+    // The read starts after the writes where the TransformStream buffers them.
+    const early = transformStreamBuffers ? undefined : response.text();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
 
@@ -670,9 +678,7 @@ export const streamingReplacementHTML = {
     await writer.write(encoder.encode('</html>'));
     await writer.close();
 
-    // This variation uses the JavaScript TransformStream, so we can
-    // initiate the read after doing the writes.
-    const promise = response.text();
+    const promise = early ?? response.text();
     strictEqual(
       await promise,
       `<html><b>such markup <i>much wow</i></b>bar</html>`
@@ -693,6 +699,8 @@ export const streamingReplacementReplace = {
       })
       .transform(new Response(readable));
 
+    // The read starts after the writes where the TransformStream buffers them.
+    const early = transformStreamBuffers ? undefined : response.text();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
 
@@ -703,9 +711,7 @@ export const streamingReplacementReplace = {
     await writer.write(encoder.encode('</html>'));
     await writer.close();
 
-    // This variation uses the JavaScript TransformStream, so we can
-    // initiate the read after doing the writes.
-    const promise = response.text();
+    const promise = early ?? response.text();
     strictEqual(await promise, `<html>goodbye world</html>`);
   },
 };
@@ -723,6 +729,8 @@ export const streamingReplacementMultiple = {
       })
       .transform(new Response(readable));
 
+    // The read starts after the writes where the TransformStream buffers them.
+    const early = transformStreamBuffers ? undefined : response.text();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
 
@@ -731,9 +739,7 @@ export const streamingReplacementMultiple = {
     await writer.write(encoder.encode('</html>'));
     await writer.close();
 
-    // This variation uses the JavaScript TransformStream, so we can
-    // initiate the read after doing the writes.
-    const promise = response.text();
+    const promise = early ?? response.text();
     strictEqual(await promise, `<html>alpha beta gamma</html>`);
   },
 };
@@ -750,17 +756,27 @@ export const streamingReplacementBadUTF8 = {
       })
       .transform(new Response(readable));
 
+    // The read starts after the writes where the TransformStream buffers them.
+    const early = transformStreamBuffers ? undefined : response.text();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
 
-    await writer.write(encoder.encode('<html>'));
-    await writer.write(encoder.encode('bar'));
-    await writer.write(encoder.encode('</html>'));
-    await writer.close();
+    const writing = (async () => {
+      await writer.write(encoder.encode('<html>'));
+      await writer.write(encoder.encode('bar'));
+      await writer.write(encoder.encode('</html>'));
+      await writer.close();
+    })();
+    if (transformStreamBuffers) await writing;
 
-    // This variation uses the JavaScript TransformStream, so we can
-    // initiate the read after doing the writes.
-    await rejects(response.text(), { message: 'Parser error: Invalid UTF-8' });
+    await rejects(early ?? response.text(), {
+      message: 'Parser error: Invalid UTF-8',
+    });
+    // Where the read runs alongside the writes, the failed rewrite cancels the original body, and
+    // the writes still pending fail with it.
+    if (!transformStreamBuffers) {
+      await rejects(writing, { message: 'Parser error: Invalid UTF-8' });
+    }
   },
 };
 

@@ -271,3 +271,39 @@ export const largeDocumentThroughHandler = {
     strictEqual(result, doc);
   },
 };
+
+// While a handler waits on a promise, the output before its element isn't
+// readable from the transformed body: it is written once the handler is done.
+export const outputBeforeAWaitingHandler = {
+  async test() {
+    const { promise: gate, resolve: open } = Promise.withResolvers();
+    const { promise: entered, resolve: enter } = Promise.withResolvers();
+    const reader = new HTMLRewriter()
+      .on('p', {
+        async element(element) {
+          enter();
+          await gate;
+          element.setAttribute('id', 'x');
+        },
+      })
+      .transform(new Response('<h1>head</h1><p>body</p>'))
+      .body.pipeThrough(new TextDecoderStream())
+      .getReader();
+    const first = reader.read();
+    let settled = false;
+    first.then(() => {
+      settled = true;
+    });
+    await entered;
+    await scheduler.wait(10);
+    strictEqual(settled, false);
+    open();
+    let result = (await first).value;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      result += value;
+    }
+    strictEqual(result, '<h1>head</h1><p id="x">body</p>');
+  },
+};
