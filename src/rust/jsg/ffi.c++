@@ -917,6 +917,21 @@ Local local_new_array_buffer(Isolate* isolate, const uint8_t* data, size_t lengt
   return to_ffi(v8::ArrayBuffer::New(isolate, std::move(backingStore)));
 }
 
+Local local_array_buffer_from_vec(Isolate* isolate, ::rust::Vec<uint8_t> data) {
+  size_t size = data.size();
+  // A BackingStore doesn't call its deleter when Data() is null, which it can be for an empty Vec.
+  if (size == 0) return to_ffi(v8::ArrayBuffer::New(isolate, 0));
+  uint8_t* begin = data.data();
+  if (!isolate->GetGroup().SandboxContains(begin)) {
+    return local_new_array_buffer(isolate, begin, size);
+  }
+  // The BackingStore owns the Vec and drops it, on whichever thread V8 frees the store.
+  auto owner = new ::rust::Vec<uint8_t>(kj::mv(data));
+  auto backingStore = v8::ArrayBuffer::NewBackingStore(begin, size,
+      [](void*, size_t, void* owner) { delete static_cast<::rust::Vec<uint8_t>*>(owner); }, owner);
+  return to_ffi(v8::ArrayBuffer::New(isolate, std::move(backingStore)));
+}
+
 // "empty" means zero-initialized with no source data to copy from, as opposed to
 // local_new_array_buffer which copies caller-supplied bytes into the buffer.
 Local local_new_array_buffer_empty(Isolate* isolate, size_t byte_length) {

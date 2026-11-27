@@ -11,6 +11,8 @@
 //! [`to_js_typed_array`](ToJsTypedArray::to_js_typed_array) makes the typed array of the element
 //! type, and [`to_js_array_buffer`](ToJsArrayBuffer::to_js_array_buffer) makes an `ArrayBuffer` of
 //! bytes, which is what C++ JSG makes of a `kj::Array<kj::byte>`.
+//! [`v8::ArrayBuffer::from_vec`] takes a `Vec<u8>` instead and keeps its memory, with no copy
+//! unless the V8 sandbox is on.
 //!
 //! A typed array that comes from JavaScript is a handle, such as `v8::Local<'s, v8::Uint8Array>`,
 //! whose `as_slice(lock)` reads its memory in place. For an owned copy, call `to_vec()` on the
@@ -80,7 +82,8 @@ impl_to_js_typed_array! {
 
 /// Converts a byte slice to a JavaScript `ArrayBuffer` holding its bytes.
 ///
-/// This is the shape C++ JSG gives a returned `kj::Array<kj::byte>`. For a `Uint8Array`, use
+/// This is the shape C++ JSG gives a returned `kj::Array<kj::byte>`. To return a `Vec<u8>` that
+/// is no longer needed, [`v8::ArrayBuffer::from_vec`] saves the copy when the V8 sandbox is off. For a `Uint8Array`, use
 /// [`to_js_typed_array`](ToJsTypedArray::to_js_typed_array). Only `[u8]` implements this, as
 /// only `kj::byte` does in C++ JSG: the bytes of wider numbers are in the platform's byte order,
 /// and a caller that wants them can take the `buffer` of their typed array.
