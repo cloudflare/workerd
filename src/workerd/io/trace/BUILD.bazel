@@ -13,6 +13,7 @@ wd_rust_crate(
     deps = [
         "//src/workerd/io:trace_capnp_rust",
         "//src/workerd/io:worker-interface_capnp_rust",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp_rust",
         "@crates_vendor//capnp",
     ],
 )
@@ -29,6 +30,7 @@ wd_rust_crate(
         ":trace",
         "//src/workerd/io:trace_capnp_rust",
         "//src/workerd/io:worker-interface_capnp_rust",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp_rust",
         "@crates_vendor//capnp",
     ],
 )
