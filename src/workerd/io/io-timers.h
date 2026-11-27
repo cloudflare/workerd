@@ -52,6 +52,8 @@ class TimeoutId {
 class TimeoutId::Generator {
  public:
   Generator() = default;
+  // Starts at `firstId` instead of 1. Tests use it to reach Number.MAX_SAFE_INTEGER.
+  explicit Generator(TimeoutId::ValueType firstId): nextId(firstId) {}
   KJ_DISALLOW_COPY_AND_MOVE(Generator);
 
   // Get the next TimeoutId for this generator. This function will never return a TimeoutId <= 0.
