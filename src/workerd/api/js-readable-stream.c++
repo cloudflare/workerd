@@ -212,7 +212,9 @@ kj::Maybe<NativeCollection> tryExtractNativeSourceForCollection(
 template <typename Func>
 auto consumeReadableStreamArrayBuffer(jsg::Lock& js, jsg::JsObject obj, uint64_t limit, Func func) {
   KJ_IF_SOME(collection, tryExtractNativeSourceForCollection(js, obj, limit)) {
-    return IoContext::current().awaitIo(js, collection.collect(),
+    // The source may be fed by JavaScript in this isolate, so collecting it holds no pending
+    // event; see awaitIoWithoutPendingEvent(). The legacy readAllBytes() waits the same way.
+    return IoContext::current().awaitIoWithoutPendingEvent(js, collection.collect(),
         [func = kj::mv(func), onEof = kj::mv(collection.onEof)](
             jsg::Lock& js, CollectedNativeBytes collected) mutable {
       NativeCollection::signalEof(js, onEof);
@@ -254,7 +256,8 @@ jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj,
   // Collects bytes rather than decoded text, matching the legacy readAllText(): see
   // JsReadableStream::text(). Bytes collected in C++ never become an ArrayBuffer.
   KJ_IF_SOME(collection, tryExtractNativeSourceForCollection(js, obj, limit)) {
-    return IoContext::current().awaitIo(js, collection.collect(),
+    // As in consumeReadableStreamArrayBuffer(), collecting holds no pending event.
+    return IoContext::current().awaitIoWithoutPendingEvent(js, collection.collect(),
         [onEof = kj::mv(collection.onEof)](jsg::Lock& js, CollectedNativeBytes collected) mutable {
       NativeCollection::signalEof(js, onEof);
       if (collected.parts.size() == 1) {
@@ -693,7 +696,10 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
 
     auto writeStep = state->writeCanceler.wrap(queuedWriteStep(
         state->sink->getPtr(), pieces.releaseAsArray(), done ? end : EndStream::NO));
-    return context.awaitIo(js, kj::mv(writeStep),
+    // The sink may be consumed by JavaScript in this isolate, such as HTMLRewriter's handlers, so
+    // the write holds no pending event; see awaitIoWithoutPendingEvent(). The legacy pump writes
+    // the same way.
+    return context.awaitIoWithoutPendingEvent(js, kj::mv(writeStep),
         context.addFunctor([state = kj::mv(state), end, done](jsg::Lock& js, IoContext&) mutable {
       return done || state->dropped ? js.resolvedPromise() : queuedPumpStep(js, kj::mv(state), end);
     }));
@@ -1696,8 +1702,10 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
   auto read = source.tryRead(buffer.begin(), 1, buffer.size());
   pullInFlight = true;
   inFlightReadStartLength = kj::mv(startLength);
+  // The source may be fed by JavaScript in this isolate, such as an HTMLRewriter's output, so the
+  // read holds no pending event; see awaitIoWithoutPendingEvent(). Legacy reads wait the same way.
   return ioContext
-      .awaitIo(js, kj::mv(read),
+      .awaitIoWithoutPendingEvent(js, kj::mv(read),
           [self = JSG_THIS, controller = controller.addRef(js), signal = kj::mv(signal),
               buffer = kj::mv(buffer)](jsg::Lock& js, size_t amount) mutable {
     // If delivery throws, the catch below retains the guard until teardown finishes.
@@ -1836,8 +1844,9 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   auto read = source.tryRead(buffer.begin(), minBytes, maxBytes);
   pullInFlight = true;
   inFlightReadStartLength = kj::mv(startLength);
+  // As in pullDefault, the read holds no pending event.
   return ioContext
-      .awaitIo(js, kj::mv(read),
+      .awaitIoWithoutPendingEvent(js, kj::mv(read),
           [self = JSG_THIS, controller = controller.addRef(js),
               byobRequest = byobRequest.addRef(js), view = view.addRef(js), signal = kj::mv(signal),
               buffer = kj::mv(buffer), minBytes,
