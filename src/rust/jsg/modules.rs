@@ -81,3 +81,18 @@ pub fn add_builtin<T, F>(
         );
     }
 }
+
+/// Registers `T`, which must describe a named structure such as a resource type, for the RTTI
+/// export to describe although no module exports it.
+///
+/// Use this for a type that the runtime passes to JavaScript, such as a handler's argument,
+/// when C++ RTTI refers to the type rather than describing it: a C++ type declares
+/// `JsgRttiRustStructure` (see `src/workerd/jsg/rtti.h`), and the export then needs the
+/// structure it names. Registries that instantiate modules ignore the type.
+pub fn add_type<T: TypeInfo>(registry: Pin<&mut ffi::ModuleRegistry>) {
+    fn describe<T: TypeInfo>(cx: &mut Context) {
+        cx.describe_structure::<T>();
+    }
+
+    ffi::register_add_type(registry, describe::<T>);
+}

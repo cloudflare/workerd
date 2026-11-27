@@ -244,6 +244,33 @@ EvalResult EvalContext::call_builtin_module(
   };
 }
 
+namespace {
+// Describes the types Rust registers, as the RTTI encoder does.
+struct DescribingModuleRegistry final: public ::workerd::rust::jsg::ModuleRegistry {
+  explicit DescribingModuleRegistry(::rust::Box<::workerd::rust::jsg::RttiContext> types)
+      : types(kj::mv(types)) {}
+  ~DescribingModuleRegistry() noexcept override = default;
+
+  void addBuiltinModule(::rust::Str,
+      ::workerd::rust::jsg::ModuleCallback,
+      ::workerd::rust::jsg::ModuleDescribeCallback,
+      ::workerd::rust::jsg::ModuleType) override {}
+
+  void addType(::workerd::rust::jsg::TypeDescribeCallback describe) override {
+    describe(*types);
+  }
+
+  ::rust::Box<::workerd::rust::jsg::RttiContext> types;
+};
+}  // namespace
+
+::rust::Vec<uint8_t> describe_registered_types(::rust::Slice<const uint8_t> flags,
+    ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerTypes) {
+  DescribingModuleRegistry registry(::workerd::rust::jsg::new_rtti_context(flags));
+  registerTypes(registry);
+  return registry.types->encode("test");
+}
+
 void TestHarness::run_in_context(
     size_t data, ::rust::Fn<void(size_t, Isolate*, EvalContext&)> callback) const {
   isolate->runInLockScope([&](TestIsolate::Lock& lock) {
