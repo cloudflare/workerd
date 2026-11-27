@@ -46,6 +46,32 @@ def _packages_tag_for_version(version):
             return info["packages"]
     return None
 
+def _python_minor_version_for_version(version):
+    # The major.minor Python version of a Pyodide release, which its stdlib bytecode must match.
+    for info in BUNDLE_VERSION_INFO.values():
+        if info["pyodide_version"] == version:
+            return ".".join(info["python_version"].split(".")[:2])
+    fail("No python_version in BUNDLE_VERSION_INFO for Pyodide %s" % version)
+
+def _compile_stdlib(python_stdlib_zip, version):
+    # Pyodide's stdlib zip holds only source, which every cold start compiles in Wasm for the
+    # modules it imports; this adds the bytecode alongside (see compile_stdlib.py).
+    python_version = _python_minor_version_for_version(version)
+    tool = Label(":compile_stdlib_" + python_version.replace(".", "_"))
+    native.genrule(
+        name = "python_stdlib.zip@rule@" + version,
+        srcs = [python_stdlib_zip],
+        outs = [_out_path("python_stdlib.zip", version)],
+        cmd = " ".join([
+            "$(execpath %s)" % tool,
+            "--input $<",
+            "--output $@",
+            "--python-version",
+            python_version,
+        ]),
+        tools = [tool],
+    )
+
 def python_bundles(overrides = {}):
     srcs = [_python_bundle_helper(info, overrides) for info in PYODIDE_VERSIONS]
     native.filegroup(
@@ -74,7 +100,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
         python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
 
     _copy_to_generated(pyodide_asm_wasm, version, "pyodide.asm.wasm")
-    _copy_to_generated(python_stdlib_zip, version, "python_stdlib.zip")
+    _compile_stdlib(python_stdlib_zip, version)
 
     # Apply workerd's patches to the Emscripten-generated module (see patch_pyodide_asm.ts).
     # The upstream file is first copied into this package so that both the tool's input and
@@ -188,7 +214,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
         deps = [
             "pyodide.asm.js@rule@" + version,
             "pyodide.asm.wasm@copy@" + version,
-            "python_stdlib.zip@copy@" + version,
+            "python_stdlib.zip@rule@" + version,
         ] + extra_deps,
         out_dir = _out_path("", version),
     )

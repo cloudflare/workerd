@@ -13,7 +13,7 @@ Python Workers runtime layer. Replaces Pyodide's loader with a minimal substitut
 | `internal/snapshot.ts`                        | Memory snapshot collect/restore; baseline vs dedicated snapshot types                                 |
 | `internal/setupPackages.ts`, `loadPackage.ts` | Package mounting, sys.path, vendor dir setup                                                          |
 | `internal/tarfs.ts`                           | Read-only Emscripten filesystem backing site-packages / dynlib mounts                                 |
-| `bundle/`                                     | Builds the per-version Pyodide bundle: `python_bundles.bzl`, `patch_pyodide_asm.ts`, `pack_python_packages.py` (stdlib wheels → `PythonPackages` message per `python_packages.capnp`), `python-lock/` |
+| `bundle/`                                     | Builds the per-version Pyodide bundle: `python_bundles.bzl`, `patch_pyodide_asm.ts`, `pack_python_packages.py` (stdlib wheels → `PythonPackages` message per `python_packages.capnp`), `compile_stdlib.py` (adds `.pyc` bytecode to the stdlib zip, on the release's Python version), `python-lock/` |
 | `internal/topLevelEntropy/`                   | TS+Python: patches `getRandomValues` with deterministic entropy during import, reseeds before request |
 | `internal/emscriptenSetup.ts`                 | Instantiates the Emscripten module from the bundle's `pyodideRuntime-internal:pyodide.asm`            |
 | `internal/builtin_wrappers.ts`                | Functions the patched Emscripten glue imports; released bundles import these by name                  |

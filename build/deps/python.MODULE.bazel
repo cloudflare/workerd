@@ -1,5 +1,13 @@
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
-python.toolchain(python_version = "3.13")
+python.toolchain(
+    is_default = True,
+    python_version = "3.13",
+)
+
+# The Python versions of the Pyodide releases, whose stdlib src/pyodide/bundle/compile_stdlib.py
+# compiles with the matching interpreter. Only downloaded when a bundle is built.
+python.toolchain(python_version = "3.12")
+python.toolchain(python_version = "3.14")
 use_repo(python, "python_3_13")
 
 # Python actions can run on a Linux remote executor even when the host isn't Linux (see
