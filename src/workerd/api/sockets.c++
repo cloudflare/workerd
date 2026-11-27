@@ -1227,8 +1227,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
-                self->writable.detach(js);
-                self->readable.detach(js, IgnoreDisturbed::YES);
+                self->detachStreams(js);
 
                 // We should set this before closedResolver.resolve() in order to give the user
                 // the option to check if the closed promise is resolved due to upgrade or not.
@@ -1932,6 +1931,18 @@ kj::Array<SocketsModule::InboundListener> SocketsModule::getInboundListeners(jsg
   };
 }
 
+void Socket::detachStreams(jsg::Lock& js) {
+  writable.detach(js);
+
+  // Detaching leaves this socket's readable neutralized, which is all we want: nothing reads the
+  // detached copy. Cancel it rather than just dropping it. Under the TypeScript streams
+  // implementation the copy is a JavaScript object, and until it is garbage-collected its native
+  // source would hold a reference to the connection, so the connection would stay open after its
+  // new owner closes it. Canceling the source only abandons this socket's own reads; it does not
+  // touch the connection.
+  readable.detach(js, IgnoreDisturbed::YES).forceCancel(js, kj::none).markAsHandled(js);
+}
+
 kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
   // Set this so that if `close` is called after this, that no closure steps are taken and instead
   // the `close` is a no-op.
@@ -1939,8 +1950,7 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
 
   // We do not care if the socket was disturbed, we require the user to ensure the socket is not
   // being used.
-  writable.detach(js);
-  readable.detach(js, IgnoreDisturbed::YES);
+  detachStreams(js);
 
   // Move the stream out of the socket, to ensure the stream is properly destroyed when the
   // caller is done with it.

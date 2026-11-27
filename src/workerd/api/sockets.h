@@ -481,6 +481,10 @@ class Socket: public jsg::Object {
   // Helper method for handleProxyStatus implementations.
   void handleProxyError(jsg::Lock& js, kj::Exception e);
 
+  // Neutralizes the socket's streams when its connection is handed to another owner (startTls(),
+  // takeConnectionStream()), releasing their hold on the connection.
+  void detachStreams(jsg::Lock& js);
+
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_SOME(err, maybeErr) {
       closedResolver.reject(js, err.clone());
