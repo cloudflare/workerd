@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "timers",
+    worker = (
+      modules = [(name = "worker", esModule = embed "timers.js")],
+      durableObjectNamespaces = [
+        (className = "TimerBench", uniqueKey = "5c2e7a1f9d3b48e6a0c4f8b2d6e1a937"),
+      ],
+      durableObjectStorage = (inMemory = void),
+      bindings = [(name = "ns", durableObjectNamespace = "TimerBench")],
+    ),
+  )],
+);
