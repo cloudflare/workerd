@@ -85,6 +85,10 @@ class JsExceptionThrown: public std::exception {
 };
 
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
+// jsg::Lock::isEvalAllowed() and setAllowEval(), for the Rust JSG shims, which have the isolate
+// but not its jsg::Lock.
+bool isEvalAllowed(v8::Isolate* isolate);
+void setAllowEval(v8::Isolate* isolate, bool allow);
 bool getShouldSetToStringTag(v8::Isolate* isolate);
 bool getShouldSetImmutablePrototype(v8::Isolate* isolate);
 bool getSpecCompliantPropertyAttributes(v8::Isolate* isolate);
