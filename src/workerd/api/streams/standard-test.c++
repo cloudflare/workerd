@@ -6,6 +6,9 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
+
+#include <capnp/message.h>
 
 // These tests exercise the legacy C++ streams implementation directly, so they allocate the
 // legacy ReadableStream / WritableStream rather than going through the JsReadableStream /
@@ -2977,6 +2980,65 @@ KJ_TEST("ReadableStream pumpTo dropped during IoContext teardown does not cancel
   // Destroying the request destroys the IoContext, and with it the task that owns the pump.
   fixture->drainAndDestroy(kj::mv(request));
   KJ_ASSERT(cancelCount == 0);
+}
+
+// ======================================================================================
+// External memory accounting
+
+// The isolate's external memory, including adjustments not yet applied, less what HeapTracer
+// reported for Wrappables, which it reports in batches: what allocAccounted() reported.
+int64_t accountedExternalMemory(jsg::Lock& js) {
+  js.getExternalMemoryTarget()->applyDeferredMemoryUpdate();
+  return js.v8Isolate->GetExternalMemory() -
+      jsg::HeapTracer::getTracer(js.v8Isolate).getReportedWrappableBytes();
+}
+
+// What the ReadableStream and WritableStream constructors report through allocAccounted() and
+// external memory adjustments, with the stream constructors enabled and exactly the given
+// autogates.
+struct ConstructorBytes {
+  int64_t readable;
+  int64_t writable;
+};
+ConstructorBytes measureConstructors(kj::Array<util::AutogateKey> autogateKeys) {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  TestFixture fixture({
+    .featureFlags = flags.asReader(),
+    .autogateKeys = kj::mv(autogateKeys),
+    .ignoreAllAutogatesEnv = true,
+  });
+  ConstructorBytes result{};
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto before = accountedExternalMemory(js);
+    auto readable = ReadableStream::constructor(js, kj::none, kj::none);
+    result.readable = accountedExternalMemory(js) - before;
+
+    before = accountedExternalMemory(js);
+    auto writable = WritableStream::constructor(js, kj::none, kj::none);
+    result.writable = accountedExternalMemory(js) - before;
+  });
+  return result;
+}
+
+KJ_TEST("stream constructors leave Wrappables' shallow sizes to WRAPPABLE_EXTERNAL_MEMORY") {
+  auto off = measureConstructors(nullptr);
+  auto on = measureConstructors(kj::arr(util::AutogateKey::WRAPPABLE_EXTERNAL_MEMORY));
+
+  // With the autogate, HeapTracer counts the Wrappables, so the constructors leave them out.
+  KJ_EXPECT(off.readable - on.readable ==
+          int64_t(sizeof(ReadableStream) + sizeof(ReadableStreamDefaultController)),
+      off.readable, on.readable);
+  KJ_EXPECT(off.writable - on.writable ==
+          int64_t(sizeof(WritableStream) + sizeof(WritableStreamDefaultController) +
+              sizeof(AbortSignal)),
+      off.writable, on.writable);
+
+  // The parts that aren't Wrappables, such as the streams' controllers, are still reported.
+  KJ_EXPECT(on.readable > 0, on.readable);
+  KJ_EXPECT(on.writable > 0, on.writable);
 }
 
 }  // namespace

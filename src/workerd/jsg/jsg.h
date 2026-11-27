@@ -2960,6 +2960,8 @@ class Lock {
   }
 
   // Like alloc() but attaches an external memory adjustment of size indicated by `accountedSize`.
+  // A Wrappable's own shallow size belongs in `accountedSize` only through
+  // HeapTracer::shallowSizeToReport(), which leaves it out when HeapTracer reports it already.
   template <typename T, typename... Params>
   Ref<T> allocAccounted(size_t accountedSize, Params&&... params) {
     maybeAllocGcStress();

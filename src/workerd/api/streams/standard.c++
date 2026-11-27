@@ -3322,11 +3322,13 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
 
     // We account for the memory usage of the ByteReadable and its controller together because
     // their lifetimes are identical (in practice) and memory accounting itself has a memory
-    // overhead. The same applies to ValueReadable below.
+    // overhead. The same applies to ValueReadable below. The controller is a Wrappable, which
+    // HeapTracer may already count.
     state.transitionTo<jsg::TracedOwn<ByteReadable>>(
         kj::heap<ByteReadable>(controller.addRef(), addPtrToThis(), autoAllocateChunkSize)
             .attach(js.getExternalMemoryAdjustment(
-                sizeof(ByteReadable) + sizeof(ReadableByteStreamController))));
+                sizeof(ByteReadable) +
+                jsg::HeapTracer::shallowSizeToReport(sizeof(ReadableByteStreamController)))));
     controller->start(js);
   } else {
     JSG_REQUIRE(
@@ -3336,7 +3338,8 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     state.transitionTo<jsg::TracedOwn<ValueReadable>>(
         kj::heap<ValueReadable>(controller.addRef(), addPtrToThis())
             .attach(js.getExternalMemoryAdjustment(
-                sizeof(ValueReadable) + sizeof(ReadableStreamDefaultController))));
+                sizeof(ValueReadable) +
+                jsg::HeapTracer::shallowSizeToReport(sizeof(ReadableStreamDefaultController)))));
     controller->start(js);
   }
 }
@@ -4367,10 +4370,12 @@ void WritableStreamJsController::setup(jsg::Lock& js,
   }
 
   // We account for the memory usage of the WritableStreamDefaultController and AbortSignal together
-  // because their lifetimes are identical and memory accounting itself has a memory overhead.
+  // because their lifetimes are identical and memory accounting itself has a memory overhead. Both
+  // are Wrappables, which HeapTracer may already count.
   auto controller = js.allocAccounted<WritableStreamDefaultController>(
-      sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, owner,
-      js.alloc<AbortSignal>());
+      jsg::HeapTracer::shallowSizeToReport(
+          sizeof(WritableStreamDefaultController) + sizeof(AbortSignal)),
+      js, owner, js.alloc<AbortSignal>());
   auto& controllerRef = *controller;
   state.transitionTo<Controller>(kj::mv(controller));
   controllerRef.setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));

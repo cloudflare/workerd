@@ -670,6 +670,13 @@ class HeapTracer: public v8::EmbedderRootsHandler {
 
   static constexpr int64_t kExternalMemoryFlushBytes = 64 * 1024;
 
+  // Returns `shallowSize`, the shallow size of Wrappables whose creator reports it as external
+  // memory itself, such as with Lock::allocAccounted(), or 0 if the WRAPPABLE_EXTERNAL_MEMORY
+  // autogate has this class report every Wrappable's shallow size, so that it isn't counted twice.
+  // The creator decides when it reports: toggling the autogate while those Wrappables live can
+  // count them twice, or not at all, until they are destroyed.
+  static size_t shallowSizeToReport(size_t shallowSize);
+
   // The shallow size of every Wrappable currently bound to this isolate, whether or not it has
   // been reported to V8.
   int64_t getChargedWrappableBytes() const {

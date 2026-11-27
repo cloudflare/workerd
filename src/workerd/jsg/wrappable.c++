@@ -127,6 +127,10 @@ void HeapTracer::releaseWrappable(Wrappable& wrappable) {
   wrappable.accountedBytes = 0;
 }
 
+size_t HeapTracer::shallowSizeToReport(size_t shallowSize) {
+  return util::Autogate::isEnabled(util::AutogateKey::WRAPPABLE_EXTERNAL_MEMORY) ? 0 : shallowSize;
+}
+
 void HeapTracer::flushExternalMemory() {
   if (isolate == nullptr ||
       !util::Autogate::isEnabled(util::AutogateKey::WRAPPABLE_EXTERNAL_MEMORY)) {

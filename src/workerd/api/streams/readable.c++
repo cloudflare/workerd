@@ -634,14 +634,17 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(jsg::Lock& js,
       "streams_enable_constructors compatibility flag. "
       "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
   // We account for the memory usage of the ReadableStream and its controller together because their
-  // lifetimes are identical and memory accounting itself has a memory overhead.
+  // lifetimes are identical and memory accounting itself has a memory overhead. The controller isn't
+  // a Wrappable, so HeapTracer never counts it; the stream is, so it may already count that.
   auto controller = newReadableStreamJsController();
   // This is the legacy ReadableStream's own JS constructor, which necessarily produces the legacy
   // type; under typescript_implemented_streams the global ReadableStream is the TypeScript class
   // and this constructor is not reachable.
   // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
   auto stream = js.allocAccounted<ReadableStream>(
-      sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
+      jsg::HeapTracer::shallowSizeToReport(sizeof(ReadableStream)) +
+          controller->jsgGetMemorySelfSize(),
+      kj::mv(controller));
   stream->getController().setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }
