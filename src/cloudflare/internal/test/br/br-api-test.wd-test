@@ -24,7 +24,7 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "br-mock",
       worker = (
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["enable_ctx_exports", "web_socket_auto_reply_to_close"],
         modules = [
           (name = "worker", esModule = embed "br-mock.js")
         ],
