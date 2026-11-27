@@ -213,11 +213,7 @@ Cipheriv.prototype.update = function (
   let ret: ArrayBuffer;
   if (typeof data === 'string') {
     if (inputEncoding === undefined) {
-      throw new ERR_INVALID_ARG_VALUE(
-        'inputEncoding',
-        inputEncoding,
-        'If inputEncoding is not provided then the data must be a Buffer'
-      );
+      inputEncoding = 'utf8';
     }
     ret = this[kHandle].update(Buffer.from(data, inputEncoding));
   } else if (isAnyArrayBuffer(data)) {
@@ -360,11 +356,7 @@ Decipheriv.prototype.update = function (
   let ret: ArrayBuffer;
   if (typeof data === 'string') {
     if (inputEncoding === undefined) {
-      throw new ERR_INVALID_ARG_VALUE(
-        'inputEncoding',
-        inputEncoding,
-        'If inputEncoding is not provided then the data must be a Buffer'
-      );
+      inputEncoding = 'utf8';
     }
     ret = this[kHandle].update(Buffer.from(data, inputEncoding));
   } else if (isAnyArrayBuffer(data)) {
