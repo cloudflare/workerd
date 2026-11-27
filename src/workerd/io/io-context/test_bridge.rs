@@ -227,6 +227,12 @@ mod ffi {
         fn register_failing_module(registry: Pin<&mut ModuleRegistry>);
         fn register_terminating_module(registry: Pin<&mut ModuleRegistry>);
         fn take_probe_observation() -> ProbeObservation;
+        unsafe fn resolved_export_type(
+            isolate: usize,
+            specifier: &str,
+            name: &str,
+        ) -> Result<String>;
+        unsafe fn resolve_leaves_termination(isolate: usize, specifier: &str) -> Result<bool>;
         unsafe fn await_released(isolate: usize, ending: AwaitEnding) -> Result<()>;
         fn run_in_wait_until(request: Pin<&mut IncomingRequest>, ending: RunEnding) -> Result<()>;
         fn run_observation() -> AwaitObservation;
@@ -471,6 +477,42 @@ fn register_terminating_module(registry: Pin<&mut ffi::ModuleRegistry>) {
 /// What the probe module's closure saw when it last ran, which is then forgotten.
 fn take_probe_observation() -> ffi::ProbeObservation {
     PROBE_OBSERVATION.with(|cell| cell.replace(ffi::ProbeObservation::NotRun))
+}
+
+/// Resolves `specifier` with `jsg_cpp::resolve_internal_module()`: `typeof` the namespace's
+/// export `name`, `none` if there is no such module, or `threw: ` and what resolving threw.
+unsafe fn resolved_export_type(isolate: usize, specifier: &str, name: &str) -> Result<String> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let outcome = lock
+        .try_catch(|lock| {
+            let Some(module) = jsg_cpp::resolve_internal_module(lock, specifier)? else {
+                return Ok("none".to_owned());
+            };
+            Ok(module.get(lock, name)?.type_of(lock))
+        })
+        .map_err(|err| to_io(&err))?;
+    match outcome {
+        Ok(description) => Ok(description),
+        Err(exception) => {
+            let detail = exception
+                .to_detail_string(lock)
+                .map_err(|err| to_io(&err))?;
+            Ok(format!("threw: {detail}"))
+        }
+    }
+}
+
+/// Resolves `specifier` with `jsg_cpp::resolve_internal_module()`: whether it failed with a
+/// pending error and execution terminating, as for a module whose evaluation terminates. The
+/// termination is left for the caller to cancel.
+unsafe fn resolve_leaves_termination(isolate: usize, specifier: &str) -> Result<bool> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    match jsg_cpp::resolve_internal_module(lock, specifier) {
+        Ok(_) => Err(std::io::Error::other("the module resolved")),
+        Err(err) => Ok(err.is_pending() && lock.is_execution_terminating()),
+    }
 }
 
 /// What the callback of the last `await_released()` did, as an `AwaitObservation`.

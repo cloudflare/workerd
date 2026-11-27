@@ -88,6 +88,24 @@ class CheckerTest(unittest.TestCase):
         self.assertIsNotNone(output)
         self.assertIn("use(s) of jsg::V8Ref, 0 allowed", output)
 
+    def test_interop_tier_counts_js_object_apart_from_other_handles(self):
+        allowlist = f"{INTEROP_FILE} interop\n{INTEROP_FILE} jsg::JsObject 1\n"
+        self.assertIsNone(self.check(allowlist, {INTEROP_FILE: "jsg::JsObject o;"}))
+        output = self.check(
+            allowlist, {INTEROP_FILE: "jsg::JsObject o; jsg::JsObject p;"}
+        )
+        self.assertIsNotNone(output)
+        self.assertIn("2 use(s) of jsg::JsObject, 1 allowed", output)
+        # The allowance admits no other handle.
+        output = self.check(
+            allowlist, {INTEROP_FILE: "jsg::JsObject o; jsg::JsValue v;"}
+        )
+        self.assertIsNotNone(output)
+        self.assertIn("use(s) of jsg::Data, 0 allowed", output)
+        output = self.check_interop("jsg::JsObject o;")
+        self.assertIsNotNone(output)
+        self.assertIn("use(s) of jsg::JsObject, 0 allowed", output)
+
 
 if __name__ == "__main__":
     unittest.main()

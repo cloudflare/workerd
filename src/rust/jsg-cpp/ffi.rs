@@ -22,7 +22,10 @@ mod bridge {
     #[namespace = "workerd::rust::jsg"]
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
+        include!("workerd/rust/jsg/v8.rs.h");
         type GcVisitor = jsg::v8::ffi::GcVisitor;
+        type Isolate = jsg::v8::ffi::Isolate;
+        type MaybeLocal = jsg::v8::ffi::MaybeLocal;
         type MemoryTracker = jsg::v8::ffi::MemoryTracker;
     }
 
@@ -58,6 +61,20 @@ mod bridge {
         /// Makes the reference strong again and forgets its parent, as moving a C++ `jsg::Ref`
         /// does; see `jsg::GcVisitor::is_detaching`. Requires the isolate lock.
         fn cpp_ref_detach(cpp_ref: &CppRef);
+
+        /// Runs `jsg::Lock::resolveInternalModule(specifier)` in `callCpp()`, storing the
+        /// namespace in `module`, which stays empty if the new registry has no such module (the
+        /// legacy registry throws instead). Returns whether the C++ completed.
+        ///
+        /// # Safety
+        ///
+        /// The isolate is locked by this thread with a context entered and a `HandleScope` open,
+        /// in which `module` receives a handle.
+        unsafe fn resolve_internal_module(
+            isolate: *mut Isolate,
+            specifier: &str,
+            module: &mut MaybeLocal,
+        ) -> bool;
     }
 
     impl KjOwn<CppRef> {}
@@ -162,6 +179,40 @@ pub unsafe fn call_cpp_for_ref<T: CppResource>(
     // SAFETY: the shim made the reference for `T`'s class (this function's contract), under
     // `lock`, so to an object of `lock`'s isolate.
     Ok(Option::from(slot).map(|inner| unsafe { Ref::from_cpp(lock, inner) }))
+}
+
+/// The namespace of the built-in module `specifier`, as C++ `jsg::Lock::resolveInternalModule()`
+/// resolves it.
+///
+/// It finds only internal modules, which JavaScript cannot import, such as
+/// `node-internal:internal_inspect`, not public built-in modules such as `node:buffer`. The
+/// module registry the isolate uses decides what a missing module gives:
+///
+/// - The new registry has `None`.
+/// - The legacy registry fails, with an internal error that it also logs.
+///
+/// So don't probe: pass only a specifier that exists, and treat `None` as a bug, as C++ callers
+/// do.
+///
+/// Resolving a module for the first time evaluates it, which can run JavaScript: the module's
+/// own and, under the legacy registry, the microtasks already queued.
+///
+/// # Errors
+///
+/// A pending error, as for [`call_cpp`]: if resolving or evaluating the module throws, the
+/// legacy registry has no such module, or execution is terminating.
+pub fn resolve_internal_module<'s>(
+    lock: &mut jsg::Lock<'s>,
+    specifier: &str,
+) -> Result<Option<v8::Local<'s, v8::Object>>, jsg::Error> {
+    let mut module = v8::ffi::MaybeLocal::default();
+    call_cpp(lock, |isolate| {
+        // SAFETY: `call_cpp` calls the shim with the lock's isolate, which `lock` proves is locked
+        // with a context entered and the HandleScope `'s` open.
+        unsafe { bridge::resolve_internal_module(isolate, specifier, &mut module) }
+    })?;
+    // SAFETY: a non-empty `module` is a handle that the shim created in the scope `'s`.
+    Ok(unsafe { v8::Local::from_ffi_maybe(module) })
 }
 
 /// A strong reference from Rust to a C++ JSG resource, like a `jsg::Ref<T>` field of a C++

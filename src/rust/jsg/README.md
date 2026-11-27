@@ -277,17 +277,21 @@ in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExcept
 depending on how DOMException is implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through
 which Rust describes a value as `kj::str()` of a handle does. These hooks take and return only V8 and KJ types.
 
-The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
-which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
-until C++ JSG is gone. Its shims (`jsg-cpp.h` and `ffi.c++`) form the interop tier of the
-allowlist, and may use `jsg::Lock`, `jsg::Ref`/`jsg::Optional`/`jsg::Object`, `jsg::V8Ref`,
-`JsExceptionThrown` and `jsg::throwInternalError`: what holding, wrapping and unwrapping a C++
-resource through the isolate's `TypeHandler`s and turning a C++ exception into a pending
-JavaScript one take. Even there, `JSG_TRY`/`tryCatch`, `createTunneledException`,
-`makeInternalError`, `jsg::check`, `liftKj`, `JSG_REQUIRE`, the other `jsg::throw*` functions
+The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG, which exists
+because C++ APIs and Rust APIs have to take, return and hold each other's resources until C++ JSG
+is gone, and because the module registries resolve modules only for a `jsg::Lock`. Its shims
+(`jsg-cpp.h` and `ffi.c++`) form the interop tier of the allowlist, and may use `jsg::Lock`,
+`jsg::Ref`/`jsg::Optional`/`jsg::Object`, `jsg::V8Ref`, `JsExceptionThrown` and
+`jsg::throwInternalError`: what holding, wrapping and unwrapping a C++ resource through the
+isolate's `TypeHandler`s, resolving a built-in module with `jsg::Lock::resolveInternalModule()`
+(`jsg_cpp::resolve_internal_module`) and turning a C++ exception into a pending JavaScript one
+take. Even there, `JSG_TRY`/`tryCatch`, `createTunneledException`, `makeInternalError`,
+`jsg::check`, `liftKj`, `JSG_REQUIRE`, the other `jsg::throw*` functions
 (`throwTunneledException` included), JavaScript value handles (`jsg::Data`, `jsg::Value`,
-`JsValue`, `JsRef`, ...) and `jsg::Promise`/`jsg::Function`/`jsg::Sequence` are not allowed. The
-containment is:
+`JsValue`, `JsRef`, `JsObject`, ...) and `jsg::Promise`/`jsg::Function`/`jsg::Sequence` are not
+allowed, except for one `jsg::JsObject` in `ffi.c++` that the allowlist counts: the module
+namespace that `resolveInternalModule()` returns, which the shim turns into a V8 handle before
+returning it. The containment is:
 
 - Only files with an `interop` line in the allowlist are in the tier, and the test rejects an
   `interop` line for a file outside `src/rust/jsg-cpp`.
