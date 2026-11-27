@@ -305,6 +305,11 @@ jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
     JSG_FAIL_REQUIRE(
         Error, "Expected exactly one result from SQL query, but got multiple results.");
   }
+  if (bufferedRows != kj::none) {
+    bufferedRows = kj::none;
+    JSG_FAIL_REQUIRE(
+        Error, "Expected exactly one result from SQL query, but got multiple results.");
+  }
 
   return result;
 }
@@ -313,6 +318,7 @@ void SqlStorage::Cursor::close() {
   KJ_IF_SOME(s, state) {
     endQuery(*s);
   }
+  bufferedRows = kj::none;
   KJ_DASSERT(state == kj::none);
 }
 
@@ -358,6 +364,20 @@ kj::Maybe<jsg::JsArray> SqlStorage::Cursor::rawIteratorNext(jsg::Lock& js, Itera
 }
 
 kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(jsg::Lock& js) {
+  KJ_IF_SOME(rows, bufferedRows) {
+    auto array = rows.getHandle(js);
+    auto row = KJ_ASSERT_NONNULL(array.get(js, bufferedRowIndex++).tryCast<jsg::JsArray>());
+    if (bufferedRowIndex >= array.size()) {
+      bufferedRows = kj::none;
+    }
+    v8::LocalVector<v8::Value> results(js.v8Isolate);
+    results.reserve(row.size());
+    for (auto i: kj::zeroTo(row.size())) {
+      results.push_back(row.get(js, i));
+    }
+    return kj::mv(results);
+  }
+
   auto& stateRef = *KJ_UNWRAP_OR(state, {
     if (canceled) {
       JSG_FAIL_REQUIRE(Error,
@@ -422,6 +442,29 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(jsg::Lock
   }
 
   return kj::mv(results);
+}
+
+void SqlStorage::Cursor::bufferAllRows(jsg::Lock& js) {
+  auto& limitEnforcer = Worker::Isolate::from(js).getLimitEnforcer();
+  js.withinHandleScope([&]() {
+    v8::LocalVector<v8::Value> rows(js.v8Isolate);
+    // iteratorImpl() ends the query, resetting the statement, after the last row.
+    while (state != kj::none) {
+      KJ_IF_SOME(values, iteratorImpl(js)) {
+        rows.push_back(v8::Array::New(js.v8Isolate, values.data(), values.size()));
+        // Same guard as toArray(): there is no yield point here to enforce the memory limit.
+        if (limitEnforcer.hasExcessivelyExceededHeapLimit()) {
+          JSG_FAIL_REQUIRE(Error,
+              "SQL query RETURNING result set is too large to fit in memory. Return fewer rows or "
+              "columns.");
+        }
+      }
+    }
+    if (!rows.empty()) {
+      bufferedRows = jsg::JsRef<jsg::JsArray>(
+          js, jsg::JsArray(v8::Array::New(js.v8Isolate, rows.data(), rows.size())));
+    }
+  });
 }
 
 void SqlStorage::Cursor::endQuery(State& stateRef) {

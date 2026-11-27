@@ -1666,6 +1666,49 @@ export class DurableObjectExample extends DurableObject {
     stashedCursor = undefined;
     this.state.storage.sql.exec('DROP TABLE close_stashed');
   }
+
+  // A write with RETURNING stays active in SQLite until its rows are read, and
+  // SQLite won't commit while a write is active. An unread cursor must not fail
+  // the implicit transaction's commit.
+  async testUnreadReturningCursor() {
+    const sql = this.state.storage.sql;
+    sql.exec(
+      'CREATE TABLE returning_test (id INTEGER PRIMARY KEY, value TEXT)'
+    );
+
+    sql.exec(
+      "INSERT INTO returning_test VALUES (1, 'a'), (2, 'b') RETURNING *"
+    );
+    await this.state.storage.sync();
+    assert.equal(
+      sql.exec('SELECT COUNT(*) AS n FROM returning_test').one().n,
+      2
+    );
+
+    // The rows can still be read after the commit.
+    const cursor = sql.exec(
+      "UPDATE returning_test SET value = 'c' WHERE id = 1 RETURNING id, value"
+    );
+    await this.state.storage.sync();
+    assert.deepStrictEqual(cursor.columnNames, ['id', 'value']);
+    assert.deepStrictEqual(cursor.raw().toArray(), [[1, 'c']]);
+    assert.equal(cursor.next().done, true);
+
+    assert.deepStrictEqual(
+      sql.exec('DELETE FROM returning_test WHERE id = 2 RETURNING id').one(),
+      { id: 2 }
+    );
+    assert.throws(
+      () =>
+        sql
+          .exec(
+            "INSERT INTO returning_test VALUES (3, 'd'), (4, 'e') RETURNING id"
+          )
+          .one(),
+      /got multiple results/
+    );
+    await this.state.storage.sync();
+  }
 }
 
 export default {
@@ -1986,6 +2029,13 @@ export let testCursorClose = {
   async test(ctrl, env, ctx) {
     let stub = env.ns.get(env.ns.idFromName('cursor-close-test'));
     await stub.testCursorClose();
+  },
+};
+
+export let testUnreadReturningCursor = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('unread-returning-cursor-test'));
+    await stub.testUnreadReturningCursor();
   },
 };
 

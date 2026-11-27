@@ -192,7 +192,11 @@ class SqlStorage::Cursor final: public jsg::Object {
     if (stateObj->query.isDone()) {
       endQuery(*stateObj);
     } else {
+      bool isWrite = !stateObj->query.isReadOnly();
       state = IoContext::current().addObject(kj::mv(stateObj));
+      if (isWrite) {
+        bufferAllRows(js);
+      }
     }
   }
   ~Cursor() noexcept(false);
@@ -256,6 +260,9 @@ class SqlStorage::Cursor final: public jsg::Object {
       tracker.trackFieldWithSize("IoOwn<State>", sizeof(IoOwn<State>));
     }
     tracker.trackField("columnNames", columnNames);
+    KJ_IF_SOME(rows, bufferedRows) {
+      tracker.trackField("bufferedRows", rows);
+    }
   }
 
   bool getReusedCachedQueryForTest() {
@@ -310,6 +317,16 @@ class SqlStorage::Cursor final: public jsg::Object {
 
   jsg::JsRef<jsg::JsArray> columnNames;
 
+  // Rows of a write statement (e.g. `INSERT ... RETURNING`), read eagerly by bufferAllRows(). Each
+  // element is an array of column values. Non-null only while rows remain.
+  kj::Maybe<jsg::JsRef<jsg::JsArray>> bufferedRows;
+  uint32_t bufferedRowIndex = 0;
+
+  // SQLite refuses to commit a transaction while a write statement is still active, and a write
+  // with RETURNING stays active until all its rows are read. The application may never read them,
+  // so read them all now, ending the query, and serve them from `bufferedRows`.
+  void bufferAllRows(jsg::Lock& js);
+
   // Invoke when `query.isDone()`, or when we want to prematurely cancel the query. This records
   // row counters and then sets `state` to `none` to drop the query and return the prepared
   // statement to the statement cache.
@@ -330,6 +347,9 @@ class SqlStorage::Cursor final: public jsg::Object {
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(columnNames);
+    KJ_IF_SOME(rows, bufferedRows) {
+      visitor.visit(rows);
+    }
   }
 };
 

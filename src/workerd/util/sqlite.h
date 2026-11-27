@@ -649,6 +649,9 @@ class SqliteDatabase::Query final: private ResetListener {
   // How many columns does each row of the result have?
   uint columnCount();
 
+  // True if the statement makes no direct changes to the database (sqlite3_stmt_readonly()).
+  bool isReadOnly();
+
   // Get the value at the given column, as whatever type was actually returned.
   //
   // Returned pointers (strings and blobs) remain valid only until either (a) nextRow() is called,
