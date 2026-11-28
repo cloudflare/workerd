@@ -93,6 +93,16 @@ struct SpanOpenData {
 
   spanId @2 :UInt64;
   parentSpanId @3 :UInt64;
+
+  traceIdLow @4 :UInt64;
+  traceIdHigh @5 :UInt64;
+  # The trace the span belongs to. All-zero means the invocation's trace.
+
+  traceFlags :union {
+    unset @6 :Void;
+    set @7 :UInt8;
+  }
+  # W3C trace flags of the span's trace.
 }
 
 struct SpanEndData {

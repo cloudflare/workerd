@@ -1130,5 +1130,24 @@ KJ_TEST("SpanContext::toTraceparent is none for zero ids") {
   KJ_EXPECT(zeroSpan.toTraceparent() == kj::none);
 }
 
+KJ_TEST("SpanOpenData round-trips the span's trace") {
+  capnp::MallocMessageBuilder builder;
+  auto root = builder.initRoot<rpc::SpanOpenData>();
+  SpanOpenData(TraceId(0x1111, 0x2222), TraceFlags(1), SpanId(2), SpanId(1),
+      kj::ConstString("span"_kjc), kj::UNIX_EPOCH)
+      .copyTo(root);
+  SpanOpenData copy(root.asReader());
+  KJ_EXPECT(copy.traceId == TraceId(0x1111, 0x2222));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(copy.traceFlags) == TraceFlags(1));
+  KJ_EXPECT(copy.spanId == SpanId(2));
+  KJ_EXPECT(copy.parentSpanId == SpanId(1));
+
+  // A message from a sender that doesn't set the trace means the invocation's trace.
+  capnp::MallocMessageBuilder empty;
+  SpanOpenData old(empty.initRoot<rpc::SpanOpenData>().asReader());
+  KJ_EXPECT(old.traceId == TraceId(nullptr));
+  KJ_EXPECT(old.traceFlags == kj::none);
+}
+
 }  // namespace
 }  // namespace workerd::tracing
