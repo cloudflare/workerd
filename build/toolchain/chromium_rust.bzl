@@ -12,6 +12,8 @@ replaces it with rust-lang.org's nightly Cargo of the day after the package's ru
 only the C library.
 """
 
+load("//build/rust:chromium_version.bzl", "CHROMIUM_RUST_VERSION")
+
 # Components that no build uses, which make up most of the package's unpacked size: rustc-dev
 # holds the compiler's own crates, for tools built against rustc's internals, and
 # rust-analyzer-preview an editor's language server.
@@ -70,9 +72,13 @@ def _chromium_rust_impl(rctx):
     rctx.rename("nightly-cargo/bin/cargo", "bin/cargo")
     rctx.delete("nightly-cargo")
 
-    # VERSION starts with `rustc 1.101.0 <commit> (...)`.
+    # VERSION starts with `rustc 1.101.0 <commit> (...)`. The toolchains declare the release.
     version = rctx.read("VERSION").split(" ")[1]
-    rctx.file("version.bzl", "CHROMIUM_RUST_VERSION = %r\n" % version)
+    if version != CHROMIUM_RUST_VERSION:
+        fail("the package is of Rust %s; set CHROMIUM_RUST_VERSION in %s to it" % (
+            version,
+            "build/rust/chromium_version.bzl",
+        ))
     rctx.template("BUILD.bazel", rctx.attr._build_file)
 
     # The package is pinned by hash.

@@ -4,11 +4,11 @@
 
 """Per-host sanitizer-instrumented Rust toolchains (see //build/rust:BUILD.bazel)."""
 
-load("@chromium_rust//:version.bzl", "CHROMIUM_RUST_VERSION")
 load("@rules_rust//cargo:cargo_toolchain.bzl", "cargo_toolchain")
 load("@rules_rust//rust:toolchain.bzl", "rust_toolchain")
 load("//build/deps:gen/build_deps.bzl", "RUST_NIGHTLY_DATE", "RUST_NIGHTLY_VERSION")
 load(":build_std.bzl", "compiler_runtime_files", "rust_std_from_source")
+load(":chromium_version.bzl", "CHROMIUM_RUST_VERSION")
 
 # rustc -Zsanitizer value => (runtime library stem, platform constraint).
 _SANITIZERS = {

@@ -42,7 +42,8 @@ use_repo(
 
 # Linux x86_64 hosts build Rust with Chromium's toolchain, from the LLVM revision of the C++
 # toolchain's clang (build/rust/chromium_toolchain.bzl). Its revision is the one that V8's DEPS
-# pins with the clang revision in build/deps/llvm.MODULE.bazel, and changes with it.
+# pins with the clang revision in build/deps/llvm.MODULE.bazel, and changes with it, as does its
+# release in build/rust/chromium_version.bzl.
 chromium_rust = use_repo_rule("//build/toolchain:chromium_rust.bzl", "chromium_rust")
 
 chromium_rust(

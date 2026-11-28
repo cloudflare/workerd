@@ -8,10 +8,10 @@ Linux with the package's standard library, and arm64 Linux with one built from i
 build/deps/rust.MODULE.bazel registers them ahead of rules_rust's toolchains, which other hosts use.
 """
 
-load("@chromium_rust//:version.bzl", "CHROMIUM_RUST_VERSION")
 load("@rules_rust//cargo:cargo_toolchain.bzl", "cargo_toolchain")
 load("@rules_rust//rust:toolchain.bzl", "rust_toolchain")
 load(":build_std.bzl", "rust_std_from_source")
+load(":chromium_version.bzl", "CHROMIUM_RUST_VERSION")
 
 _HOST_TRIPLE = "x86_64-unknown-linux-gnu"
 
