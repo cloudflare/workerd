@@ -925,6 +925,11 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-ed25519-verify-test.wd-test",
+    data = ["crypto-ed25519-verify-test.js"],
+)
+
+wd_test(
     src = "crypto-extras-test.wd-test",
     args = ["--experimental"],
     data = ["crypto-extras-test.js"],
