@@ -56,6 +56,8 @@ struct TestFixture {
     // If true, the actor's storage cache flushes writes to its stage, which is read-only, so a
     // write fails at flush time. Otherwise writes stay in the cache, as in a preview session.
     bool flushActorStorage = false;
+    // If true, with flushActorStorage, the stage never answers a put, so its flush stays in flight.
+    bool blockActorStoragePuts = false;
     // If set, used instead of the default DummyIoChannelFactory when creating incoming requests.
     // The factory receives the TimerChannel reference.
     kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
@@ -333,6 +335,7 @@ struct TestFixture {
   kj::Maybe<kj::Rc<Worker::Actor::HibernationManager>> savedHibernationManager;
   kj::Maybe<uint64_t> savedHolderToken;
   kj::Maybe<kj::String> savedActorClassName;
+  bool blockActorStoragePuts = false;
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;

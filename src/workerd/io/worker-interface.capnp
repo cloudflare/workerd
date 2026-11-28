@@ -1112,6 +1112,12 @@ interface EventDispatcher @0xf20697475ec1752d {
   # carries datagrams sent by the Worker back toward the peer. The call remains pending until the
   # Worker's connect() handler completes.
 
+  onHibernate @15 (reason :Trace.OnHibernateEventInfo.Reason) -> (result :EventOutcome)
+      $Cxx.allowCancellation;
+  # Runs a Durable Object's onHibernate handler, and returns its outcome. Only the actor's own
+  # runtime sends this, for an instance that is retiring. In C++, we use
+  # `WorkerInterface::customEvent()` with an OnHibernateCustomEvent to dispatch this event.
+
   # Other methods might be added to handle other kinds of events, e.g. TCP connections, or maybe
   # even native Cap'n Proto RPC eventually.
 }
