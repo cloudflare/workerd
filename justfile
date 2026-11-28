@@ -108,7 +108,8 @@ node-test test_name *args:
 wpt-test test_name:
   just stream-test //src/wpt:{{test_name}}
 
-lldb-wpt-test test_name: build
+lldb-wpt-test test_name:
+  bazel build --build_runfile_links //src/wpt:{{test_name}}
   cd bazel-bin/src/wpt/{{test_name}}.runfiles/workerd/src/wpt; lldb ../workerd/server/workerd  -- test {{test_name}}.wd-test --experimental --directory-path=TEST_TMPDIR=/tmp
 
 asan-wpt-test test_name:
