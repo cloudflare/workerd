@@ -44,6 +44,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
         "//src/workerd/io/io-context:ffi",
+        "//src/workerd/util:autogate",
     ],
 )
 

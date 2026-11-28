@@ -160,10 +160,10 @@ namespace workerd::util {
   /* Compatibility dates and flags are compiled by the Rust compiler (io/compat-date/) rather      \
      than the C++ one (io/compatibility-date-legacy.c++). See io/compatibility-date.c++. */        \
   V(RUST_COMPAT_DATE)                                                                              \
-  /* WorkerEntrypoint::runScheduled() hands the scheduled event to Rust (io/entrypoint), which     \
-     reports it to the tracer, delivers it, starts the handler in a waitUntil task and waits for   \
-     the request to finish, rather than doing all of that in C++. The handler is still started by  \
-     C++ ServiceWorkerGlobalScope::startScheduled(). */                                            \
+  /* The Rust WorkerEntrypoint (io/entrypoint) delivers the scheduled event: it reports it to the  \
+     tracer, delivers it, starts the handler in a waitUntil task and waits for the request to      \
+     finish, rather than passing it to C++ WorkerEntrypoint::runScheduled(). The handler is still  \
+     started by C++ ServiceWorkerGlobalScope::startScheduled(). */                                 \
   V(RUST_ENTRYPOINT_SCHEDULED)                                                                     \
   /* MIME types are parsed and serialized by the Rust crate in util/mimetype/ rather than the      \
      C++ code in util/mimetype-legacy.c++. See util/mimetype.c++. */                               \

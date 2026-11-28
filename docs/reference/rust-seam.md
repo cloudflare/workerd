@@ -17,8 +17,9 @@ Two directions cross the seam:
 - **Requests in.** An embedder delivers events to a Worker through C++ `WorkerInterface`
   (`src/workerd/io/worker-interface.h`) or its Rust counterpart, `worker::Interface`
   (`src/rust/worker/`, see its [`AGENTS.md`](../../src/rust/worker/AGENTS.md)). On the runtime side,
-  C++ `WorkerEntrypoint` receives them and hands the events that Rust delivers to the `entrypoint`
-  crate (`src/workerd/io/entrypoint/`).
+  the Rust `WorkerEntrypoint` of the `entrypoint` crate (`src/workerd/io/entrypoint/`) receives
+  them. It delivers the events that Rust implements and passes the others to the C++
+  `WorkerEntrypoint` it owns.
 - **Calls out.** The runtime calls its host through `IoChannelFactory`, `LimitEnforcer`,
   `TimerChannel`, the observers, `BaseTracer` and `SpanSubmitter`, the actor storage hooks and
   `Worker::Api`. These are C++ interfaces with no Rust trait. Each is a seam interface that gets a
