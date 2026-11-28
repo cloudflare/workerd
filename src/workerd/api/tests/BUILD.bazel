@@ -1936,6 +1936,12 @@ wd_test(
 )
 
 wd_test(
+    src = "response-headers-test.wd-test",
+    args = ["--experimental"],
+    data = ["response-headers-test.js"],
+)
+
+wd_test(
     src = "request-signal-enabled.wd-test",
     args = ["--experimental"],
     data = ["request-signal-enabled.js"],
