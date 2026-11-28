@@ -14,6 +14,14 @@ export default {
   tailStream: createTailStreamHandler(state),
 };
 
+// Expected status and exceptions of the span of a failed operation.
+function failed(message, name = 'Error') {
+  return {
+    status: { code: 'error', message },
+    exceptions: [{ name, message }],
+  };
+}
+
 export const test = {
   async test() {
     await runInstrumentationTest(state, expectedSpans, {
@@ -202,6 +210,7 @@ const expectedSpans = [
     'cloudflare.images.options.encoding': 'base64',
     'cloudflare.images.error.code': '123',
     'error.type': 'ERROR 123: Bad request',
+    ...failed('IMAGES_INFO_ERROR 123: Bad request'),
     closed: true,
   },
   {
@@ -306,6 +315,7 @@ const expectedSpans = [
     'cloudflare.images.options.format': 'image/avif',
     'cloudflare.images.error.code': '123',
     'error.type': 'ERROR 123: Bad request',
+    ...failed('IMAGES_TRANSFORM_ERROR 123: Bad request'),
     closed: true,
   },
   {
@@ -325,6 +335,9 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    ...failed(
+      'IMAGES_TRANSFORM_ERROR 9525: ImageTransformer consumed; you may only call .output() or draw a transformer once'
+    ),
     closed: true,
   },
 ];
