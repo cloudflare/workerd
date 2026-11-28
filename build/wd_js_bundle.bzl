@@ -79,6 +79,12 @@ _gen_compile_cache = rule(
         ),
         "_v8_flags": attr.label(default = "//build/config:compile_cache_v8_flags"),
     },
+    toolchains = [
+        config_common.toolchain_type(
+            "//build/config:compile_cache_executor_toolchain_type",
+            mandatory = False,
+        ),
+    ],
 )
 
 def _get_compile_cache(compile_cache, m):
