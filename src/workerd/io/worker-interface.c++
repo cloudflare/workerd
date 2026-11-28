@@ -437,7 +437,10 @@ kj::Promise<void> RpcWorkerInterface::request(kj::HttpMethod method,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
-  auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
+  // The HttpService is used for this one request and then dropped, so the call that fetches it
+  // is sent for pipelining only: the dispatcher need not send its result back.
+  auto inner = httpOverCapnpFactory.capnpToKj(
+      dispatcher.getHttpServiceRequest().sendForPipeline().getHttp());
   auto promise = inner->request(method, url, headers, requestBody, response);
   return promise.attach(kj::mv(inner));
 }
@@ -447,7 +450,8 @@ kj::Promise<void> RpcWorkerInterface::connect(kj::StringPtr host,
     kj::AsyncIoStream& connection,
     ConnectResponse& tunnel,
     kj::HttpConnectSettings settings) {
-  auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
+  auto inner = httpOverCapnpFactory.capnpToKj(
+      dispatcher.getHttpServiceRequest().sendForPipeline().getHttp());
   auto promise = inner->connect(host, headers, connection, tunnel, kj::mv(settings));
   return promise.attach(kj::mv(inner));
 }
