@@ -48,10 +48,16 @@ class RewritingResponse final: public kj::HttpService::Response {
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+    if (edits.size() == 0) {
+      return inner.send(statusCode, statusText, headers, expectedBodySize);
+    }
     return inner.send(statusCode, statusText, rewrite(headers), expectedBodySize);
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    if (edits.size() == 0) {
+      return inner.acceptWebSocket(headers);
+    }
     return inner.acceptWebSocket(rewrite(headers));
   }
 
