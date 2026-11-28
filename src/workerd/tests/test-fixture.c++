@@ -584,7 +584,8 @@ TestFixture::Response TestFixture::runRequest(
     kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body) {
   kj::HttpHeaders requestHeaders(*headerTable);
   MockResponse response;
-  auto requestBody = newMemoryInputStream(body);
+  auto requestBody = newMemoryInputStream(
+      kj::rc<kj::String>(kj::str(body)).project([](auto& str) { return str.asBytes(); }));
 
   runInIoContext([&](const TestFixture::Environment& env) {
     auto& globalScope = env.lock.getGlobalScope();

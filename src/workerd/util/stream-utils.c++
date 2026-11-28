@@ -11,84 +11,58 @@ namespace {
 
 // An AsyncInputStream implementation that reads from an in-memory buffer.
 // This is optimized for the case where the entire contents are available
-// up-front, so it doesn't do any dynamic memory allocation or copying.
-// It also supports optimized teeing when the backing storage is provided.
+// up-front, so it doesn't do any copying. The stream and its tee branches
+// share a claim on the backing storage, so teeing needs no additional buffering.
 class MemoryInputStream final: public kj::AsyncInputStream {
- private:
-  struct OwnedBacking: public kj::Refcounted {
-    kj::Own<void> backing;
-    OwnedBacking(kj::Own<void>&& backing): backing(kj::mv(backing)) {}
-  };
+  using Bytes = kj::Rc<kj::ArrayPtr<const kj::byte>>;
 
  public:
-  MemoryInputStream(
-      kj::ArrayPtr<const kj::byte> data, kj::Maybe<kj::Own<void>> maybeBacking = kj::none)
-      : data(data),
-        // Note that we don't actually check that maybeBacking actually owns the
-        // memory that `data` points to. It is the caller's responsibility to ensure
-        // this is the case if they want teeing to be safely supported.
-        ownedBacking(maybeBacking.map(
-            [](kj::Own<void>& backing) mutable { return kj::rc<OwnedBacking>(kj::mv(backing)); })) {
-  }
-  MemoryInputStream(kj::ArrayPtr<const kj::byte> data, kj::Rc<OwnedBacking> ownedBacking)
-      : data(data),
-        ownedBacking(kj::mv(ownedBacking)) {}
+  explicit MemoryInputStream(Bytes data): data(kj::mv(data)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    auto ptr = kj::arrayPtr<kj::byte>(static_cast<kj::byte*>(buffer), maxBytes);
-    size_t toRead = kj::min(data.size(), ptr.size());
-    if (toRead == 0) return toRead;
-    ptr.write(data.first(toRead));
-    data = data.slice(toRead);
-    return toRead;
+    return KJ_ASSERT_NONNULL(
+        tryReadSync(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes), minBytes));
   }
 
   kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
     // All of the data is in memory, so every read can complete synchronously.
-    size_t toRead = kj::min(data.size(), buffer.size());
-    if (toRead == 0) return toRead;
-    buffer.write(data.first(toRead));
-    data = data.slice(toRead);
-    return toRead;
+    size_t size = kj::min(data->size(), buffer.size());
+    buffer.first(size).write(data->first(size));
+    skip(size);
+    return size;
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
-    return data.size();
+    return data->size();
   }
 
   kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
     // An optimized pumpTo... we know we have all the data right here. We can
     // just write it all at once up to `amount`.
-    uint64_t toRead = kj::min(data.size(), amount);
-    if (toRead == 0) {
-      co_return toRead;
+    size_t size = kj::min(data->size(), amount);
+    if (size > 0) {
+      auto bytes = data->first(size);
+      if (!output.tryWriteSync(bytes)) {
+        co_await output.write(bytes);
+      }
     }
-    auto ptr = data.first(toRead);
-    if (!output.tryWriteSync(ptr)) {
-      co_await output.write(ptr);
-    }
-    data = data.slice(toRead);
-    co_return toRead;
+    skip(size);
+    co_return size;
   }
 
   kj::Maybe<kj::Own<AsyncInputStream>> tryTee(uint64_t limit = kj::maxValue) override {
-    // If a MemoryInputStream is holding onto backing storage, then we can safely
-    // tee it here, allowing us to avoid the default tee implementation which needs
-    // additional buffering. Tee'ing just becomes a matter of sharing the backing
-    // storage and the data slice directly. This allows us to avoid any additional
-    // buffering in unread stream branches since all of the data is already in memory
-    // anyway. If we're not holding onto the backing storage, then we cannot safely
-    // assume that the a tee branch will safely be able to read the data, so we'll
-    // fall back to the default kj::newTee implementation.
-    KJ_IF_SOME(owned, ownedBacking) {
-      return kj::heap<MemoryInputStream>(data, owned.addRef());
-    }
-    return kj::none;
+    // Teeing just shares the backing storage and the unread slice, avoiding the
+    // buffering of the default kj::newTee implementation: all of the data is
+    // already in memory anyway.
+    return kj::heap<MemoryInputStream>(data.addRef());
   }
 
  private:
-  kj::ArrayPtr<const kj::byte> data;
-  kj::Maybe<kj::Rc<OwnedBacking>> ownedBacking;
+  Bytes data;
+
+  void skip(size_t amount) {
+    data = kj::mv(data).project([amount](auto& bytes) { return bytes.slice(amount); });
+  }
 };
 
 class NeuterableInputStreamImpl final: public NeuterableInputStream {
@@ -265,14 +239,8 @@ kj::Own<kj::AsyncOutputStream> newNullOutputStream() {
   return kj::Own<kj::AsyncOutputStream>(&nullStream, kj::NullDisposer::instance);
 }
 
-kj::Own<kj::AsyncInputStream> newMemoryInputStream(
-    kj::ArrayPtr<const kj::byte> data, kj::Maybe<kj::Own<void>> maybeBacking) {
-  return kj::heap<MemoryInputStream>(data, kj::mv(maybeBacking));
-}
-
-kj::Own<kj::AsyncInputStream> newMemoryInputStream(
-    kj::StringPtr data, kj::Maybe<kj::Own<void>> maybeBacking) {
-  return kj::heap<MemoryInputStream>(data.asBytes(), kj::mv(maybeBacking));
+kj::Own<kj::AsyncInputStream> newMemoryInputStream(kj::Rc<kj::ArrayPtr<const kj::byte>> data) {
+  return kj::heap<MemoryInputStream>(kj::mv(data));
 }
 
 kj::Own<NeuterableInputStream> newNeuterableInputStream(kj::AsyncInputStream& inner) {

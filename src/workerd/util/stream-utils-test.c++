@@ -11,8 +11,12 @@
 namespace workerd {
 namespace {
 
+kj::Own<kj::AsyncInputStream> newTestMemoryInputStream(kj::ArrayPtr<const kj::byte> bytes) {
+  return newMemoryInputStream(kj::rc<kj::Array<kj::byte>>(kj::heapArray(bytes)));
+}
+
 KJ_TEST("MemoryInputStream tryReadSync") {
-  auto stream = newMemoryInputStream("foobar"_kj);
+  auto stream = newTestMemoryInputStream("foobar"_kjb);
 
   kj::byte buf[4]{};
   KJ_EXPECT(KJ_ASSERT_NONNULL(stream->tryReadSync(kj::arrayPtr(buf), 1)) == 4);
@@ -22,6 +26,55 @@ KJ_TEST("MemoryInputStream tryReadSync") {
 
   // EOF is a valid synchronous answer.
   KJ_EXPECT(KJ_ASSERT_NONNULL(stream->tryReadSync(kj::arrayPtr(buf), 1)) == 0);
+}
+
+KJ_TEST("MemoryInputStream tee branches share the backing") {
+  auto stream = newTestMemoryInputStream("foobar"_kjb);
+  kj::byte buf[4]{};
+  KJ_EXPECT(KJ_ASSERT_NONNULL(stream->tryReadSync(kj::arrayPtr(buf).first(2), 1)) == 2);
+  auto branch = KJ_ASSERT_NONNULL(stream->tryTee());
+
+  // The branch starts at the parent's read position and outlives the parent.
+  KJ_EXPECT(KJ_ASSERT_NONNULL(stream->tryReadSync(kj::arrayPtr(buf), 1)) == 4);
+  KJ_EXPECT(kj::arrayPtr(buf) == "obar"_kjb);
+  stream = nullptr;
+
+  KJ_EXPECT(KJ_ASSERT_NONNULL(branch->tryGetLength()) == 4);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(branch->tryReadSync(kj::arrayPtr(buf), 1)) == 4);
+  KJ_EXPECT(kj::arrayPtr(buf) == "obar"_kjb);
+}
+
+KJ_TEST("MemoryInputStream pending pumpTo") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto stream = newTestMemoryInputStream("foobar"_kjb);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(stream->tryGetLength()) == 6);
+
+  // Nothing reads from the pipe yet, so the pump stays pending.
+  auto pipe = kj::newOneWayPipe();
+  auto pumpPromise = stream->pumpTo(*pipe.out, 4);
+  KJ_EXPECT(!pumpPromise.poll(ws));
+
+  kj::byte buf[4]{};
+  KJ_EXPECT(pipe.in->tryRead(buf, 4, 4).wait(ws) == 4);
+  KJ_EXPECT(kj::arrayPtr(buf) == "foob"_kjb);
+  KJ_EXPECT(pumpPromise.wait(ws) == 4);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(stream->tryGetLength()) == 2);
+}
+
+KJ_TEST("MemoryInputStream pumpTo at EOF") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto stream = newTestMemoryInputStream("foobar"_kjb);
+  auto pipe = kj::newOneWayPipe();
+  auto pumpPromise = stream->pumpTo(*pipe.out, kj::maxValue);
+  kj::byte buf[6]{};
+  KJ_EXPECT(pipe.in->tryRead(buf, 6, 6).wait(ws) == 6);
+  KJ_EXPECT(kj::arrayPtr(buf) == "foobar"_kjb);
+  KJ_EXPECT(pumpPromise.wait(ws) == 6);
+  KJ_EXPECT(stream->pumpTo(*pipe.out, kj::maxValue).wait(ws) == 0);
 }
 
 KJ_TEST("NeuterableInputStream tryReadSync") {
