@@ -68,7 +68,7 @@ fn a_fixed_client_dials_through_its_dialer_and_sends_the_url_as_given() {
         assert!(request.contains("\r\nHost: example.com\r\n"), "{request}");
         assert_eq!(response.status(), http::StatusCode::NO_CONTENT);
         let headers = HeaderBlock::new(response.headers(), response.extensions())
-            .to_kj(&table)
+            .into_kj(&table)
             .unwrap();
         assert_eq!(
             HeadersRef::from(&*headers).get_by_name("x-reply"),

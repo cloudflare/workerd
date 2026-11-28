@@ -310,12 +310,20 @@ impl Service for ExternalHttpRequest {
             .as_deref()
             .map_or(headers, HeadersRef::from);
         let mut client = self.service.pool.client(table);
-        let mut response =
-            bridge::rewriting_response(response.into_ffi(), table, rewriter.response_edits())?;
+        let url = rewritten.url.as_bytes();
+        let edits = rewriter.response_edits();
+        // Options that inject no response headers hand over the response itself, rather than a
+        // wrapper that would copy its headers to edit nothing.
+        if edits.is_empty() {
+            return client
+                .request(method, url, headers, request_body, response)
+                .await;
+        }
+        let mut response = bridge::rewriting_response(response.into_ffi(), table, edits)?;
         client
             .request(
                 method,
-                rewritten.url.as_bytes(),
+                url,
                 headers,
                 request_body,
                 ServiceResponse::from(response.as_mut()),

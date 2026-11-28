@@ -34,7 +34,8 @@ enum class Ecdsa : uint8_t;
 
 void for_each_header(const kj::HttpHeaders& headers, Head& head);
 kj::Own<kj::HttpHeaders> headers_from_block(const kj::HttpHeaderTable& table,
-    ::rust::Slice<const uint8_t> arena,
+    uint8_t* arena,
+    size_t arenaLen,
     ::rust::Slice<const uint32_t> lens);
 
 bool ecdsa_verify(Ecdsa algorithm,

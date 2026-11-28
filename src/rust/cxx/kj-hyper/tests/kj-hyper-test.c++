@@ -43,6 +43,8 @@ class TestService final: public kj::HttpService {
   kj::PromiseFulfillerPair<void> gateOpen = kj::newPromiseAndFulfiller<void>();
   kj::ForkedPromise<void> gate = gateOpen.promise.fork();
   kj::uint inFlight = 0;
+  // /headers-later waits on this before it reads the request's headers.
+  kj::PromiseFulfillerPair<void> headersLater = kj::newPromiseAndFulfiller<void>();
   kj::uint requestCount = 0;
   bool receiveFailed = false;
   kj::Maybe<kj::String> overwriteError;
@@ -171,6 +173,26 @@ class TestService final: public kj::HttpService {
           responseHeaders.add(kj::str(name), kj::str(value));
         }
       });
+      response.send(200, "OK", responseHeaders, static_cast<uint64_t>(0));
+    } else if (url == "/headers-later") {
+      // Lists every request header as kj has it, once the call has gone async.
+      co_await headersLater.promise;
+      kj::Vector<kj::String> lines;
+      headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+        lines.add(kj::str(name, ": ", value, "\n"));
+      });
+      auto listing = kj::strArray(lines, "");
+      auto out = response.send(200, "OK", responseHeaders, listing.size());
+      co_await out->write(listing.asBytes());
+    } else if (url == "/spellings") {
+      // Repeated, empty and oddly spelled headers, Set-Cookie (in the table) among them.
+      responseHeaders.addPtrPtr("Set-Cookie", "a=1");
+      responseHeaders.addPtrPtr("x-lower", "1");
+      responseHeaders.addPtrPtr("Set-Cookie", "b=2");
+      responseHeaders.addPtrPtr("X-UPPER", "2");
+      responseHeaders.addPtrPtr("X-Empty", "");
+      responseHeaders.addPtrPtr("X-Dup", "1");
+      responseHeaders.addPtrPtr("x-dup", "2");
       response.send(200, "OK", responseHeaders, static_cast<uint64_t>(0));
     } else if (url == "/order" || url == "/order-chunked") {
       // Headers of every kind, set in another order than the one kj writes them in.
@@ -302,6 +324,8 @@ struct Fixture {
   kj::Timer& timer = io.provider->getTimer();
   kj::HttpHeaderTable::Builder builder;
   kj::HttpHeaderId xCustom = builder.add("X-Custom-Header");
+  // Indexed, so that kj keeps a repeated Set-Cookie apart rather than joining it.
+  kj::HttpHeaderId setCookie = builder.add("Set-Cookie");
   kj::Own<kj::HttpHeaderTable> table = builder.build();
   TestService service{*table, xCustom};
   ::rust::Box<TestServer> server = start_server(&service, table.get(), true);
@@ -695,6 +719,63 @@ KJ_TEST("server: multi-valued and non-UTF-8 headers pass through both directions
   KJ_EXPECT(head.startsWith("HTTP/1.1 200 OK\r\n"), head);
   KJ_EXPECT(head.contains(": a\r\n") && head.contains(": b\r\n"), head);
   KJ_EXPECT(head.contains(": \xff\xfe\r\n"), head);
+}
+
+KJ_TEST("server: request headers reach the service as kj adds them, and outlive the read") {
+  Fixture f;
+  auto conn = f.connect();
+  conn->write("GET /headers-later HTTP/1.1\r\nHost: foo\r\nX-Custom-Header: a\r\n"
+              "x-lower: 1\r\nSet-Cookie: c=1\r\nX-MiXeD: 2\r\nX-Empty:\r\n"
+              "X-Custom-Header: b\r\nSet-Cookie: d=2\r\nx-mixed: 3\r\n\r\n"_kj.asBytes())
+      .wait(f.ws);
+  // The connection reads on while the service waits.
+  conn->write("GET /hello HTTP/1.1\r\nHost: overwritten\r\nX-Custom-Header: overwritten\r\n"
+              "\r\n"_kj.asBytes())
+      .wait(f.ws);
+  f.timer.afterDelay(10 * kj::MILLISECONDS).wait(f.ws);
+  f.service.headersLater.fulfiller->fulfill();
+  // The table's headers first, a repeated one joined, except Set-Cookie, whose second value goes
+  // with the rest, which keep the client's spelling and come in hyper's order: by name, each
+  // name's values together.
+  auto listing = "Host: foo\n"
+                 "X-Custom-Header: a, b\n"
+                 "Set-Cookie: c=1\n"
+                 "x-lower: 1\n"
+                 "Set-Cookie: d=2\n"
+                 "X-MiXeD: 2\n"
+                 "x-mixed: 3\n"
+                 "X-Empty: \n"_kj;
+  KJ_EXPECT(readHead(*conn).wait(f.ws) ==
+      kj::str("HTTP/1.1 200 OK\r\nContent-Length: ", listing.size(), "\r\n\r\n"));
+  KJ_EXPECT(readBytes(f.ws, *conn, listing.size()) == listing);
+  KJ_EXPECT(readHead(*conn).wait(f.ws) == "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n");
+  KJ_EXPECT(readBytes(f.ws, *conn, 5) == "hello");
+}
+
+KJ_TEST("server: response headers keep their spellings, repeats and empty values on the wire") {
+  Fixture f;
+  auto conn = f.connect();
+  conn->write("GET /spellings HTTP/1.1\r\nHost: foo\r\n\r\n"_kj.asBytes()).wait(f.ws);
+  // A name's values go out together; one spelled other than title case keeps its spelling, the
+  // rest are title-cased.
+  KJ_EXPECT(readHead(*conn).wait(f.ws) ==
+      "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\n"
+      "x-lower: 1\r\nX-UPPER: 2\r\nX-Empty: \r\nX-Dup: 1\r\nx-dup: 2\r\n\r\n");
+}
+
+KJ_TEST("server: a request with very many headers is read and echoed in full") {
+  Fixture f;
+  auto conn = f.connect();
+  constexpr kj::uint COUNT = 2000;
+  kj::Vector<kj::String> lines;
+  for (auto i: kj::zeroTo(COUNT)) {
+    lines.add(kj::str("X-H-", i, ": ", i, "\r\n"));
+  }
+  auto block = kj::strArray(lines, "");
+  conn->write(kj::str("GET /headers HTTP/1.1\r\nHost: foo\r\n", block, "\r\n").asBytes())
+      .wait(f.ws);
+  KJ_EXPECT(readHead(*conn).wait(f.ws) ==
+      kj::str("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n", block, "\r\n"));
 }
 
 KJ_TEST("server: a large response is written only as fast as the client reads") {
@@ -1188,6 +1269,32 @@ KJ_TEST("client: multi-valued and non-UTF-8 headers pass through both directions
   auto joined = kj::strArray(seen, "|");
   KJ_EXPECT(joined.contains(": a") && joined.contains(": b"), joined);
   KJ_EXPECT(joined.contains(": \xff\xfe"), joined);
+}
+
+KJ_TEST("client: header spellings, repeats and empty values on the wire, both directions") {
+  Fixture f;
+  auto [client, peer] = f.pipeClient();
+  kj::HttpHeaders headers(*f.table);
+  headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+  headers.addPtrPtr("x-lower", "1");
+  headers.addPtrPtr("X-Empty", "");
+  headers.addPtrPtr("X-Dup", "1");
+  headers.addPtrPtr("x-dup", "2");
+  auto response =
+      client->request(kj::HttpMethod::GET, "/", headers, static_cast<uint64_t>(0)).response;
+  // hyper's client writes an empty value without the space.
+  KJ_EXPECT(readHead(*peer).wait(f.ws) ==
+      "GET / HTTP/1.1\r\nHost: foo\r\nx-lower: 1\r\nX-Empty:\r\nX-Dup: 1\r\nx-dup: 2\r\n\r\n");
+  peer->write("HTTP/1.1 200 OK\r\nset-cookie: a=1\r\nX-Reply:\r\nSet-Cookie: b=2\r\n"
+              "Content-Length: 0\r\n\r\n"_kj.asBytes())
+      .wait(f.ws);
+  auto result = response.wait(f.ws);
+  KJ_EXPECT(result.headers->get(f.setCookie).orDefault(nullptr) == "a=1");
+  kj::Vector<kj::String> seen;
+  result.headers->forEach(
+      [&](kj::StringPtr name, kj::StringPtr value) { seen.add(kj::str(name, ": ", value)); });
+  auto joined = kj::strArray(seen, "|");
+  KJ_EXPECT(joined == "Content-Length: 0|Set-Cookie: a=1|Set-Cookie: b=2|X-Reply: ", joined);
 }
 
 KJ_TEST("client: a write beyond the declared length fails") {
