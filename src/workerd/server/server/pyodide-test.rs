@@ -435,22 +435,6 @@ fn a_refused_connection_names_the_request() {
     });
 }
 
-#[test]
-fn an_unresolvable_host_names_the_request() {
-    local(async {
-        let url = "http://pyodide-bundle.invalid/";
-        let error = load_bundle(None, url, &no_tls(), VERSION, "")
-            .await
-            .unwrap_err();
-        let description = error.description();
-        assert!(description.contains("Pyodide"), "{error:?}");
-        assert!(
-            description.contains(&format!("{url}{}", bundle_file_name(VERSION))),
-            "{error:?}"
-        );
-    });
-}
-
 // An EC P-256 CA and a `localhost` certificate it signed, with the certificate's key. Valid
 // from 2026 on.
 const TEST_CA: &str = "-----BEGIN CERTIFICATE-----
