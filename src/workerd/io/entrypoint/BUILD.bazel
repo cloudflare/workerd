@@ -6,12 +6,14 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 wd_rust_crate(
     name = "entrypoint",
     srcs = [
+        "bench.rs",
         "ffi.rs",
         "lib.rs",
         "scheduled.rs",
         "test.rs",
     ],
     cxx_bridge_deps = [
+        "//src/rust/kj",
         "//src/rust/worker:bridge",
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
@@ -30,6 +32,7 @@ wd_rust_crate(
         "//src/workerd/io:outcome_capnp_rust",
         "//src/workerd/io/io-context",
         "//src/workerd/util/perfetto",
+        "@crates_vendor//tracing",
     ],
 )
 
@@ -40,6 +43,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":ffi.rs@cxx",
+        "//src/rust/kj",
         "//src/rust/worker:bridge",
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",

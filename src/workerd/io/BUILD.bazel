@@ -943,6 +943,7 @@ kj_test(
 kj_test(
     src = "worker-entrypoint-test.c++",
     deps = [
+        ":bench_capnp",
         ":worker-entrypoint",
         "//src/workerd/tests:test-fixture",
         "@capnp-cpp//src/kj:kj-async-io",

@@ -1,0 +1,13 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# A Worker with one quick bench case, for `workerd bench`.
+const config :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        modules = [(name = "worker", esModule = embed "bench-event.js")],
+        compatibilityDate = "2024-01-01",
+      ),
+    ),
+  ],
+);

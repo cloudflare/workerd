@@ -110,6 +110,8 @@ mod ffi {
         PanicInFuture,
         /// The prelude throws a JavaScript exception, so the function never runs.
         PreludeThrows,
+        /// The future that the function returns never completes.
+        Pend,
     }
 
     /// How the callback of the last `await_promise()` ends once its future has a value.
@@ -229,8 +231,15 @@ mod ffi {
         fn take_probe_observation() -> ProbeObservation;
         unsafe fn await_released(isolate: usize, ending: AwaitEnding) -> Result<()>;
         fn run_in_wait_until(request: Pin<&mut IncomingRequest>, ending: RunEnding) -> Result<()>;
+        /// # Safety
+        /// C++ keeps `request` alive and unmoved until the future completes or is dropped.
+        async unsafe fn run_in_context<'a>(
+            request: Pin<&'a mut IncomingRequest>,
+            ending: RunEnding,
+        ) -> Result<()>;
         fn run_observation() -> AwaitObservation;
         fn run_future_done() -> bool;
+        fn run_future_dropped() -> bool;
         fn run_handle() -> f64;
         fn release_await(value: i32);
         fn release_await_from_thread(value: i32);
@@ -606,6 +615,8 @@ unsafe fn await_released(isolate: usize, ending: ffi::AwaitEnding) -> Result<()>
 static RUN_OBSERVATION: AtomicU8 = AtomicU8::new(ffi::AwaitObservation::Pending.repr);
 /// Whether the future of the last `run_in_wait_until()` has completed.
 static RUN_FUTURE_DONE: AtomicBool = AtomicBool::new(false);
+/// Whether the future of the last run was dropped before it completed.
+static RUN_FUTURE_DROPPED: AtomicBool = AtomicBool::new(false);
 /// The number that the function of the last `run_in_wait_until()` received from its prelude.
 static RUN_HANDLE: Mutex<f64> = Mutex::new(0.0);
 
@@ -632,12 +643,46 @@ fn run_in_wait_until(
     request: Pin<&mut io_context::IncomingRequest>,
     ending: ffi::RunEnding,
 ) -> Result<()> {
+    let prelude = start_run(ending);
+    io_context::incoming_request_run_in_wait_until(request, prelude, run_function(ending))
+        .map_err(|exception| std::io::Error::other(exception.to_string()))
+}
+
+/// As `run_in_wait_until()`, with `io_context::incoming_request_run()`: the future completes once
+/// the function's future has, and fails as the run does.
+async fn run_in_context(
+    request: Pin<&mut io_context::IncomingRequest>,
+    ending: ffi::RunEnding,
+) -> Result<()> {
+    let prelude = start_run(ending);
+    let run = io_context::incoming_request_run(request, prelude, run_function(ending))
+        .map_err(|exception| std::io::Error::other(exception.to_string()))?;
+    run.await
+        .map_err(|exception| std::io::Error::other(exception.to_string()))
+}
+
+/// Resets what the run records, and returns its prelude.
+fn start_run(ending: ffi::RunEnding) -> kj_rs::KjOwn<ffi::RunPrelude> {
     RUN_OBSERVATION.store(ffi::AwaitObservation::Pending.repr, Ordering::SeqCst);
     RUN_FUTURE_DONE.store(false, Ordering::SeqCst);
+    RUN_FUTURE_DROPPED.store(false, Ordering::SeqCst);
     *RUN_HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = 0.0;
+    ffi::new_run_prelude(ending == ffi::RunEnding::PreludeThrows)
+}
+
+/// The future that the function of a run returns.
+type RunFuture = Pin<Box<dyn Future<Output = std::result::Result<(), cxx::KjException>>>>;
+
+/// The function of a run: see `run_in_wait_until()`.
+fn run_function(
+    ending: ffi::RunEnding,
+) -> impl for<'s> FnOnce(
+    &mut jsg::Lock<'s>,
+    &[v8::Local<'s, v8::Value>],
+) -> std::result::Result<RunFuture, io_context::RunError>
++ 'static {
     let observer = RunDropObserver;
-    let prelude = ffi::new_run_prelude(ending == ffi::RunEnding::PreludeThrows);
-    io_context::incoming_request_run_in_wait_until(request, prelude, move |lock, handles| {
+    move |lock, handles| {
         let _observer = observer;
         ffi::record_await_context();
         RUN_OBSERVATION.store(ffi::AwaitObservation::Ran.repr, Ordering::SeqCst);
@@ -663,16 +708,21 @@ fn run_in_wait_until(
             ffi::RunEnding::PanicInFunction => panic!("the function panicked"),
             _ => {}
         }
-        Ok(async move {
+        let future: RunFuture = Box::pin(async move {
+            let dropped = RunFutureDropObserver;
+            if ending == ffi::RunEnding::Pend {
+                std::future::pending::<()>().await;
+            }
+            std::mem::forget(dropped);
             assert!(
                 ending != ffi::RunEnding::PanicInFuture,
                 "the future panicked"
             );
             RUN_FUTURE_DONE.store(true, Ordering::SeqCst);
             Ok(())
-        })
-    })
-    .map_err(|exception| std::io::Error::other(exception.to_string()))
+        });
+        Ok(future)
+    }
 }
 
 fn run_handle() -> f64 {
@@ -687,6 +737,20 @@ fn run_observation() -> ffi::AwaitObservation {
 
 fn run_future_done() -> bool {
     RUN_FUTURE_DONE.load(Ordering::SeqCst)
+}
+
+fn run_future_dropped() -> bool {
+    RUN_FUTURE_DROPPED.load(Ordering::SeqCst)
+}
+
+/// Sets `RUN_FUTURE_DROPPED` when dropped, that is, if the future of a run holding it is dropped
+/// while it waits; the future forgets it once the wait is over.
+struct RunFutureDropObserver;
+
+impl Drop for RunFutureDropObserver {
+    fn drop(&mut self) {
+        RUN_FUTURE_DROPPED.store(true, Ordering::SeqCst);
+    }
 }
 
 thread_local! {

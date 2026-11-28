@@ -768,14 +768,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   v8::Local<v8::Function> getTestHandler(
       jsg::Lock& js, kj::Maybe<ExportedHandler&> exportedHandler);
 
-  // Received bench() (called from C++, not JS). See WorkerInterface::bench(). Runs the handler to
-  // register cases, then runs them, through Worker::Api::runBench(). Resolves with the group's
-  // `BenchReport.Group`, without its name, as an encoded message. Failures, of the handler or of
-  // a case, are recorded in the group rather than rejecting.
-  jsg::Promise<kj::Array<capnp::word>> bench(Worker::Lock& lock,
-      kj::Maybe<ExportedHandler&> exportedHandler,
-      bench::BenchParams::Reader params);
-
   kj::Promise<void> eventTimeoutPromise(uint32_t timeoutMs);
   kj::Promise<void> setHibernatableEventTimeout(
       kj::Promise<void> event, kj::Maybe<uint32_t> eventTimeoutMs);

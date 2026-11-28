@@ -15,6 +15,7 @@ wd_rust_crate(
     ],
     cxx_bridge_deps = [
         "//src/rust/jsg",
+        "//src/rust/kj",
         "//src/rust/worker:bridge",
         "//src/workerd/io",
     ],
@@ -28,6 +29,7 @@ wd_rust_crate(
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",
+        "//src/rust/kj",
         "//src/rust/worker",
     ],
 )

@@ -285,31 +285,64 @@ void io_context_await_io_and_run(
   });
 }
 
+namespace {
+
+// The body of the IoContext::run() lambda of incoming_request_run_in_wait_until() and
+// incoming_request_run(), which `binding` names in the failure of a function that panics.
+kj::Promise<void> runInContext(Worker::Lock& lock,
+    IoContext& context,
+    RunPrelude& prelude,
+    ::rust::Box<RunInContext> run,
+    kj::StringPtr binding) {
+  TRACE_EVENT("workerd", perfetto::StaticString(prelude.spanName().cStr()));
+  auto traceScope = context.makeRequestTraceScope(lock);
+  auto handles = prelude.run(lock, context);
+  auto ffiHandles =
+      KJ_MAP(handle, handles) { return ::workerd::rust::jsg::to_ffi(kj::mv(handle)); };
+  switch (run_in_context_start(reinterpret_cast<uintptr_t>(lock.getIsolate()), *run,
+      ::rust::Slice<const ::workerd::rust::jsg::Local>(ffiHandles.begin(), ffiHandles.size()))) {
+    case IoCallbackOutcome::Succeeded:
+      return run_in_context_wait(kj::mv(run));
+    case IoCallbackOutcome::Failed:
+      // As in io_context_await_io_and_run(): run() logs the exception as uncaught and fails with
+      // it.
+      throwPendingToRun();
+    case IoCallbackOutcome::Panicked:
+      // As in io_context_await_io_and_run().
+      KJ_FAIL_ASSERT(kj::str("the function of IoContext::IncomingRequest::", binding, " panicked"));
+  }
+  KJ_UNREACHABLE;
+}
+
+}  // namespace
+
 void incoming_request_run_in_wait_until(
-    IncomingRequest& request, kj::Own<RunPrelude> prelude, ::rust::Box<WaitUntilRun> run) {
+    IncomingRequest& request, kj::Own<RunPrelude> prelude, ::rust::Box<RunInContext> run) {
   auto& context = request.getContext();
   context.addWaitUntil(
       context.run([prelude = kj::mv(prelude), run = kj::mv(run)](
                       Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
-    TRACE_EVENT("workerd", perfetto::StaticString(prelude->spanName().cStr()));
-    auto traceScope = context.makeRequestTraceScope(lock);
-    auto handles = prelude->run(lock, context);
-    auto ffiHandles =
-        KJ_MAP(handle, handles) { return ::workerd::rust::jsg::to_ffi(kj::mv(handle)); };
-    switch (wait_until_run_start(reinterpret_cast<uintptr_t>(lock.getIsolate()), *run,
-        ::rust::Slice<const ::workerd::rust::jsg::Local>(ffiHandles.begin(), ffiHandles.size()))) {
-      case IoCallbackOutcome::Succeeded:
-        return wait_until_run_wait(kj::mv(run));
-      case IoCallbackOutcome::Failed:
-        // As in io_context_await_io_and_run(): run() logs the exception as uncaught and fails
-        // the task with it.
-        throwPendingToRun();
-      case IoCallbackOutcome::Panicked:
-        // As in io_context_await_io_and_run().
-        KJ_FAIL_ASSERT("the function of IoContext::IncomingRequest::run_in_wait_until() panicked");
-    }
-    KJ_UNREACHABLE;
+    return runInContext(lock, context, *prelude, kj::mv(run), "run_in_wait_until()"_kj);
   }));
+}
+
+kj::Own<RunPromise> incoming_request_run(
+    IncomingRequest& request, kj::Own<RunPrelude> prelude, ::rust::Box<RunInContext> run) {
+  auto& context = request.getContext();
+  return kj::heap<RunPromise>(
+      context.run([prelude = kj::mv(prelude), run = kj::mv(run)](
+                      Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
+    return runInContext(lock, context, *prelude, kj::mv(run), "run()"_kj);
+  }));
+}
+
+kj::Promise<void> run_promise_wait(kj::Own<RunPromise> promise) {
+  return kj::mv(promise->promise);
+}
+
+void incoming_request_drain(kj::Own<IncomingRequest> request, kj::TaskSet& waitUntilTasks) {
+  auto& self = *request;
+  self.drain(waitUntilTasks, kj::mv(request));
 }
 
 ReentryCallback::ReentryCallback(IoContext& context, ::rust::Box<ReentryFn> function)

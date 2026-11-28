@@ -7385,6 +7385,101 @@ KJ_TEST("Server: bench command") {
   }
 }
 
+KJ_TEST("Server: bench drains the request, so its waitUntil tasks continue") {
+  setBenchMode();
+  KJ_DEFER(unsetBenchModeForTest());
+
+  // The default entrypoint's group runs first. Its case's teardown, the last thing its bench()
+  // does, starts a waitUntil task whose subrequest makes subrequests until the next group opens a
+  // gate, so the task can finish only once the first group's request is draining. The next group's
+  // setup opens the gate and makes subrequests until the task has run, and its case checks that it
+  // did.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `const once = {warmup: 0, batch: 1, samples: 1};
+                `const ping = async (env) => (await env.SELF.fetch("http://x/")).text();
+                `export default {
+                `  async fetch(request, env) {
+                `    if (new URL(request.url).pathname == "/wait") {
+                `      while (!globalThis.open) await ping(env);
+                `    }
+                `    return new Response("ok");
+                `  },
+                `  bench(b, env, ctx) {
+                `    b.run("starts a waitUntil task", () => {}, {...once, teardown() {
+                `      ctx.waitUntil(env.SELF.fetch("http://x/wait").then((r) => r.text())
+                `          .then(() => { globalThis.drained = true; }));
+                `    }});
+                `  }
+                `}
+                `export let check = {
+                `  bench(b, env) {
+                `    b.run("the waitUntil task ran", () => {
+                `      if (!globalThis.drained) throw new Error("the waitUntil task did not run");
+                `    }, {...once, async setup() {
+                `      globalThis.open = true;
+                `      for (let i = 0; i < 100 && !globalThis.drained; i++) await ping(env);
+                `    }});
+                `  }
+                `}
+            )
+          ],
+          bindings = [( name = "SELF", service = "hello" )]
+        )
+      ),
+    ]
+  ))"_kj);
+  capnp::MallocMessageBuilder paramsMessage;
+  auto params = paramsMessage.initRoot<bench::BenchParams>();
+  params.setSkipStartup(true);
+  capnp::MallocMessageBuilder reportMessage;
+  auto report = reportMessage.initRoot<bench::BenchReport>();
+  KJ_EXPECT(test.server.bench(v8System, *test.config, params.asReader(), report, "hello", "*")
+                .wait(test.ws));
+  auto groups = report.getGroups();
+  KJ_ASSERT(groups.size() == 2);
+  KJ_EXPECT(groups[1].getName() == "hello:check");
+  KJ_ASSERT(groups[1].getCases().size() == 1);
+  KJ_EXPECT(groups[1].getCases()[0].getStatus() == bench::BenchReport::Case::Status::OK,
+      groups[1].getCases()[0].getError());
+}
+
+KJ_TEST("Server: bench fails under Service Workers syntax") {
+  setBenchMode();
+  KJ_DEFER(unsetBenchModeForTest());
+
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          serviceWorkerScript = `addEventListener("bench", () => {});
+        )
+      ),
+    ]
+  ))"_kj);
+  capnp::MallocMessageBuilder paramsMessage;
+  auto params = paramsMessage.initRoot<bench::BenchParams>();
+  params.setSkipStartup(true);
+  capnp::MallocMessageBuilder reportMessage;
+  auto report = reportMessage.initRoot<bench::BenchReport>();
+  KJ_EXPECT_LOG(DBG, "jsg.Error: Benchmarks are not currently supported with Service Workers");
+  KJ_EXPECT(!test.server.bench(v8System, *test.config, params.asReader(), report, "hello", "*")
+                 .wait(test.ws));
+  auto groups = report.getGroups();
+  KJ_ASSERT(groups.size() == 1);
+  KJ_EXPECT(groups[0].getError() ==
+          "expected exportedHandler != nullptr; jsg.Error: Benchmarks are not currently supported "
+          "with Service Workers syntax."_kj,
+      groups[0].getError());
+}
+
 KJ_TEST("Server: bench groups can be larger than capnp's default traversal limit") {
   setBenchMode();
   KJ_DEFER(unsetBenchModeForTest());

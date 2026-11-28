@@ -960,6 +960,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
     return entrypoint::runScheduled(
         kj::heap(entrypoint::Invocation{
           .request = kj::mv(incomingRequest),
+          .waitUntilTasks = waitUntilTasks,
           .entrypointName = entrypointName.map([](kj::String& name) { return kj::str(name); }),
           .versionInfo = kj::mv(versionInfo),
           .props = kj::mv(props),
@@ -1148,30 +1149,21 @@ kj::Promise<void> WorkerEntrypoint::bench(
   auto incomingRequest =
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "bench() can only be called once"));
   this->incomingRequest = kj::none;
-  auto& context = incomingRequest->getContext();
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
-  }
 
-  incomingRequest->delivered();
+  // Rust reports the event to the tracer, delivers it, calls the handler's bench() in
+  // IoContext::run() and waits for its group, then drains the request (see entrypoint/bench.rs).
   // Background work that the cases leave behind may continue; it isn't waited for.
-  KJ_DEFER(incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest)));
-
-  // Unlike test(), this awaits the handler directly rather than through finishScheduled(), since
-  // the report needs the handler's result.
-  auto result = co_await context.run(
-      [params, entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
-          props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
-    TRACE_EVENT("workerd", "WorkerEntrypoint::bench() run");
-    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
-
-    return context.awaitJs(lock,
-        lock.getGlobalScope().bench(lock,
-            lock.getExportedHandler(
-                entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()),
-            params));
-  });
+  capnp::MallocMessageBuilder paramsMessage;
+  paramsMessage.setRoot(params);
+  auto result = co_await entrypoint::runBench(
+      kj::heap(entrypoint::Invocation{
+        .request = kj::mv(incomingRequest),
+        .waitUntilTasks = waitUntilTasks,
+        .entrypointName = entrypointName.map([](kj::String& name) { return kj::str(name); }),
+        .versionInfo = kj::mv(versionInfo),
+        .props = kj::mv(props),
+      }),
+      capnp::messageToFlatArray(paramsMessage));
   // A group holds up to MAX_SAMPLES wall and CPU samples per case, which can be more than the
   // default traversal limit.
   capnp::FlatArrayMessageReader message(
@@ -1196,6 +1188,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
   // task and waits for the request to finish (see entrypoint/test.rs).
   return wrapWithCanceler(entrypoint::runTest(kj::heap(entrypoint::Invocation{
     .request = kj::mv(incomingRequest),
+    .waitUntilTasks = waitUntilTasks,
     .entrypointName = entrypointName.map([](kj::String& name) { return kj::str(name); }),
     .versionInfo = kj::mv(versionInfo),
     .props = kj::mv(props),

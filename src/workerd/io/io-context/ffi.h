@@ -44,9 +44,9 @@ void incoming_request_set_scheduled_event_info(
 void incoming_request_set_custom_event_info(IncomingRequest& request);
 
 // Rust type, defined in ffi.rs.
-struct WaitUntilRun;
+struct RunInContext;
 
-// The C++ work that a run in a waitUntil task does in IoContext::run() before it calls Rust, as a
+// The C++ work that a run does in IoContext::run() before it calls Rust, as a
 // C++ event's lambda finds the exported handler before it calls it. run() returns the handles that
 // the Rust function receives, in the lock's HandleScope. An exception that it throws fails the run
 // as one that C++ code run() runs throws: a JavaScript exception, left pending, is logged as
@@ -69,7 +69,27 @@ class RunPrelude {
 // uncaught, with the KJ exception it fails with, unchanged, or with the exception of its future. If
 // the function panics, the task fails with a KJ exception.
 void incoming_request_run_in_wait_until(
-    IncomingRequest& request, kj::Own<RunPrelude> prelude, ::rust::Box<WaitUntilRun> run);
+    IncomingRequest& request, kj::Own<RunPrelude> prelude, ::rust::Box<RunInContext> run);
+
+// The promise of a run that incoming_request_run() started, which Rust waits for with
+// run_promise_wait().
+struct RunPromise {
+  kj::Promise<void> promise;
+};
+
+// context.run(...) on the request's IoContext, as C++ runs an event's handler whose result it waits
+// for: runs `prelude` and the function of `run` as incoming_request_run_in_wait_until() does.
+// Returns the run's promise, which resolves once the function's future has and fails as that task
+// does. Throws what run() throws when it is called, as when the request is not current.
+kj::Own<RunPromise> incoming_request_run(
+    IncomingRequest& request, kj::Own<RunPrelude> prelude, ::rust::Box<RunInContext> run);
+
+// Waits for the run of `promise`.
+kj::Promise<void> run_promise_wait(kj::Own<RunPromise> promise);
+
+// IoContext::IncomingRequest::drain(waitUntilTasks, request): the request's waitUntil tasks keep
+// running in `waitUntilTasks` until they finish.
+void incoming_request_drain(kj::Own<IncomingRequest> request, kj::TaskSet& waitUntilTasks);
 
 // IoContext::IncomingRequest::finishScheduled(request). An exception that it throws rejects the
 // promise.

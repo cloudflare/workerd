@@ -15,6 +15,9 @@ namespace workerd::entrypoint {
 // owns it from then on, and operates on it through the calls in `entrypoint/ffi.h`.
 struct Invocation {
   kj::Own<IoContext::IncomingRequest> request;
+  // The WorkerEntrypoint's waitUntil tasks, which outlive it, and in which draining the request
+  // waits for its own waitUntil tasks (IoContext::IncomingRequest::drain()).
+  kj::TaskSet& waitUntilTasks;
   kj::Maybe<kj::String> entrypointName;
   kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;
@@ -58,5 +61,17 @@ struct TestHandles {
 // exception is thrown on. The entrypoint crate runs it as the C++ prelude of a run in a waitUntil
 // task (`io_context::RunPrelude`), before Rust holds the lock.
 TestHandles getTestHandles(Worker::Lock& lock, IoContext& context, HandlerLookup lookup);
+
+// Finds the exported handler that `lookup` names, as getTestHandles() does, and starts its
+// bench() handler with `params`, an encoded `BenchParams` message, through
+// Worker::Api::runBench(), which only `workerd bench` implements. Returns the promise for the
+// group: an ArrayBuffer that holds its `BenchReport.Group`, without its name, as an encoded
+// message. Throws a JavaScript Error, as a KJ exception, under Service Workers syntax, and throws
+// on what finding or starting the handler throws. The entrypoint crate runs it as the C++ prelude
+// of the run that waits for the group, before Rust holds the lock.
+v8::Local<v8::Promise> startBench(Worker::Lock& lock,
+    IoContext& context,
+    HandlerLookup lookup,
+    kj::ArrayPtr<const capnp::word> params);
 
 }  // namespace workerd::entrypoint
