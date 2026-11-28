@@ -77,6 +77,10 @@ class SqliteDatabase {
   // Allow 34 bytes of padding for V8 serialization overhead beyond the 8 MiB row limit.
   static constexpr int MAX_ROW_LENGTH = 8 * 1024 * 1024 + 34;
 
+  // SQLite's soft heap limit for the whole process, under which it frees cache. The first
+  // SqliteDatabase to open sets it, and setMaxMemoryPerProcessBytes() sets it again.
+  static constexpr int64_t SOFT_HEAP_LIMIT_BYTES = 128 << 20;
+
   class Vfs;
   class Query;
   class Statement;
@@ -120,6 +124,14 @@ class SqliteDatabase {
     uint64_t rowsWritten;
     uint64_t statementCount;
   };
+
+  // Sets SQLite's hard heap limit for the whole process, 0 for none, and returns the one it
+  // replaces. Unlike `sqliteMaxMemoryPerProcessBytes`, which only the first SqliteDatabase that a
+  // process opens applies, it applies at once, and the latest call wins. It also sets the soft heap
+  // limit again, which SQLite lowers to a lower hard limit, so that removing or raising the hard
+  // limit raises the soft one back. It initializes SQLite, so a custom allocator must already be
+  // installed.
+  static int64_t setMaxMemoryPerProcessBytes(int64_t bytes);
 
   SqliteDatabase(const Vfs& vfs,
       kj::Path path,
@@ -641,6 +653,13 @@ class SqliteDatabase::Query final: private ResetListener {
   // that the method is being run on, otherwise this is quite a gotcha.
   uint changeCount();
 
+  // The number of rows that this query inserted, updated or deleted, once it is done. Unlike
+  // changeCount(), it is this query's count even when another statement finished later, and 0 for a
+  // statement that changes no rows, such as CREATE TABLE, BEGIN or a PRAGMA, for which
+  // changeCount() returns the count of an earlier statement. Rows changed by triggers are left out,
+  // as sqlite3_changes() leaves them out.
+  uint64_t ownChangeCount();
+
   // Advance to the next row.
   void nextRow() {
     nextRow(/*first=*/false);
@@ -663,6 +682,13 @@ class SqliteDatabase::Query final: private ResetListener {
 
   // Get the value at the given column, coercing it to the desired type according to SQLite rules.
   kj::StringPtr getText(uint column);
+
+  // getBlob() and getText() for a caller that must not read an empty value where SQLite ran out of
+  // memory converting the value (a number to text, a zeroblob() to bytes, text to the encoding
+  // asked for): these throw "out of memory" instead. NULL reads as empty, and getCheckedText()
+  // never returns a null pointer.
+  kj::ArrayPtr<const byte> getCheckedBlob(uint column);
+  kj::StringPtr getCheckedText(uint column);
 
   // Get the value at the given column, coercing it to the desired type according to SQLite rules.
   int getInt(uint column);
@@ -781,6 +807,11 @@ class SqliteDatabase::Query final: private ResetListener {
   // refer to gets destroyed as part of the reset process.
   uint64_t rowsRead = 0;
   uint64_t rowsWritten = 0;
+
+  // sqlite3_total_changes64() before the first step, and the query's own change count once it is
+  // done; see ownChangeCount().
+  int64_t totalChangesBefore = 0;
+  uint64_t ownChanges = 0;
 
   // Whether this query allows unconfirmed writes.
   bool allowUnconfirmed = false;

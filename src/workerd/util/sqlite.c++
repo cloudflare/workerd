@@ -611,6 +611,14 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
 
+int64_t SqliteDatabase::setMaxMemoryPerProcessBytes(int64_t bytes) {
+  KJ_REQUIRE(bytes >= 0, "negative limit", bytes);
+  sqlite3_int64 prior = sqlite3_hard_heap_limit64(bytes);
+  KJ_REQUIRE(prior >= 0, "SQLite could not be initialized");
+  sqlite3_soft_heap_limit64(SOFT_HEAP_LIMIT_BYTES);
+  return prior;
+}
+
 SqliteDatabase::SqliteDatabase(const Vfs& vfs,
     kj::Path path,
     kj::Maybe<kj::WriteMode> maybeMode,
@@ -1534,7 +1542,7 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // mechanism to prevent SQLite from consuming too much per-process memory. The primary mechanism
   // for limiting SQLite memory consumption is the metering done in the sqlite-metering module.
   static bool doOnce KJ_UNUSED = [hardHeapLimit = sqliteMaxMemoryPerProcessBytes]() {
-    sqlite3_soft_heap_limit64(128u << 20);
+    sqlite3_soft_heap_limit64(SOFT_HEAP_LIMIT_BYTES);
     sqlite3_hard_heap_limit64(hardHeapLimit);
     return false;
   }();
@@ -1736,6 +1744,7 @@ void SqliteDatabase::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
 }
 
 void SqliteDatabase::Query::bind(uint i, ValuePtr value) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
 
   KJ_SWITCH_ONEOF(value) {
@@ -1812,6 +1821,9 @@ void SqliteDatabase::Query::nextRow(bool first) {
   db.currentRegulator = regulator;
 
   auto memoryScope = db.enterMemoryScope();
+  if (first) {
+    totalChangesBefore = sqlite3_total_changes64(db);
+  }
   SQLITE_CALL_SCOPE {
     int err = sqlite3_step(statement);
     queryEvent.setQueryResult(err);
@@ -1827,6 +1839,10 @@ void SqliteDatabase::Query::nextRow(bool first) {
     rowsWritten = getRowsWritten();
     if (err == SQLITE_DONE) {
       done = true;
+      // sqlite3_changes() is the count of the last INSERT, UPDATE or DELETE to finish, which is this
+      // query when it is one and has just finished. A query that changed no rows, whatever it is,
+      // left the total as it was.
+      ownChanges = sqlite3_total_changes64(db) == totalChangesBefore ? 0 : sqlite3_changes64(db);
     } else if (err != SQLITE_ROW) {
       SQLITE_CALL_FAILED("sqlite3_step()", err);
     }
@@ -1843,6 +1859,11 @@ uint SqliteDatabase::Query::changeCount() {
   KJ_DREQUIRE(
       columnCount() == 0, "changeCount() can only be called on INSERT/UPDATE/DELETE queries");
   return sqlite3_changes(db);
+}
+
+uint64_t SqliteDatabase::Query::ownChangeCount() {
+  KJ_REQUIRE(done);
+  return ownChanges;
 }
 
 uint SqliteDatabase::Query::columnCount() {
@@ -1886,6 +1907,41 @@ kj::StringPtr SqliteDatabase::Query::getText(uint column) {
   auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   const char* ptr = reinterpret_cast<const char*>(sqlite3_column_text(statement, column));
+  return kj::StringPtr(ptr, sqlite3_column_bytes(statement, column));
+}
+
+kj::ArrayPtr<const byte> SqliteDatabase::Query::getCheckedBlob(uint column) {
+  auto memoryScope = db.enterMemoryScope();
+  sqlite3_stmt* statement = getStatement();
+  // Read before the conversion, after which SQLite leaves the type undefined, and a value it ran
+  // out of memory converting is NULL. A blob's size is read without converting it.
+  int type = sqlite3_column_type(statement, column);
+  size_t blobSize = type == SQLITE_BLOB ? sqlite3_column_bytes(statement, column) : 0;
+  const byte* ptr = reinterpret_cast<const byte*>(sqlite3_column_blob(statement, column));
+  if (ptr == nullptr) {
+    // SQLite returns no bytes for NULL, for empty text and for an empty blob, and none when it
+    // runs out of memory converting a number to text or expanding a zeroblob(). It reads text as
+    // a blob without converting it.
+    bool empty =
+        type == SQLITE_NULL || type == SQLITE_TEXT || (type == SQLITE_BLOB && blobSize == 0);
+    SQLITE_REQUIRE(empty, SQLITE_NOMEM, "out of memory: SQLITE_NOMEM", column);
+    return nullptr;
+  }
+  return kj::arrayPtr(ptr, sqlite3_column_bytes(statement, column));
+}
+
+kj::StringPtr SqliteDatabase::Query::getCheckedText(uint column) {
+  auto memoryScope = db.enterMemoryScope();
+  sqlite3_stmt* statement = getStatement();
+  // Read before the conversion, after which SQLite leaves the type undefined, and a value it ran
+  // out of memory converting is NULL.
+  int type = sqlite3_column_type(statement, column);
+  const char* ptr = reinterpret_cast<const char*>(sqlite3_column_text(statement, column));
+  if (ptr == nullptr) {
+    // SQLite returns text for every value but NULL, unless it runs out of memory converting it.
+    SQLITE_REQUIRE(type == SQLITE_NULL, SQLITE_NOMEM, "out of memory: SQLITE_NOMEM", column);
+    return ""_kj;
+  }
   return kj::StringPtr(ptr, sqlite3_column_bytes(statement, column));
 }
 

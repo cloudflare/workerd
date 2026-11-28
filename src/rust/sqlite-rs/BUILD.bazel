@@ -1,0 +1,50 @@
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC", "CFI_CHECKED_TEST_FEATURES")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "sqlite-rs",
+    srcs = glob(["*.rs"]),
+    cxx_bridge_deps = [
+        "//src/workerd/util:sqlite",
+    ],
+    cxx_bridge_src = "ffi.rs",
+    # Public only so that other bridges, such as the server's, can name SqliteVfs. The bridge's
+    # other types and functions are the crate's internals, not an API to use directly.
+    cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [
+        ":ffi",
+    ],
+    test_deps = [
+        "//src/rust/sqlite-rs/testing:sqlite-rs-testing",
+    ],
+    # C++ calls into Rust from these tests as it does in a binary: through cxx's rust::Fn (the
+    # closure that checked() runs) and its extern "Rust" functions, which call Rust directly from
+    # C++ that cxx generates. Rust is compiled without CFI, so cfi-icall would reject an indirect
+    # call from C++ straight into Rust; the tests run with a downstream release build's CFI checks
+    # so that such a call fails them.
+    test_features = CFI_CHECKED_TEST_FEATURES,
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = [
+        "ffi.c++",
+    ],
+    linkstatic = CC_LIBRARY_LINKSTATIC,
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/workerd/util:sqlite",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+# Snippets that must, or must not, compile against sqlite-rs; each annotates the errors it expects. See
+# build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "compile-tests",
+    srcs = glob(["compile-tests/*.rs"]),
+    deps = [":sqlite-rs"],
+)
