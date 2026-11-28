@@ -43,7 +43,8 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
     OutputGate& outputGate,
     kj::Function<kj::Promise<void>(SpanParent)> commitCallback,
     Hooks& hooks,
-    bool debugAlarmSyncParam)
+    bool debugAlarmSyncParam,
+    ActorSqliteGroupCommit groupCommitParam)
     : db(kj::mv(dbParam)),
       outputGate(outputGate),
       commitCallback(kj::mv(commitCallback)),
@@ -52,7 +53,8 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       metadata(*db),
       commitTasks(*this),
       blockTasks(*this),
-      debugAlarmSync(debugAlarmSyncParam) {
+      debugAlarmSync(debugAlarmSyncParam),
+      groupCommit(groupCommitParam) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
   db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
   lastConfirmedAlarmDbState = metadata.getAlarm();
@@ -354,9 +356,15 @@ void ActorSqlite::startImplicitTxn() {
 
 kj::Promise<void> ActorSqlite::startImplicitTxnImpl(kj::Own<ImplicitTxn> txn) {
   // We implement the magic of accumulating all of the writes between JavaScript awaits in one
-  // transaction by evaluating by awaiting kj::yield() first, which runs the function on the next
-  // turn of the event loop
-  co_await kj::yield();
+  // transaction by yielding to the event loop before committing.
+  if (groupCommit) {
+    // Wait until every event that is ready has run, so that the writes of all the requests that
+    // run in this pass of the event loop share one implicit transaction, and so one commit.
+    co_await kj::yieldUntilQueueEmpty();
+  } else {
+    // Run on the next turn of the event loop.
+    co_await kj::yield();
+  }
 
   // If there were tasks blocking the transaction, wait for them.
   if (!blockTasks.isEmpty()) {

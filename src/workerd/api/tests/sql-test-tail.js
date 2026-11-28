@@ -39,7 +39,7 @@ export const test = {
       durable_object_storage_deleteAll: 1,
       createStringTable: 4,
       runActorFunc: 4,
-      durable_object_storage_sync: 4,
+      durable_object_storage_sync: 6,
       getStringTableIds: 4,
       testMultiStatement: 1,
       testRollbackKvInit: 1,

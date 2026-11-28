@@ -53,6 +53,7 @@ T expectSync(kj::OneOf<T, kj::Promise<T>> result, kj::SourceLocation location = 
 
 struct ActorSqliteTestOptions final {
   bool monitorOutputGate = true;
+  ActorSqliteGroupCommit groupCommit = ActorSqliteGroupCommit::NO;
 };
 
 struct ActorSqliteTest final: public kj::PtrTarget {
@@ -111,7 +112,12 @@ struct ActorSqliteTest final: public kj::PtrTarget {
         vfsDir(kj::newInMemoryDirectory(kj::nullClock())),
         vfs(*vfsDir),
         db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY),
-        actor(kj::attachRef(db), gate, KJ_BIND_METHOD(*this, commitCallback), hooks),
+        actor(kj::attachRef(db),
+            gate,
+            KJ_BIND_METHOD(*this, commitCallback),
+            hooks,
+            /*debugAlarmSync=*/false,
+            options.groupCommit),
         gateBrokenPromise(options.monitorOutputGate ? eagerlyReportExceptions(gate.onBroken())
                                                     : kj::Promise<void>(kj::READY_NOW)) {
     db.afterReset([this](SqliteDatabase& cbDb) {
@@ -2424,6 +2430,77 @@ KJ_TEST("multiple sync() calls for same commit") {
   syncPromise1.wait(test.ws);
   syncPromise2.wait(test.ws);
   syncPromise3.wait(test.ws);
+}
+
+// Writes once, then writes again from an event that becomes ready only after the commit was
+// scheduled, but in the same pass of the event loop (as when a second request is delivered through a
+// few promise continuations). Returns the second request's promise; `firstGateWait` and
+// `secondGateWait` are set to output gate waits taken after each write.
+kj::Promise<void> writeFromTwoRequestsInOneTurn(ActorSqliteTest& test,
+    kj::Maybe<kj::Promise<void>>& firstGateWait,
+    kj::Maybe<kj::Promise<void>>& secondGateWait) {
+  test.put("foo", "bar");
+  firstGateWait = test.gate.wait(nullptr);
+
+  return kj::evalLater([&]() {
+    return kj::evalLater([&]() {
+      test.put("baz", "qux");
+      secondGateWait = test.gate.wait(nullptr);
+    });
+  }).eagerlyEvaluate(nullptr);
+}
+
+KJ_TEST("with group commit, writes of requests that run in one turn share a commit") {
+  ActorSqliteTest test({.groupCommit = ActorSqliteGroupCommit::YES});
+
+  kj::Maybe<kj::Promise<void>> firstGateWait;
+  kj::Maybe<kj::Promise<void>> secondGateWait;
+  auto secondRequest = writeFromTwoRequestsInOneTurn(test, firstGateWait, secondGateWait);
+
+  // The commit waits for the event queue to drain, so both writes are in one transaction and are
+  // committed together.
+  auto commitFulfillers = test.pollAndExpectCalls({"commit"});
+  secondRequest.wait(test.ws);
+  auto& first = KJ_ASSERT_NONNULL(firstGateWait);
+  auto& second = KJ_ASSERT_NONNULL(secondGateWait);
+  KJ_ASSERT(!first.poll(test.ws));
+  KJ_ASSERT(!second.poll(test.ws));
+
+  commitFulfillers[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(first.poll(test.ws));
+  KJ_ASSERT(second.poll(test.ws));
+
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "qux"_kj.asBytes());
+}
+
+KJ_TEST("without group commit, a write that runs later in the same turn gets its own commit") {
+  ActorSqliteTest test;
+
+  kj::Maybe<kj::Promise<void>> firstGateWait;
+  kj::Maybe<kj::Promise<void>> secondGateWait;
+  auto secondRequest = writeFromTwoRequestsInOneTurn(test, firstGateWait, secondGateWait);
+
+  // The first commit runs on the next turn, before the second write, which needs its own commit.
+  auto commitFulfillers = test.pollAndExpectCalls({"commit", "commit"});
+  secondRequest.wait(test.ws);
+  auto& first = KJ_ASSERT_NONNULL(firstGateWait);
+  auto& second = KJ_ASSERT_NONNULL(secondGateWait);
+  KJ_ASSERT(!first.poll(test.ws));
+  KJ_ASSERT(!second.poll(test.ws));
+
+  commitFulfillers[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(first.poll(test.ws));
+  KJ_ASSERT(!second.poll(test.ws));
+
+  commitFulfillers[1]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(second.poll(test.ws));
+
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "qux"_kj.asBytes());
 }
 
 KJ_TEST("allowUnconfirmed setAlarm does not block output gate") {

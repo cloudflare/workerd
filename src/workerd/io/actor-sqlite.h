@@ -9,8 +9,12 @@
 #include <workerd/io/trace.h>
 #include <workerd/util/sqlite-kv.h>
 #include <workerd/util/sqlite-metadata.h>
+#include <workerd/util/strong-bool.h>
 
 namespace workerd {
+
+// See the `groupCommit` parameter of ActorSqlite's constructor.
+WD_STRONG_BOOL(ActorSqliteGroupCommit);
 
 // An implementation of ActorCacheOps that is backed by SqliteKv.
 class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorHandler {
@@ -58,11 +62,21 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // `commitCallback` will be invoked after committing a transaction. The output gate will block on
   // the returned promise. This can be used e.g. when the database needs to be replicated to other
   // machines before being considered durable.
+  //
+  // By default, an implicit transaction commits on the next turn of the event loop. With
+  // `groupCommit`, it commits once the event queue is empty instead, so the writes of every request
+  // that runs in one pass of the event loop share one commit. This pays off where each commit is
+  // expensive and blocks the thread, e.g. a synchronous fsync(): while one commit is in progress,
+  // the next batch accumulates, so the batch size adapts to load. Each request's output is still
+  // held until the commit containing its writes has completed. But code that expects an `await` to
+  // have closed the implicit transaction (say, before `PRAGMA foreign_keys`, which does nothing
+  // inside a transaction) may find it still open.
   explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       OutputGate& outputGate,
       kj::Function<kj::Promise<void>(SpanParent)> commitCallback,
       Hooks& hooks = Hooks::getDefaultHooks(),
-      bool debugAlarmSync = false);
+      bool debugAlarmSync = false,
+      ActorSqliteGroupCommit groupCommit = ActorSqliteGroupCommit::NO);
 
   bool isCommitScheduled() {
     return !currentTxn.is<NoTxn>() || deleteAllCommitScheduled;
@@ -335,6 +349,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   // Debug flag for tracing alarm synchronization issues for specific namespaces
   bool debugAlarmSync = false;
+
+  ActorSqliteGroupCommit groupCommit;
 
   void startImplicitTxn();
 

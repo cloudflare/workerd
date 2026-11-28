@@ -525,7 +525,10 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
                    SpanParent) -> kj::Promise<void> { return result_task_run(c->commit()); };
       committer = kj::none;
     }
-    auto sqlite = kj::heap<ActorSqlite>(kj::mv(db), outputGate, kj::mv(commit), *sqliteHooks);
+    // Each commit syncs the WAL to disk, blocking the thread, so let the requests that run in one
+    // pass of the event loop share a commit.
+    auto sqlite = kj::heap<ActorSqlite>(kj::mv(db), outputGate, kj::mv(commit), *sqliteHooks,
+        /*debugAlarmSync=*/false, ActorSqliteGroupCommit::YES);
     KJ_IF_SOME(root, rootHooks) {
       if (storage->actors->replicated()) {
         KJ_IF_SOME(alarm, sqlite->getAlarm({}).tryGet<kj::Maybe<kj::Date>>()) {
