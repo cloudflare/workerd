@@ -45,6 +45,13 @@ import %workspace%/build/ci.bazelrc
 import %workspace%/build/rust_lint.bazelrc
 import %workspace%/build/tools/clang_tidy/clang_tidy.bazelrc
 
+# Build a runfiles tree only for a target that bazel runs locally, with `bazel run` or `bazel test`,
+# rather than for every target built. Writing the trees' symlinks is slow on macOS and on slow
+# disks, and with remote execution and --remote_download_minimal they point at outputs that were
+# never downloaded. A binary built with `bazel build` and started from bazel-bin finds no runfiles
+# tree; start it with `bazel run`, or build it with --build_runfile_links.
+build --nobuild_runfile_links
+
 # Continue building locally when remote cache entries fail to materialize
 build --incompatible_remote_local_fallback_for_remote_cache
 
