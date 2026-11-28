@@ -188,6 +188,14 @@ class RevocableWebSocket final: public kj::WebSocket {
     return 0;
   }
 
+  // Returns the wrapped WebSocket, unless it has been revoked.
+  kj::Maybe<kj::WebSocket&> tryGetInner() {
+    KJ_IF_SOME(inner, ws.tryGet<kj::Own<kj::WebSocket>>()) {
+      return *inner;
+    }
+    return kj::none;
+  }
+
  private:
   template <typename T>
   kj::Promise<T> wrap(kj::Promise<T> prom) {
@@ -211,6 +219,19 @@ class RevocableWebSocket final: public kj::WebSocket {
   kj::Promise<void> revokeProm;
   kj::Canceler canceler;
 };
+
+}  // namespace
+
+kj::WebSocket& unwrapRevocableWebSocket(kj::WebSocket& webSocket) {
+  kj::WebSocket* current = &webSocket;
+  for (;;) {
+    auto& revocable =
+        KJ_UNWRAP_OR(kj::dynamicDowncastIfAvailable<RevocableWebSocket>(*current), return *current);
+    current = &KJ_UNWRAP_OR(revocable.tryGetInner(), return *current);
+  }
+}
+
+namespace {
 
 // The revocation promise shared by everything a RevocableWebSocketWorkerInterface opens. When
 // built from a factory, the promise is only created once something needs it.

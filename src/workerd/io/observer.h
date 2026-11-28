@@ -16,6 +16,10 @@
 #include <kj/string.h>
 #include <kj/time.h>
 
+namespace kj {
+class WebSocket;
+}
+
 namespace workerd {
 
 class IoContext;
@@ -110,6 +114,28 @@ class OutgoingActorCallObserver {
   }
 };
 
+// An embedder's handle for moving one hibernatable WebSocket out of the process that accepted it,
+// for example into the process replacing it during a reload. RequestObserver supplies one when its
+// request becomes a hibernatable WebSocket, and the actor's hibernation manager keeps it with the
+// socket. Workerd never looks inside it: the embedder downcasts it to its own type.
+class WebSocketMigrationLink {
+ public:
+  virtual ~WebSocketMigrationLink() noexcept(false) = default;
+
+  // Resolves once the embedder has continued the WebSocket somewhere else. The request that carried
+  // it then completes successfully, rather than when the connection ends. For a WebSocket that never
+  // moves, the promise never settles, even once the link is destroyed.
+  //
+  // Called at most once, by that request. A WebSocket adopted from another process carries no
+  // request, so its link is never asked.
+  virtual kj::Promise<void> whenMigrated() = 0;
+
+  // Wraps the connection that carries the WebSocket in this process, before any message crosses
+  // it, so that the embedder sees every message in both directions. Called at most once, by the
+  // request that carried the WebSocket. Returns `connection` unchanged by default.
+  virtual kj::Own<kj::WebSocket> wrapConnection(kj::Own<kj::WebSocket> connection);
+};
+
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
 //
 // Observing anything is optional. Default implementations of all methods observe nothing.
@@ -124,6 +150,13 @@ class RequestObserver: public kj::Refcounted {
   virtual kj::Maybe<kj::Own<WebSocketObserver>> tryCreateWebSocketObserver() {
     return kj::none;
   };
+
+  // Called when the request is converted to a WebSocket that the worker accepted as hibernatable.
+  // An embedder that can move hibernated WebSockets to another process returns a link for this
+  // one; see WebSocketMigrationLink.
+  virtual kj::Maybe<kj::Own<WebSocketMigrationLink>> tryCreateWebSocketMigrationLink() {
+    return kj::none;
+  }
 
   // This is called when a writable byte stream is created whilst processing this request. It will
   // be destroyed when the corresponding byte stream is destroyed.

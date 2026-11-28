@@ -707,8 +707,25 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
 
     auto& context = IoContext::current();
 
+    // An embedder may be able to continue a hibernatable WebSocket in another process without
+    // closing the client connection. Its link sees the connection before any message crosses it.
+    kj::Maybe<kj::Own<WebSocketMigrationLink>> migrationLink;
+    KJ_IF_SOME(peerRef, maybePeerRef) {
+      if (peerRef->isHibernatable()) {
+        KJ_IF_SOME(actor, context.getActor()) {
+          if (actor.getHibernationManager() != kj::none) {
+            KJ_IF_SOME(link, request.tryCreateWebSocketMigrationLink()) {
+              other = link->wrapConnection(kj::mv(other));
+              migrationLink = kj::mv(link);
+            }
+          }
+        }
+      }
+    }
+
     auto upstream = other->pumpTo(*self);
     auto downstream = self->pumpTo(*other);
+    kj::Maybe<kj::Promise<void>> whenMigrated;
 
     KJ_IF_SOME(peerRef, maybePeerRef) {
       // We're terminating the WebSocket in this worker, so the upstream promise (which pumps
@@ -784,6 +801,15 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
         }
         co_return;
       }
+      // Once the embedder has continued the WebSocket elsewhere, this connection is no longer
+      // needed, and the request completes successfully.
+      KJ_IF_SOME(link, migrationLink) {
+        auto manager =
+            KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(context.getActor()).getHibernationManager());
+        whenMigrated = link->whenMigrated();
+        manager->attachMigrationLink(*peerRef, kj::mv(link));
+      }
+
       // Drop the maybePeerRef before we hit the BEGIN_DEFERRED_PROXYING below.
       maybePeerRef = kj::none;
     }
@@ -797,6 +823,9 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
     auto promise = kj::joinPromises(
         kj::arr(upstream.eagerlyEvaluate(nullptr), downstream.eagerlyEvaluate(nullptr)))
                        .attach(kj::mv(self), kj::mv(other));
+    KJ_IF_SOME(migrated, whenMigrated) {
+      promise = promise.exclusiveJoin(kj::mv(migrated));
+    }
 
     // Either:
     // 1. This websocket is just proxying through, in which case we can allow the IoContext to go

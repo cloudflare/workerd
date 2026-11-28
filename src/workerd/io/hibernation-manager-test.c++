@@ -294,10 +294,14 @@ kj::Rc<Worker::Actor::HibernationManager> makeTestHm(
 //
 // Needs an IoContext (the api::WebSocket constructor stores IoOwn members), supplied by the
 // IR. Test code should pick an IR whose IoContext should "own" this api::WebSocket.
+//
+// With a `migrationLink`, the WebSocket can be moved to another process, as if the embedder had
+// returned the link from RequestObserver::tryCreateWebSocketMigrationLink().
 kj::Own<kj::WebSocket> acceptNewWebSocket(TestFixture& fixture,
     IoContext::IncomingRequest& request,
     Worker::Actor::HibernationManager& hm,
-    kj::StringPtr tag = ""_kj) {
+    kj::StringPtr tag = ""_kj,
+    kj::Maybe<kj::Own<WebSocketMigrationLink>> migrationLink = kj::none) {
   kj::Own<kj::WebSocket> eyeball;
   fixture.enterContext(request, [&](const TestFixture::Environment& env) {
     auto pipe = kj::newWebSocketPipe();
@@ -314,10 +318,23 @@ kj::Own<kj::WebSocket> acceptNewWebSocket(TestFixture& fixture,
 #endif
     auto tags = kj::heapArray<kj::String>(tag.size() == 0 ? 0 : 1);
     if (tag.size() != 0) tags[0] = kj::str(tag);
+    auto& webSocket = *apiWs;
     hm.acceptWebSocket(kj::mv(apiWs), tags);
+    KJ_IF_SOME(link, migrationLink) {
+      hm.attachMigrationLink(webSocket, kj::mv(link));
+    }
   });
   return eyeball;
 }
+
+// A migration link whose connection is never moved. The tests drive the HibernationManager's half
+// of a migration directly.
+class TestMigrationLink final: public WebSocketMigrationLink {
+ public:
+  kj::Promise<void> whenMigrated() override {
+    return kj::NEVER_DONE;
+  }
+};
 
 // Send a string message from the DO side, on the WebSocket identified by `tag` (or the only
 // untagged one if `tag` is empty). Enters the supplied IR's IoContext for the duration of
@@ -2528,6 +2545,187 @@ KJ_TEST(
   KJ_ASSERT(close.reason == "gated-bye"_kj, close.reason);
 
   blocker.wait(fixture.getWaitScope());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: held events are delivered once the hold ends") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("hold-events")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+
+  auto hold = hm->holdEvents();
+  // While events are held, the manager still takes every message the client sends.
+  end1->send("one"_kj).wait(fixture.getWaitScope());
+  end1->send("two"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 0, stats.customEventCalls);
+
+  hold = nullptr;
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 2, stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: only hibernated WebSockets can move") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("migration-preconditions")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+
+  // A manager without WebSockets has nothing to move.
+  KJ_ASSERT(hm->tryBeginMigration() == kj::none);
+
+  auto end1 KJ_UNUSED =
+      acceptNewWebSocket(fixture, *request, *hm, "a"_kj, kj::heap<TestMigrationLink>());
+  // The WebSocket is still active.
+  KJ_ASSERT(hm->tryBeginMigration() == kj::none);
+
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  {
+    auto migration = KJ_ASSERT_NONNULL(hm->tryBeginMigration());
+    KJ_ASSERT(migration->size() == 1);
+    // Only one migration at a time.
+    KJ_ASSERT(hm->tryBeginMigration() == kj::none);
+  }
+
+  // A WebSocket without a link moves along with the rest, and the embedder decides what becomes
+  // of it.
+  auto end2 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm, "b"_kj);
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  {
+    auto migration = KJ_ASSERT_NONNULL(hm->tryBeginMigration());
+    KJ_ASSERT(migration->size() == 2);
+    KJ_ASSERT((migration->getLink(0) == kj::none) != (migration->getLink(1) == kj::none));
+  }
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: a migrated WebSocket continues in another manager") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("migrate")));
+  auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm, "room"_kj, kj::heap<TestMigrationLink>());
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+
+  auto migration = KJ_ASSERT_NONNULL(hm->tryBeginMigration());
+
+  // A message the client sends while the WebSocket is moving is held, and moves with it.
+  end1->send("held"_kj).wait(fixture.getWaitScope());
+  migration->whenReceived(0, 1).wait(fixture.getWaitScope());
+  migration->whenSendsSettled().wait(fixture.getWaitScope());
+  auto webSockets = migration->exportWebSockets();
+  // Exporting leaves the WebSocket in place, so the embedder can still give up.
+  KJ_ASSERT(hm->getWebSocketCount() == 1);
+  auto connections = migration->finish();
+  migration = nullptr;
+
+  KJ_ASSERT(webSockets.size() == 1);
+  auto& exported = webSockets[0];
+  KJ_ASSERT(exported.tags.size() == 1 && exported.tags[0] == "room"_kj);
+  KJ_ASSERT(exported.pendingMessages.size() == 1);
+  KJ_ASSERT(exported.pendingMessages[0].get<kj::String>() == "held"_kj);
+
+  // The old manager lets the WebSocket go without telling the Durable Object it closed.
+  fixture.pollEventLoop();
+  KJ_ASSERT(hm->getWebSocketCount() == 0);
+  KJ_ASSERT(stats.customEventCalls == 0, stats.customEventCalls);
+
+  // Continue the WebSocket over a new connection in a new manager. The old connection would
+  // forward to it, so the client keeps talking to the same end.
+  auto hm2 = makeTestHm(fixture);
+  hm2->importSettings(hm->exportSettings());
+  auto pipe = kj::newWebSocketPipe();
+  auto end2 = kj::mv(pipe.ends[0]);
+  {
+    // Nothing is delivered until the embedder has adopted every WebSocket.
+    auto hold = hm2->holdEvents();
+    hm2->adoptWebSocket(kj::mv(exported), kj::mv(pipe.ends[1]), kj::heap<TestMigrationLink>());
+    fixture.pollEventLoop();
+    KJ_ASSERT(stats.customEventCalls == 0, stats.customEventCalls);
+  }
+  KJ_ASSERT(hm2->getWebSocketCount() == 1);
+
+  // The held message is delivered first.
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 1, stats.customEventCalls);
+
+  // The auto-response moved with the settings.
+  end2->send("ping"_kj).wait(fixture.getWaitScope());
+  auto pong = end2->receive().wait(fixture.getWaitScope());
+  KJ_ASSERT(pong.is<kj::String>() && pong.get<kj::String>() == "pong"_kj);
+  KJ_ASSERT(stats.customEventCalls == 1, stats.customEventCalls);
+
+  // An adopted WebSocket that was given a link can move again.
+  KJ_ASSERT(hm2->tryBeginMigration() != kj::none);
+
+  // The Durable Object finds the WebSocket by its tag.
+  sendFromDo(fixture, *request, *hm2, "hello"_kj, "room"_kj);
+  auto hello = end2->receive().wait(fixture.getWaitScope());
+  KJ_ASSERT(hello.is<kj::String>() && hello.get<kj::String>() == "hello"_kj);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: WebSockets adopted before the actor exists wait for its loopback") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("adopt-before-actor")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm, "room"_kj, kj::heap<TestMigrationLink>());
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+
+  auto migration = KJ_ASSERT_NONNULL(hm->tryBeginMigration());
+  end1->send("held"_kj).wait(fixture.getWaitScope());
+  migration->whenReceived(0, 1).wait(fixture.getWaitScope());
+  auto webSockets = migration->exportWebSockets();
+  auto connections = migration->finish();
+  migration = nullptr;
+
+  // The new process restores the WebSocket before its actor starts.
+  auto hm2 = kj::rc<LegacyHibernationManagerImpl>(0);
+  auto pipe = kj::newWebSocketPipe();
+  hm2->adoptWebSocket(kj::mv(webSockets[0]), kj::mv(pipe.ends[1]), kj::none);
+  fixture.pollEventLoop();
+  KJ_ASSERT(hm2->getWebSocketCount() == 1);
+  KJ_ASSERT(stats.customEventCalls == 0, stats.customEventCalls);
+
+  // Once the actor exists, the held message is delivered.
+  hm2->setTimerChannel(fixture.getTimerChannel());
+  hm2->setLoopback(fixture.getActor().getLoopback());
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 1, stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: a migration given up after export leaves the WebSockets in place") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("migration-given-up")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm, "room"_kj, kj::heap<TestMigrationLink>());
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  {
+    auto migration = KJ_ASSERT_NONNULL(hm->tryBeginMigration());
+    end1->send("held"_kj).wait(fixture.getWaitScope());
+    migration->whenReceived(0, 1).wait(fixture.getWaitScope());
+    auto webSockets = migration->exportWebSockets();
+    KJ_ASSERT(webSockets.size() == 1);
+    fixture.pollEventLoop();
+    KJ_ASSERT(stats.customEventCalls == 0, stats.customEventCalls);
+  }
+
+  // Dropping the migration delivers what it held, and the WebSocket stays.
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 1, stats.customEventCalls);
+  KJ_ASSERT(hm->getWebSocketCount() == 1);
+
   fixture.drainAndDestroy(kj::mv(request));
 }
 
