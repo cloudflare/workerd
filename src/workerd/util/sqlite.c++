@@ -1851,6 +1851,11 @@ uint SqliteDatabase::Query::columnCount() {
   return sqlite3_column_count(statement);
 }
 
+bool SqliteDatabase::Query::isReadOnly() {
+  auto memoryScope = db.enterMemoryScope();
+  return sqlite3_stmt_readonly(getStatement());
+}
+
 SqliteDatabase::Query::ValuePtr SqliteDatabase::Query::getValue(uint column) {
   auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
