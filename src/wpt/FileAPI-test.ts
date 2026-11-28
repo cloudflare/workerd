@@ -191,14 +191,7 @@ export default {
     comment: 'Helper loaded by the send-file-formdata tests via META script',
     omittedTests: true,
   },
-  'unicode.any.js': {
-    comment:
-      'Strings in blobParts should be converted as USVString, replacing unpaired surrogates with U+FFFD, but Blob::BitsValue uses kj::String (blob.h) and they come back unreplaced',
-    expectedFailures: [
-      'Test that unpaired surrogates are replaced by Blob constructor',
-      'Test that unpaired surrogates are replaced by File constructor',
-    ],
-  },
+  'unicode.any.js': {},
   'url/url-charset.window.js': {
     comment: 'Opens blob URLs with window.open()',
     omittedTests: true,

@@ -381,6 +381,7 @@ wpt_test(
 
 wpt_test(
     name = "FileAPI",
+    compat_flags = ["blob_string_parts_usvstring"],
     config = "FileAPI-test.ts",
     wpt_directory = "@wpt//:FileAPI@module",
 )

@@ -1887,4 +1887,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-12-16");
   # Enables delivery of UDP flows to the Worker's connect() handler and exposes the global
   # Datagram constructor and Socket.prototype.protocol. The protocol reports "tcp" or "udp".
+
+  blobStringPartsUsvString @211 :Bool
+      $compatEnableFlag("blob_string_parts_usvstring")
+      $compatDisableFlag("blob_string_parts_wtf8")
+      $compatEnableDate("2026-12-15");
+  # The Blob and File constructors convert their string parts as USVString, as the File API spec
+  # requires, so an unpaired surrogate becomes U+FFFD (EF BF BD). Without the flag it is kept as
+  # WTF-8, so `new Blob(['\ud800'])` holds ED A0 80, which is not valid UTF-8. Both take 3 bytes,
+  # so a Blob's size is the same either way; only its bytes differ.
 }
