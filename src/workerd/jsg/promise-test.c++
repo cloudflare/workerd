@@ -248,5 +248,99 @@ KJ_TEST("a then on Object.prototype isn't called for a promise resolved with a C
       "boolean", "false");
 }
 
+// Makes a PromiseContextScope's tag, counting how often it is asked to.
+struct DeferredPromiseTag {
+  uint makeCount = 0;
+  kj::Maybe<JsRef<JsObject>> tag;
+
+  static v8::Local<v8::Object> make(v8::Isolate* isolate, void* data) {
+    auto& self = *static_cast<DeferredPromiseTag*>(data);
+    auto& js = Lock::from(isolate);
+    ++self.makeCount;
+    auto tag = js.obj();
+    self.tag = JsRef(js, tag);
+    return tag;
+  }
+};
+
+uint crossContextCount = 0;
+kj::Maybe<JsRef<JsObject>> crossContextTag;
+
+KJ_TEST("a deferred promise context tag is made by the scope's first promise") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+  e.run([](auto& lock) {
+    Lock& js = lock;
+    auto eval = [&](kj::StringPtr code) {
+      auto script = check(v8::Script::Compile(js.v8Context(), v8Str(js.v8Isolate, code)));
+      check(script->Run(js.v8Context()));
+    };
+
+    js.v8Isolate->SetPromiseCrossContextCallback(
+        [](v8::Local<v8::Context> context, v8::Local<v8::Promise> promise,
+            v8::Local<v8::Object> tag) -> v8::MaybeLocal<v8::Promise> {
+      auto& js = Lock::current();
+      ++crossContextCount;
+      crossContextTag = JsRef(js, JsObject(tag));
+      return promise;
+    });
+    KJ_DEFER(js.v8Isolate->SetPromiseCrossContextCallback(nullptr));
+
+    DeferredPromiseTag first;
+    {
+      v8::Isolate::PromiseContextScope scope(js.v8Isolate, &DeferredPromiseTag::make, &first);
+      eval("globalThis.x = 1 + 1");
+      KJ_EXPECT(first.makeCount == 0);
+
+      // JavaScript promises get their tag from the builtins that make them.
+      eval("globalThis.p = new Promise(() => {}); Promise.resolve(1); (async () => {})()");
+      KJ_EXPECT(first.makeCount == 1);
+      eval("p.then(() => {})");
+      KJ_EXPECT(crossContextCount == 0);
+    }
+
+    DeferredPromiseTag second;
+    {
+      // A promise from another scope is from another context, both before this scope has a tag
+      // and after it has made one.
+      v8::Isolate::PromiseContextScope scope(js.v8Isolate, &DeferredPromiseTag::make, &second);
+      eval("p.then(() => {})");
+      KJ_EXPECT(crossContextCount == 1);
+      JsValue seenTag = KJ_ASSERT_NONNULL(crossContextTag).getHandle(js);
+      KJ_EXPECT(seenTag.strictEquals(KJ_ASSERT_NONNULL(first.tag).getHandle(js)));
+      eval("p.then(() => {})");
+      KJ_EXPECT(crossContextCount == 2);
+    }
+
+    DeferredPromiseTag third;
+    {
+      // Promises made through the API get their tag from Factory::NewJSPromiseWithoutHook.
+      v8::Isolate::PromiseContextScope scope(js.v8Isolate, &DeferredPromiseTag::make, &third);
+      check(v8::Promise::Resolver::New(js.v8Context()));
+      check(v8::Promise::Resolver::New(js.v8Context()));
+      KJ_EXPECT(third.makeCount == 1);
+    }
+
+    DeferredPromiseTag fourth;
+    {
+      // A subclass's promise is allocated by the Promise constructor rather than by
+      // InnerNewJSPromise.
+      v8::Isolate::PromiseContextScope scope(js.v8Isolate, &DeferredPromiseTag::make, &fourth);
+      eval("globalThis.sub = new (class extends Promise {})(() => {})");
+      KJ_EXPECT(fourth.makeCount == 1);
+      eval("sub.then(() => {})");
+      KJ_EXPECT(crossContextCount == 2);
+    }
+
+    {
+      // A scope that starts with the first scope's tag treats its promises as its own.
+      v8::Isolate::PromiseContextScope scope(
+          js.v8Isolate, KJ_ASSERT_NONNULL(first.tag).getHandle(js));
+      eval("p.then(() => {})");
+      KJ_EXPECT(crossContextCount == 2);
+    }
+    crossContextTag = kj::none;
+  });
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test
