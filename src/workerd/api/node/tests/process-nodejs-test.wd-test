@@ -6,7 +6,8 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [
           (name = "worker", esModule = embed "process-nodejs-test.js"),
-          (name = "mod", esModule = "export const { FOO } = process.env;")
+          (name = "mod", esModule = "export const { FOO } = process.env;"),
+          (name = "lazy", esModule = embed "process-cwd-lazy.js"),
         ],
         compatibilityFlags = [
           "nodejs_compat",

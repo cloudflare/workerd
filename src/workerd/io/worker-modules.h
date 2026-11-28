@@ -124,14 +124,30 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     // if any, is moved out of the way while we are evaluating.
     SuppressIoContextScope suppressIoContextScope;
     KJ_DASSERT(!IoContext::hasCurrent(), "Module evaluation must not be in an IoContext");
-    JSG_TRY(js) {
-      auto ret = jsg::check(v8Module->Evaluate(js.v8Context()));
-      KJ_ASSERT(ret->IsPromise());
-      return jsg::JsPromise(ret.template As<v8::Promise>());
+    // Evaluation runs outside of any IoContext, so without a TmpDirStoreScope
+    // getCurrentWorkingDirectory() has nothing to read and process.cwd() falls
+    // back to "/" (and chdir() fails with EPERM). Provide the same isolate-vfs
+    // scope the top-level bootstrap (worker.c++) and the legacy dynamic import
+    // path use, so cwd is /bundle while evaluating. The bootstrap already
+    // provides one while the main module is evaluated, so only create one when
+    // none is current — the scope asserts against nesting. Temporary files
+    // created during evaluation are discarded with the scope, matching the
+    // top-level behavior.
+    auto evaluate = [&]() -> jsg::JsPromise {
+      JSG_TRY(js) {
+        auto ret = jsg::check(v8Module->Evaluate(js.v8Context()));
+        KJ_ASSERT(ret->IsPromise());
+        return jsg::JsPromise(ret.template As<v8::Promise>());
+      }
+      JSG_CATCH(exception) {
+        return js.rejectedJsPromise(jsg::JsValue(exception.getHandle(js)));
+      }
+    };
+    if (TmpDirStoreScope::hasCurrent()) {
+      return evaluate();
     }
-    JSG_CATCH(exception) {
-      return js.rejectedJsPromise(jsg::JsValue(exception.getHandle(js)));
-    }
+    TmpDirStoreScope tmpDirStoreScope;
+    return evaluate();
   });
 
   // Add the module bundles that are built into the runtime.

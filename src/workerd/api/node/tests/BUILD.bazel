@@ -357,7 +357,7 @@ wd_test(
 
 wd_test(
     src = "process-nodejs-test.wd-test",
-    data = ["process-nodejs-test.js"],
+    data = ["process-nodejs-test.js", "process-cwd-lazy.js"],
 )
 
 wd_test(
