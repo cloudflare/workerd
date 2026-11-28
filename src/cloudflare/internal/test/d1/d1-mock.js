@@ -83,7 +83,11 @@ export class D1MockDO extends DurableObject {
       changes_stmt().raw()
     );
 
-    const stmt = this.sql.prepare(sql)(...params);
+    // The D1 service takes blob parameters as arrays of bytes; SqlStorage
+    // takes them as buffers.
+    const stmt = this.sql.prepare(sql)(
+      ...params.map((p) => (Array.isArray(p) ? new Uint8Array(p) : p))
+    );
     const columnNames = stmt.columnNames;
     const rawResults = Array.from(stmt.raw());
 
