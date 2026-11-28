@@ -80,11 +80,15 @@ jobs:
             bazel-config: release_linux_x64
             target-arch: X64
             bazelflare: true
+            # The PGO workload (build/pgo/README.md), and the types, which the jobs publishing them
+            # below then find in bazelflare's cache.
+            extra-targets: //src/workerd/server/tests/pgo-workload/... //types
           - title: linux-arm64
             os-name: Linux
             image: ubuntu-24.04-arm-16core
             bazel-config: release_linux_arm64
             target-arch: ARM64
+            extra-targets: //src/workerd/server/tests/pgo-workload/...
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
           # release binaries on the macos-26-xlarge runner.
           - title: macOS-x64
@@ -120,8 +124,11 @@ jobs:
       # On release, generate a full WPT report...
       run_tests: true
       upload_test_logs: true
-      # ...and on Linux, run the serving workload on the PGO binary (build/pgo/README.md).
-      test_target: ${{ matrix.os-name == 'Linux' && '//src/wpt/... //src/workerd/server/tests/pgo-workload/...' || '//src/wpt/...' }}
+      # ...building only the binary and what the job tests, not //..., whose test binaries the job
+      # would otherwise link in the release configuration (ThinLTO and PGO on Linux) without running
+      # them. With the same targets to build and test, the job runs a single `bazel test`.
+      build_target: ${{ format('//src/workerd/server:workerd //src/wpt/... {0}', matrix.extra-targets) }}
+      test_target: ${{ format('//src/workerd/server:workerd //src/wpt/... {0}', matrix.extra-targets) }}
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}

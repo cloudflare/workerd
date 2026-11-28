@@ -1,7 +1,10 @@
 load(":coverage.bzl", "llvm_coverage_toolchain")
 
 # The LLVM tools that Bazel's coverage collector runs over a test's profiles, from the toolchain
-# that built the code, for tests that the C++ toolchain doesn't give them to (see wd_test).
+# that built the code, for tests that the C++ toolchain doesn't give them to (see wd_test). The
+# tools are manual, so that //... doesn't build them itself: each depends on its CPU's LLVM
+# distribution, which a build would then fetch whatever CPU it targets. Toolchain resolution still
+# finds them through the toolchain() targets.
 toolchain_type(
     name = "coverage_toolchain_type",
     visibility = ["//visibility:public"],
@@ -11,6 +14,7 @@ llvm_coverage_toolchain(
     name = "coverage_tools_linux_x86_64",
     llvm_cov = "@llvm_linux_x86_64//:llvm-cov",
     llvm_profdata = "@llvm_linux_x86_64//:llvm-profdata",
+    tags = ["manual"],
 )
 
 toolchain(
@@ -27,6 +31,7 @@ llvm_coverage_toolchain(
     name = "coverage_tools_linux_aarch64",
     llvm_cov = "@llvm_linux_aarch64//:llvm-cov",
     llvm_profdata = "@llvm_linux_aarch64//:llvm-profdata",
+    tags = ["manual"],
 )
 
 toolchain(
