@@ -68,6 +68,18 @@ interface NonSerializableInterface {
   field: ReadableStream<string>;
 }
 
+interface InterfaceWithStub {
+  counter: RpcStub<TestCounter>;
+  nested: {
+    counter: RpcStub<TestCounter>;
+  };
+  pair: readonly [RpcStub<TestCounter>, number];
+}
+
+interface CallbackPayload {
+  callback(value: number): Promise<number>;
+}
+
 class TestCounter extends RpcTarget {
   constructor(private val = 0) {
     super();
@@ -305,6 +317,24 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
         fieldCallback: (p: string) => 5,
       },
     };
+  }
+
+  methodAcceptsInterfaceWithStub(arg: InterfaceWithStub): number {
+    void arg;
+    return 1;
+  }
+
+  methodAcceptsCallbacks(
+    callback: (value: number) => Promise<number>,
+    payload: CallbackPayload
+  ): Promise<number> {
+    return callback(1).then((value) => payload.callback(value));
+  }
+
+  methodAcceptsStubCallback(
+    callback: RpcStub<(counter: RpcStub<TestCounter>) => number>
+  ): Promise<number> {
+    return callback(new TestCounter());
   }
 
   nonSerializable1() {
@@ -700,6 +730,46 @@ export default <ExportedHandler<Env>>{
         oInterface.fieldSubLevelInterface.fieldCallback
       ).toEqualTypeOf<RpcStub<(p: string) => number>>(); // stubified
 
+      // Verify `interface` parameters containing RpcStub are unstubified
+      expectTypeOf(
+        s.methodAcceptsInterfaceWithStub({
+          counter: new TestCounter(1),
+          nested: { counter: new TestCounter(2) },
+          pair: [new TestCounter(3), 3],
+        })
+      ).toMatchTypeOf<Promise<number>>();
+
+      using counter = new RpcStub(new TestCounter(4));
+      expectTypeOf(
+        s.methodAcceptsInterfaceWithStub({
+          counter,
+          nested: { counter: new TestCounter(5) },
+          pair: [counter, 4],
+        })
+      ).toMatchTypeOf<Promise<number>>();
+      type PayloadArgument = Parameters<
+        typeof s.methodAcceptsInterfaceWithStub
+      >[0];
+      expectTypeOf<PayloadArgument['pair']>().toEqualTypeOf<
+        readonly [TestCounter | RpcStub<TestCounter>, number]
+      >();
+
+      expectTypeOf(s.methodAcceptsCallbacks).parameters.toEqualTypeOf<
+        [callback: (value: number) => Promise<number>, payload: CallbackPayload]
+      >();
+      const callback = (_counter: RpcStub<TestCounter>) => 1;
+      using callbackStub = new RpcStub(callback);
+      expectTypeOf(s.methodAcceptsStubCallback(callbackStub)).toMatchTypeOf<
+        Promise<number>
+      >();
+      expectTypeOf(
+        s.methodAcceptsStubCallback((counter) => {
+          expectTypeOf(counter).toEqualTypeOf<RpcStub<TestCounter>>();
+          return 1;
+        })
+      ).toMatchTypeOf<Promise<number>>();
+      expectTypeOf<Rpc.Unstubify<TestCounter>>().toEqualTypeOf<TestCounter>();
+
       expectTypeOf(s.nonSerializable1).returns.toBeNever();
       // Note: Since one of the object's members is non-serializable,
       //   the entire object is resolved as 'never'.
@@ -764,17 +834,20 @@ export default <ExportedHandler<Env>>{
 
     // Check methods accepting stubs
     {
+      type Callback = (value: number) => number;
+      type CallbackStub = RpcStub<Callback>;
+      type CounterArgument = TestCounter | RpcStub<TestCounter>;
       expectTypeOf(env.RPC_SERVICE.stubMethod).toEqualTypeOf<
         (
-          callback: (x: number) => number,
-          counter: TestCounter,
-          map: Map<TestCounter, TestCounter>,
-          set: Set<TestCounter>,
-          readonlyMap: ReadonlyMap<TestCounter, TestCounter>,
-          readonlySet: ReadonlySet<TestCounter>,
-          array: Array<TestCounter>,
-          readonlyArray: ReadonlyArray<TestCounter>,
-          object: { a: { b: TestCounter } }
+          callback: Callback | Pick<CallbackStub, keyof CallbackStub>,
+          counter: CounterArgument,
+          map: Map<CounterArgument, CounterArgument>,
+          set: Set<CounterArgument>,
+          readonlyMap: ReadonlyMap<CounterArgument, CounterArgument>,
+          readonlySet: ReadonlySet<CounterArgument>,
+          array: Array<CounterArgument>,
+          readonlyArray: ReadonlyArray<CounterArgument>,
+          object: { a: { b: CounterArgument } }
         ) => Promise<number>
       >();
     }
