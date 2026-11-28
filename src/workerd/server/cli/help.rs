@@ -176,7 +176,7 @@ Quick start:
   index.js       export default { fetch: () => new Response(\"hello\") };
   wrangler.json  { \"main\": \"index.js\", \"compatibility_date\": \"2026-11-01\" }
 
-  $ workerd serve wrangler.json --watch        # http://localhost:8787
+  $ workerd serve wrangler.json --watch        # http://localhost:8080
 
 Cluster (experimental):
   Machines that share an object store bucket serve as one: each Durable
