@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "crypto_keys-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "disable_fast_jsg_struct"],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "disable_fast_jsg_struct", "no_nodejs_compat_jwk_export"],
         bindings = [
           ( name = "dh_private.pem", text = embed "fixtures/dh_private.pem" ),
           ( name = "dsa_private_pkcs8.pem", text = embed "fixtures/dsa_private_pkcs8.pem" ),
