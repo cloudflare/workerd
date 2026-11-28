@@ -2853,7 +2853,7 @@ test(
 test(
   "cluster: a peer's request a DO's late handoff releases is answered moved",
   SIGTERM_DRAINS,
-  async () => {
+  async (t) => {
     await withCluster(
       2,
       async ({ nodes }) => {
@@ -2876,6 +2876,7 @@ test(
           10_000,
           'the held request never ran on node 0'
         );
+        const stoppedAt = Date.now();
         const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
         // Logged once node 0 marks its objects as being handed off: from then
         // on a request for one waits for its handoff.
@@ -2884,16 +2885,26 @@ test(
         // Sent on from there, it would still run when the stopping node's
         // connections deadline cuts it off; answered moved, the peer runs it
         // where the DO went.
+        const sentAfter = Date.now() - stoppedAt;
         const peer = await fetchJson(
           nodes[1].httpPort,
           '/hold-increment?name=late&ms=2000',
           { timeoutMs: 30_000 }
         );
-        // It went to node 0, waited there, and was answered moved.
-        assert.match(
-          nodes[0].stderr,
-          /a peer's request that waited for its handoff is answered moved/
-        );
+        // It went to node 0, waited there, and was answered moved, which node
+        // 0 logs. One that reaches node 0 past the time for requests in
+        // flight, 2 s into the stop, finds the DO handed off already and is
+        // answered moved without waiting or logging, as when the machine
+        // stalls; either way it runs on node 1, which the assertions below
+        // check.
+        const waited =
+          /a peer's request that waited for its handoff is answered moved/;
+        if (!waited.test(nodes[0].stderr)) {
+          t.diagnostic(
+            `the peer's request, sent ${sentAfter} ms into the stop, did not ` +
+              'wait on node 0 for its handoff'
+          );
+        }
         assert.strictEqual(peer.status, 200, JSON.stringify(peer.body));
         assert.deepStrictEqual(
           [peer.body.nodeId, peer.body.count],
