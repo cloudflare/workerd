@@ -69,6 +69,16 @@ repeatable_string_flag(
     visibility = ["//visibility:public"],
 )
 
+# Where gen-compile-cache runs. It is built for the target platform, since only the target's V8
+# accepts the caches it writes, so in a cross-compiling build the execution platform Bazel picks may
+# not be able to run it. No toolchain of this type is registered by default, so the tool runs on
+# that platform; a build that has a better one registers a toolchain whose exec_compatible_with
+# picks it, such as @bazel_tools//tools/test:empty_toolchain constrained to the target's CPU.
+toolchain_type(
+    name = "compile_cache_executor_toolchain_type",
+    visibility = ["//visibility:public"],
+)
+
 # The remote executor of the build, if it has larger runners for the links of select binaries (see
 # link_exec_properties in //build/bazelflare:exec_properties.bzl).
 string_flag(
