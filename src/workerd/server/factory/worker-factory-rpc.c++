@@ -42,15 +42,16 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
         causedBy(kj::mv(causedBy)) {}
 
   kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
-    IoChannelFactory::SubrequestMetadata metadata;
-    metadata.cfBlobJson = cfBlobJson.clone();
-    metadata.fromPersistentStub = fromPersistentStub;
-    metadata.fromHandoff = fromHandoff;
-    metadata.forwardedBy = kj::mv(forwardedBy);
-    metadata.causedBy = kj::mv(causedBy);
-    context.initResults(capnp::MessageSize{4, 1})
-        .setHttp(httpOverCapnpFactory.kjToCapnp(getService()->startRequest(kj::mv(metadata))));
+    context.initResults(capnp::MessageSize{4, 1}).setHttp(makeHttpService());
     return kj::READY_NOW;
+  }
+
+  kj::Promise<void> request(RequestContext context) override {
+    return forwardHttpRequest(makeHttpService(), context);
+  }
+
+  kj::Promise<void> connect(ConnectContext context) override {
+    return forwardHttpConnect(makeHttpService(), context);
   }
 
   kj::Promise<void> sendTraces(SendTracesContext context) override {
@@ -109,6 +110,17 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   FromHandoff fromHandoff;
   kj::Maybe<kj::String> forwardedBy;
   kj::Array<kj::String> causedBy;
+
+  // The HTTP interface to the service, for the one request this dispatcher delivers.
+  capnp::HttpService::Client makeHttpService() {
+    IoChannelFactory::SubrequestMetadata metadata;
+    metadata.cfBlobJson = cfBlobJson.clone();
+    metadata.fromPersistentStub = fromPersistentStub;
+    metadata.fromHandoff = fromHandoff;
+    metadata.forwardedBy = kj::mv(forwardedBy);
+    metadata.causedBy = kj::mv(causedBy);
+    return httpOverCapnpFactory.kjToCapnp(getService()->startRequest(kj::mv(metadata)));
+  }
 
   kj::Rc<IoChannelFactory::SubrequestChannel> getService() {
     auto result =

@@ -206,6 +206,14 @@ class RestoredServiceEventDispatcher final: public rpc::EventDispatcher::Server 
     return kj::READY_NOW;
   }
 
+  kj::Promise<void> request(RequestContext context) override {
+    return forwardHttpRequest(httpOverCapnpFactory.kjToCapnp(getWorker()), context);
+  }
+
+  kj::Promise<void> connect(ConnectContext context) override {
+    return forwardHttpConnect(httpOverCapnpFactory.kjToCapnp(getWorker()), context);
+  }
+
   kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
     return api::JsRpcSessionCustomEvent::receiveRpc(context, getWorker());
   }

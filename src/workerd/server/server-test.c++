@@ -10103,11 +10103,9 @@ KJ_TEST("Server: debug port RPC calls") {
     return getDispatcherFromBootstrap(getBootstrap(service, entrypoint, propsBuilder));
   };
 
-  // Helper to make HTTP request from a dispatcher
-  auto makeHttpRequestFromDispatcher = [&](rpc::EventDispatcher::Client dispatcher,
-                                           kj::StringPtr path) -> kj::String {
-    auto capnpHttpService = dispatcher.getHttpServiceRequest().send().wait(test.ws).getHttp();
-
+  // Helper to make HTTP request on a Cap'n Proto HttpService
+  auto makeHttpRequestOn = [&](capnp::HttpService::Client capnpHttpService,
+                               kj::StringPtr path) -> kj::String {
     // Convert to KJ HttpService and make request
     auto kjHttpService = httpOverCapnpFactory.capnpToKj(kj::mv(capnpHttpService));
     auto httpClient = kj::newHttpClient(*kjHttpService);
@@ -10117,6 +10115,13 @@ KJ_TEST("Server: debug port RPC calls") {
 
     KJ_EXPECT(httpResponse.statusCode == 200);
     return httpResponse.body->readAllText().wait(test.ws);
+  };
+
+  // Helper to make HTTP request from a dispatcher
+  auto makeHttpRequestFromDispatcher = [&](rpc::EventDispatcher::Client dispatcher,
+                                           kj::StringPtr path) -> kj::String {
+    return makeHttpRequestOn(
+        dispatcher.getHttpServiceRequest().send().wait(test.ws).getHttp(), path);
   };
 
   // Helper to make HTTP request from a bootstrap client (works for both entrypoints and actors)
@@ -10229,6 +10234,12 @@ KJ_TEST("Server: debug port RPC calls") {
 
     auto jsonResult = deserializeV8ToJson(resultData);
     KJ_EXPECT(jsonResult == "8", jsonResult, "Expected result to be 8");
+  }
+
+  // Test 7: A dispatcher is itself an HttpService, with no getHttpService() call
+  {
+    auto dispatcher = getDispatcher("hello", kj::none, [](auto& props) { props.setEmptyObject(); });
+    KJ_EXPECT(makeHttpRequestOn(kj::mv(dispatcher), "/") == "Hello from hello service");
   }
 }
 

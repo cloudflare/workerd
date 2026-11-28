@@ -173,7 +173,12 @@ namespace workerd::util {
      C++ implementation is retained for rollback. The gate is read when a ctx is created, so       \
      toggling it at runtime can leave a non-class handler's reused ctx of one class while new      \
      ones are of the other. */                                                                     \
-  V(RUST_EXECUTION_CONTEXT)
+  V(RUST_EXECUTION_CONTEXT)                                                                        \
+  /* When enabled, RpcWorkerInterface makes an HTTP request on the EventDispatcher itself instead  \
+     of on the capability from getHttpService(), which saves an RPC call per request. The peer     \
+     must be recent enough to serve HttpService on its dispatchers, or the request fails, so       \
+     enable only once every peer is. */                                                            \
+  V(HTTP_REQUEST_ON_EVENT_DISPATCHER)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

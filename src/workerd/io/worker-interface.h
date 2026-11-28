@@ -345,6 +345,15 @@ kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
 kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
     kj::Own<WorkerInterface> worker, kj::Function<kj::Promise<void>()> makeRevokeProm);
 
+// Implement rpc::EventDispatcher's own `request()` and `connect()` (it extends HttpService) by
+// forwarding the call to `http`, the capability that the dispatcher's `getHttpService()` returns.
+kj::Promise<void> forwardHttpRequest(capnp::HttpService::Client http,
+    capnp::CallContext<capnp::HttpService::RequestParams, capnp::HttpService::RequestResults>
+        context);
+kj::Promise<void> forwardHttpConnect(capnp::HttpService::Client http,
+    capnp::CallContext<capnp::HttpService::ConnectParams, capnp::HttpService::ConnectResults>
+        context);
+
 // Implementation of WorkerInterface on top of rpc::EventDispatcher. Since an EventDispatcher
 // is intended to be single-use, this class is also inherently single-use (i.e. only one event
 // can be delivered).

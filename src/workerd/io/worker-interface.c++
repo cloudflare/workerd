@@ -432,15 +432,46 @@ RpcWorkerInterface::RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapn
       frankenvalueHandler(frankenvalueHandler),
       dispatcher(kj::mv(dispatcher)) {}
 
+kj::Promise<void> forwardHttpRequest(capnp::HttpService::Client http,
+    capnp::CallContext<capnp::HttpService::RequestParams, capnp::HttpService::RequestResults>
+        context) {
+  auto params = context.getParams();
+  auto req = http.requestRequest(params.totalSize());
+  req.setRequest(params.getRequest());
+  req.setContext(params.getContext());
+  context.releaseParams();
+  return context.tailCall(kj::mv(req));
+}
+
+kj::Promise<void> forwardHttpConnect(capnp::HttpService::Client http,
+    capnp::CallContext<capnp::HttpService::ConnectParams, capnp::HttpService::ConnectResults>
+        context) {
+  auto params = context.getParams();
+  auto req = http.connectRequest(params.totalSize());
+  req.setHost(params.getHost());
+  req.setHeaders(params.getHeaders());
+  req.setDown(params.getDown());
+  req.setContext(params.getContext());
+  req.setSettings(params.getSettings());
+  context.releaseParams();
+  return context.tailCall(kj::mv(req));
+}
+
 kj::Promise<void> RpcWorkerInterface::request(kj::HttpMethod method,
     kj::StringPtr url,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
-  // The HttpService is used for this one request and then dropped, so the call that fetches it
-  // is sent for pipelining only: the dispatcher need not send its result back.
-  auto inner = httpOverCapnpFactory.capnpToKj(
-      dispatcher.getHttpServiceRequest().sendForPipeline().getHttp());
+  capnp::HttpService::Client http = nullptr;
+  if (util::Autogate::isEnabled(util::AutogateKey::HTTP_REQUEST_ON_EVENT_DISPATCHER)) {
+    // The dispatcher is itself an HttpService, which saves the call that asks it for one.
+    http = dispatcher;
+  } else {
+    // The HttpService is used for this one request and then dropped, so the call that fetches it
+    // is sent for pipelining only: the dispatcher need not send its result back.
+    http = dispatcher.getHttpServiceRequest().sendForPipeline().getHttp();
+  }
+  auto inner = httpOverCapnpFactory.capnpToKj(kj::mv(http));
   auto promise = inner->request(method, url, headers, requestBody, response);
   return promise.attach(kj::mv(inner));
 }

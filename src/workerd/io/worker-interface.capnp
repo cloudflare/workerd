@@ -1008,8 +1008,13 @@ interface TraceCompletion {
   # capability can be released while the handler's work continues.
 }
 
-interface EventDispatcher @0xf20697475ec1752d {
+interface EventDispatcher @0xf20697475ec1752d extends(HttpService) {
   # Interface used to deliver events to a Worker's global event handlers.
+  #
+  # A dispatcher is itself the HTTP interface to its worker: calling `request()` or `connect()`
+  # on it is the same as calling it on the capability that `getHttpService()` returns, without
+  # the extra call. A dispatcher that predates this fails such a call as unimplemented, so a
+  # caller must know that its peer is recent enough before relying on it.
 
   getHttpService @0 () -> (http :HttpService) $Cxx.allowCancellation;
   # Gets the HTTP interface to this worker (to trigger FetchEvents).

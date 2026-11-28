@@ -4,9 +4,14 @@
 
 #include "worker-interface.h"
 
+#include <workerd/io/frankenvalue.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/wait-list.h>
 
+#include <capnp/compat/byte-stream.h>
+#include <capnp/compat/http-over-capnp.h>
+#include <kj/compat/http.h>
 #include <kj/test.h>
 
 namespace workerd {
@@ -198,6 +203,109 @@ KJ_TEST("eager revocation revokes an accepted WebSocket") {
 
   fixture.killed.fulfill();
   fixture.expectRevoked(*fixture.worker->webSockets[0]);
+}
+
+// Answers every request with its method, URL and body.
+class EchoService final: public kj::HttpService {
+ public:
+  explicit EchoService(const kj::HttpHeaderTable& headerTable): headerTable(headerTable) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    auto text = kj::str(method, " ", url, " [", co_await requestBody.readAllText(), "]");
+    auto body = response.send(200, "OK", kj::HttpHeaders(headerTable), text.size());
+    co_await body->write(text.asBytes());
+  }
+
+ private:
+  const kj::HttpHeaderTable& headerTable;
+};
+
+// A dispatcher that counts how its HTTP service is reached.
+class CountingDispatcher final: public rpc::EventDispatcher::Server {
+ public:
+  struct Counts {
+    uint getHttpService = 0;
+    uint request = 0;
+  };
+
+  CountingDispatcher(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      const kj::HttpHeaderTable& headerTable,
+      Counts& counts)
+      : httpOverCapnpFactory(httpOverCapnpFactory),
+        headerTable(headerTable),
+        counts(counts) {}
+
+  kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
+    ++counts.getHttpService;
+    context.getResults().setHttp(makeHttpService());
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> request(RequestContext context) override {
+    ++counts.request;
+    return forwardHttpRequest(makeHttpService(), context);
+  }
+
+ private:
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  const kj::HttpHeaderTable& headerTable;
+  Counts& counts;
+
+  capnp::HttpService::Client makeHttpService() {
+    return httpOverCapnpFactory.kjToCapnp(kj::heap<EchoService>(headerTable));
+  }
+};
+
+// Sends a request with a body through an RpcWorkerInterface, checks the response, and returns how
+// the dispatcher's HTTP service was reached.
+CountingDispatcher::Counts sendRequestOverRpc() {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  capnp::ByteStreamFactory byteStreamFactory;
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  capnp::HttpOverCapnpFactory httpOverCapnpFactory(
+      byteStreamFactory, headerTableBuilder, capnp::HttpOverCapnpFactory::LEVEL_2);
+  auto headerTable = headerTableBuilder.build();
+
+  CountingDispatcher::Counts counts;
+  RpcWorkerInterface worker(httpOverCapnpFactory, byteStreamFactory,
+      getUnsupportedFrankenvalueHandler(),
+      kj::heap<CountingDispatcher>(httpOverCapnpFactory, *headerTable, counts));
+
+  auto client = kj::newHttpClient(worker);
+  auto request = client->request(
+      kj::HttpMethod::POST, "http://example.com/path", kj::HttpHeaders(*headerTable), uint64_t(4));
+  request.body->write("body"_kjb).wait(waitScope);
+  request.body = nullptr;
+  auto response = request.response.wait(waitScope);
+  KJ_EXPECT(response.statusCode == 200);
+  KJ_EXPECT(response.body->readAllText().wait(waitScope) == "POST http://example.com/path [body]");
+  return counts;
+}
+
+KJ_TEST("RpcWorkerInterface::request() asks the dispatcher for its HttpService") {
+  util::Autogate::initAutogateNamesForTest(
+      kj::ArrayPtr<const kj::StringPtr>(), util::IgnoreAllAutogatesEnv::YES);
+  KJ_DEFER(util::Autogate::deinitAutogate());
+
+  auto counts = sendRequestOverRpc();
+  KJ_EXPECT(counts.getHttpService == 1);
+  KJ_EXPECT(counts.request == 0);
+}
+
+KJ_TEST("RpcWorkerInterface::request() calls the dispatcher itself when the autogate is on") {
+  util::Autogate::initAutogateNamesForTest(
+      {"http-request-on-event-dispatcher"_kj}, util::IgnoreAllAutogatesEnv::YES);
+  KJ_DEFER(util::Autogate::deinitAutogate());
+
+  auto counts = sendRequestOverRpc();
+  KJ_EXPECT(counts.getHttpService == 0);
+  KJ_EXPECT(counts.request == 1);
 }
 
 }  // namespace
