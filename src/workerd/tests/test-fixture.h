@@ -99,6 +99,9 @@ struct TestFixture {
     // If set, and useRealTimers is not, the time the request clock always reads, so a test can
     // tell it from the system clock. Otherwise the mock timer reads the system clock.
     kj::Maybe<kj::Date> fixedNow;
+    // If true, the entrypoints from makeWorkerEntrypoint() tunnel a fetch handler's exceptions back
+    // to the caller, as a Worker called by another Worker does, instead of responding with a 5xx.
+    bool tunnelExceptions = false;
   };
 
   // A default argument here would need SetupParams' member initializers before TestFixture is
@@ -357,6 +360,7 @@ struct TestFixture {
       waitUntilTaskTrackerFactory;
   kj::Maybe<uint&> checkedSubrequestCount;
   kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
+  bool tunnelExceptions;
   kj::Maybe<EventOutcome> limitsExceeded;
   kj::Maybe<EventOutcome> limitsExceededOnLeavingJs;
 

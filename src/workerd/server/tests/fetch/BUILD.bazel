@@ -1,0 +1,24 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Checks the Perfetto spans of fetch events with the autogates off and on, and that with them on
+# the Rust path delivers the events.
+sh_test(
+    name = "fetch-perfetto-test",
+    size = "medium",
+    srcs = ["fetch-perfetto-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location fetch.wd-test)",
+    ],
+    data = [
+        "fetch.js",
+        "fetch.wd-test",
+        "handler.js",
+        "throws.js",
+        "//src/workerd/server:workerd",
+    ],
+    target_compatible_with = select({
+        "//src/workerd/util:really_use_perfetto": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)

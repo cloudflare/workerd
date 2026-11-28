@@ -38,6 +38,12 @@ inline kj::Maybe<uint64_t> async_input_stream_try_get_length(AsyncInputStream& s
   return stream.tryGetLength();
 }
 
+// --- The event loop
+
+inline kj::Promise<void> yield_to_event_loop() {
+  return kj::yield();
+}
+
 // --- kj::HttpHeaders ffi
 
 using BuiltinIndicesEnum = kj::HttpHeaders::BuiltinIndicesEnum;

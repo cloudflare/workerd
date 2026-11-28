@@ -444,7 +444,8 @@ TestFixture::TestFixture(SetupParams&& params)
       requestObserverFactory(kj::mv(params.requestObserverFactory)),
       waitUntilTaskTrackerFactory(kj::mv(params.waitUntilTaskTrackerFactory)),
       checkedSubrequestCount(params.checkedSubrequestCount),
-      actorCallReplayMemoryReserver(kj::mv(params.actorCallReplayMemoryReserver)) {
+      actorCallReplayMemoryReserver(kj::mv(params.actorCallReplayMemoryReserver)),
+      tunnelExceptions(params.tunnelExceptions) {
   KJ_IF_SOME(id, params.actorId) {
     KJ_IF_SOME(provided, params.actorLoopback) {
       savedActorLoopback = kj::mv(provided);
@@ -622,8 +623,8 @@ kj::Own<WorkerInterface> TestFixture::makeWorkerEntrypoint() {
       kj::mv(actorRef),
       kj::heap<MockLimitEnforcer>(
           kj::none, actorCallReplayMemoryReserver, limitsExceeded, limitsExceededOnLeavingJs),
-      kj::Own<void>(), kj::mv(channelFactory), kj::mv(observer), waitUntilTasks, false, kj::none,
-      kj::none, kj::none);
+      kj::Own<void>(), kj::mv(channelFactory), kj::mv(observer), waitUntilTasks, tunnelExceptions,
+      kj::none, kj::none, kj::none);
 }
 
 bool TestFixture::isInStartupLimitScope() {

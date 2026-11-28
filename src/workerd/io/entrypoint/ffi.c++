@@ -64,6 +64,66 @@ kj::Promise<bool> runTest(kj::Own<Invocation> invocation) {
   return test_event_finish(test_event_start(kj::mv(invocation)));
 }
 
+void fetch_set_event_info(Fetch& fetch) {
+  fetch.setEventInfo();
+}
+
+IoContext::IncomingRequest& fetch_request(Fetch& fetch) {
+  return fetch.getRequest();
+}
+
+void fetch_delivered(Fetch& fetch) {
+  fetch.delivered();
+}
+
+kj::Promise<void> fetch_run_handler(Fetch& fetch) {
+  return fetch.runHandler();
+}
+
+kj::Promise<void> fetch_handler_failed(Fetch& fetch, kj::Exception exception) {
+  return fetch.handlerFailed(kj::mv(exception));
+}
+
+void fetch_end_handler(Fetch& fetch) {
+  fetch.endHandler();
+}
+
+kj::Promise<void> fetch_finish_proxying(Fetch& fetch) {
+  return fetch.finishProxying();
+}
+
+kj::Exception fetch_prepare_failure(Fetch& fetch, kj::Exception exception) {
+  return fetch.prepareFailure(kj::mv(exception));
+}
+
+bool fetch_is_actor(const Fetch& fetch) {
+  return fetch.isActor();
+}
+
+bool fetch_has_fail_open_service(const Fetch& fetch) {
+  return fetch.hasFailOpenService();
+}
+
+bool fetch_tunnels_exceptions(const Fetch& fetch) {
+  return fetch.tunnelsExceptions();
+}
+
+kj::Exception fetch_propagate_from_actor(Fetch& fetch, kj::Exception exception) {
+  return fetch.propagateFromActor(kj::mv(exception));
+}
+
+kj::Promise<void> fetch_fail_open(Fetch& fetch, kj::Exception exception) {
+  return fetch.failOpen(kj::mv(exception));
+}
+
+kj::Exception fetch_propagate(Fetch& fetch, kj::Exception exception) {
+  return fetch.propagate(kj::mv(exception));
+}
+
+void fetch_respond_with_error(Fetch& fetch, kj::Exception exception) {
+  fetch.respondWithError(kj::mv(exception));
+}
+
 namespace {
 
 // The WorkerInterface of a Rust WorkerEntrypoint. The events that Rust delivers go to Rust, and the
@@ -79,7 +139,21 @@ class RustWorkerEntrypoint final: public WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
-    return cxx.request(method, url, headers, requestBody, response);
+    if (!util::Autogate::isEnabled(util::AutogateKey::RUST_ENTRYPOINT_FETCH)) {
+      return cxx.request(method, url, headers, requestBody, response);
+    }
+    // kj::evalNow() makes an exception from the start reject the promise, as it does in C++
+    // requestImpl(), a coroutine.
+    auto promise = kj::evalNow([&]() {
+      return fetch_event_finish(
+          fetch_event_start(cxx.takeFetch(method, url, headers, requestBody, response, this)));
+    });
+    KJ_IF_SOME(canceler, cxx.getCanceler()) {
+      return canceler.wrap(kj::mv(promise));
+    }
+    // A promise of a Rust future makes progress only while it is awaited, and C++ requestImpl(), a
+    // coroutine, runs whether or not its promise is. Canceler::wrap() evaluates eagerly too.
+    return promise.eagerlyEvaluate(nullptr);
   }
 
   kj::Promise<void> connect(kj::StringPtr host,

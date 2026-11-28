@@ -1572,5 +1572,278 @@ KJ_TEST("output gate failure replaces an earlier handler failure") {
   KJ_EXPECT_THROW_MESSAGE("output gate failed", blocker.wait(fixture.getWaitScope()));
 }
 
+// Answers every request with a 202, counting the requests.
+class FallbackWorker final: public WorkerInterface {
+ public:
+  explicit FallbackWorker(uint& requestCount): requestCount(requestCount) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    ++requestCount;
+    auto responseHeaders = headers.cloneShallow();
+    responseHeaders.clear();
+    response.send(202, "Accepted", responseHeaders, static_cast<uint64_t>(0));
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    KJ_UNIMPLEMENTED();
+  }
+
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    KJ_UNIMPLEMENTED();
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    KJ_UNIMPLEMENTED();
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    KJ_UNIMPLEMENTED();
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    KJ_UNIMPLEMENTED();
+  }
+
+ private:
+  uint& requestCount;
+};
+
+// Opens a FallbackWorker for each subrequest on the next-client channel, which is the fail-open
+// service.
+class FallbackIoChannelFactory final: public TestFixture::DummyIoChannelFactory {
+ public:
+  FallbackIoChannelFactory(TimerChannel& timer, uint& requestCount)
+      : DummyIoChannelFactory(timer),
+        requestCount(requestCount) {}
+
+  kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
+    KJ_EXPECT(channel == IoContext::NEXT_CLIENT_CHANNEL);
+    return kj::heap<FallbackWorker>(requestCount);
+  }
+
+ private:
+  uint& requestCount;
+};
+
+KJ_TEST("a fetch handler that fails open is retried through the fail-open service") {
+  // Fail-open applies even when exceptions are tunnelled back to the caller, as they are between
+  // Workers.
+  static constexpr auto source = R"(
+    export default {
+      fetch(request, env, ctx) {
+        ctx.passThroughOnException();
+        throw new Error("handler failed");
+      }
+    };
+  )"_kj;
+
+  uint fallbackRequests = 0;
+  auto observer = kj::refcounted<RecordingObserver>();
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = source,
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&fallbackRequests](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<FallbackIoChannelFactory>(timer, fallbackRequests);
+  }),
+    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(*observer); }),
+    .tunnelExceptions = true,
+  });
+  TestResponse response;
+
+  KJ_EXPECT(sendFetch(fixture, response) == kj::none);
+
+  KJ_EXPECT(response.statusCode == 202);
+  KJ_EXPECT(fallbackRequests == 1);
+  // The handler's failure is still reported.
+  KJ_EXPECT(KJ_ASSERT_NONNULL(observer->outcome) == EventOutcome::EXCEPTION);
+}
+
+KJ_TEST("a stateless fetch runs before its promise is awaited") {
+  static constexpr auto source = R"(
+    export default {
+      fetch() { return new Response("OK"); }
+    };
+  )"_kj;
+
+  TestFixture fixture(TestFixture::SetupParams{.mainModuleSource = source});
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  kj::NullStream requestBody;
+  TestResponse response;
+
+  auto promise = entrypoint->request(
+      kj::HttpMethod::GET, "https://example.com", headers, requestBody, response);
+  // Only the event loop runs the request, as it runs a request whose caller awaits something else.
+  fixture.getWaitScope().poll();
+
+  KJ_EXPECT(response.statusCode == 200);
+  promise.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("a fetch handler's exception is tunnelled back to a calling Worker") {
+  static constexpr auto source = R"(
+    export default {
+      fetch() { throw new Error("handler failed"); }
+    };
+  )"_kj;
+
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = source,
+    .tunnelExceptions = true,
+  });
+  TestResponse response;
+
+  auto e = KJ_ASSERT_NONNULL(sendFetch(fixture, response));
+
+  KJ_EXPECT(e.getDescription() == "remote.jsg.Error: handler failed", e);
+  KJ_EXPECT(e.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(response.statusCode == 0);
+}
+
+KJ_TEST("a fetch handler's exception becomes a 500 unless it is tunnelled") {
+  static constexpr auto source = R"(
+    export default {
+      fetch() { throw new Error("handler failed"); }
+    };
+  )"_kj;
+
+  auto observer = kj::refcounted<RecordingObserver>();
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = source,
+    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(*observer); }),
+  });
+  TestResponse response;
+
+  KJ_EXPECT(sendFetch(fixture, response) == kj::none);
+
+  KJ_EXPECT(response.statusCode == 500);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(observer->outcome) == EventOutcome::EXCEPTION);
+}
+
+// A request body of one chunk, "hello", of known length.
+class HelloInputStream final: public kj::AsyncInputStream {
+ public:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto n = kj::min(maxBytes, remaining.size());
+    memcpy(buffer, remaining.begin(), n);
+    remaining = remaining.slice(n);
+    return n;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return remaining.size();
+  }
+
+ private:
+  kj::ArrayPtr<const kj::byte> remaining = "hello"_kjb;
+};
+
+// A response whose body stream disconnects on the first write.
+class DisconnectingBodyResponse final: public kj::HttpService::Response {
+ public:
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize) override {
+    this->statusCode = statusCode;
+    return kj::heap<DisconnectingStream>();
+  }
+
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    KJ_FAIL_ASSERT("request unexpectedly returned a WebSocket");
+  }
+
+  uint statusCode = 0;
+
+ private:
+  class DisconnectingStream final: public kj::AsyncOutputStream {
+   public:
+    kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+      return KJ_EXCEPTION(DISCONNECTED, "response body disconnected");
+    }
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+      return KJ_EXCEPTION(DISCONNECTED, "response body disconnected");
+    }
+    kj::Promise<void> whenWriteDisconnected() override {
+      return kj::NEVER_DONE;
+    }
+  };
+};
+
+KJ_TEST("a fetch handler's deferred-proxy failure is reported once the response was sent") {
+  // The handler proxies the request body, so the deferred-proxy task writes it, after the handler
+  // returned. The failure is reported as a deferred-proxy failure, and the response, already sent,
+  // is left as it is.
+  static constexpr auto source = R"(
+    export default {
+      fetch(request) { return new Response(request.body); }
+    };
+  )"_kj;
+
+  auto observer = kj::refcounted<RecordingObserver>();
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = source,
+    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(*observer); }),
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  HelloInputStream requestBody;
+  DisconnectingBodyResponse response;
+
+  KJ_EXPECT(kj::runCatchingExceptions([&]() {
+    entrypoint->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+        .wait(fixture.getWaitScope());
+  }) == kj::none);
+
+  KJ_EXPECT(response.statusCode == 200);
+  // Reported by the wait for the deferred-proxy task, and again by respondWithError(), which
+  // reports every failure it handles but sends nothing, since the response was already sent.
+  KJ_EXPECT(KJ_ASSERT_NONNULL(observer->outcome) == EventOutcome::RESPONSE_STREAM_DISCONNECTED);
+  KJ_EXPECT(observer->failureCount == 2, observer->failureCount);
+}
+
+KJ_TEST("a fetch handler's deferred-proxy failure is tunnelled back to a calling Worker") {
+  static constexpr auto source = R"(
+    export default {
+      fetch(request) { return new Response(request.body); }
+    };
+  )"_kj;
+
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = source,
+    .tunnelExceptions = true,
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  HelloInputStream requestBody;
+  DisconnectingBodyResponse response;
+
+  auto e = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
+    entrypoint->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+        .wait(fixture.getWaitScope());
+  }));
+
+  // The exception is internal, so the caller sees only that the request failed.
+  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
+  KJ_EXPECT(e.getDescription() == "worker_do_not_log; Request failed due to internal error", e);
+  KJ_EXPECT(e.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(response.statusCode == 200);
+}
+
 }  // namespace
 }  // namespace workerd

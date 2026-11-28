@@ -55,6 +55,7 @@ class Fetch {
   // caller delivers it, so that the request records the caller's location as where it was
   // delivered.
   void setEventInfo();
+  // Fails after endHandler(), which drains the request.
   IoContext::IncomingRequest& getRequest();
   void delivered();
 

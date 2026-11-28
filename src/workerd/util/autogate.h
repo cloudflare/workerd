@@ -165,6 +165,10 @@ namespace workerd::util {
      finish, rather than passing it to C++ WorkerEntrypoint::runScheduled(). The handler is still  \
      started by C++ ServiceWorkerGlobalScope::startScheduled(). */                                 \
   V(RUST_ENTRYPOINT_SCHEDULED)                                                                     \
+  /* The Rust WorkerEntrypoint delivers fetch events from Rust (io/entrypoint/fetch.rs), taking    \
+     the steps of WorkerEntrypoint::request() on entrypoint::Fetch, rather than passing them to    \
+     the C++ WorkerEntrypoint. */                                                                  \
+  V(RUST_ENTRYPOINT_FETCH)                                                                         \
   /* MIME types are parsed and serialized by the Rust crate in util/mimetype/ rather than the      \
      C++ code in util/mimetype-legacy.c++. See util/mimetype.c++. */                               \
   V(RUST_MIMETYPE)                                                                                 \

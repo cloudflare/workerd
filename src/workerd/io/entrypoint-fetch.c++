@@ -178,6 +178,7 @@ void Fetch::setEventInfo() {
 }
 
 IoContext::IncomingRequest& Fetch::getRequest() {
+  KJ_REQUIRE(invocation->request.get() != nullptr, "the fetch handler already ended");
   return *invocation->request;
 }
 

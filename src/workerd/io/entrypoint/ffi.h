@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/entrypoint-fetch.h>
 #include <workerd/io/entrypoint-invocation.h>
 #include <workerd/io/io-context/ffi.h>
 #include <workerd/io/worker-interface.h>
@@ -49,11 +50,32 @@ void invocation_start_scheduled_in_wait_until(
 // the request.
 kj::Promise<bool> runTest(kj::Own<Invocation> invocation);
 
+// The steps of a fetch event, for `fetch.rs`: the methods of the same names of entrypoint::Fetch
+// (`io/entrypoint-fetch.h`), which WorkerEntrypoint::request() takes in C++. fetch_request() is
+// Fetch::getRequest(), which fails once fetch_end_handler() has drained the request.
+void fetch_set_event_info(Fetch& fetch);
+IoContext::IncomingRequest& fetch_request(Fetch& fetch);
+void fetch_delivered(Fetch& fetch);
+kj::Promise<void> fetch_run_handler(Fetch& fetch);
+kj::Promise<void> fetch_handler_failed(Fetch& fetch, kj::Exception exception);
+void fetch_end_handler(Fetch& fetch);
+kj::Promise<void> fetch_finish_proxying(Fetch& fetch);
+kj::Exception fetch_prepare_failure(Fetch& fetch, kj::Exception exception);
+bool fetch_is_actor(const Fetch& fetch);
+bool fetch_has_fail_open_service(const Fetch& fetch);
+bool fetch_tunnels_exceptions(const Fetch& fetch);
+kj::Exception fetch_propagate_from_actor(Fetch& fetch, kj::Exception exception);
+kj::Promise<void> fetch_fail_open(Fetch& fetch, kj::Exception exception);
+kj::Exception fetch_propagate(Fetch& fetch, kj::Exception exception);
+void fetch_respond_with_error(Fetch& fetch, kj::Exception exception);
+
 // Makes a Rust WorkerEntrypoint (see `lib.rs`) that owns `cxx`, and returns its WorkerInterface.
 // Behind the RUST_ENTRYPOINT_SCHEDULED autogate, it delivers the scheduled event from Rust, as
 // WorkerEntrypoint::runScheduled() does in C++: everything but the wait for the request to finish
-// happens before runScheduled() returns, and an exception before then is thrown, as in C++. Every
-// other event goes to `cxx`, which then does its work as it would on its own.
+// happens before runScheduled() returns, and an exception before then is thrown, as in C++.
+// Behind the RUST_ENTRYPOINT_FETCH autogate, it delivers the fetch event from Rust, taking the
+// steps of WorkerEntrypoint::request() (see `fetch.rs`). Every other event goes to `cxx`, which
+// then does its work as it would on its own.
 kj::Own<WorkerInterface> newWorkerEntrypoint(kj::Own<CxxEntrypoint> cxx);
 
 }  // namespace workerd::entrypoint
