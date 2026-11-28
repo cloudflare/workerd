@@ -3,6 +3,176 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import * as assert from 'node:assert';
+import { Ai } from 'cloudflare:ai';
+
+export const concurrentRunMetadata = {
+  async test() {
+    const { promise: bodyStarted, resolve: markBodyStarted } =
+      Promise.withResolvers();
+    const { promise: releaseFirstBody, resolve: finishFirstCall } =
+      Promise.withResolvers();
+    const ai = new Ai({
+      async fetch(_url, init) {
+        const { prompt } = JSON.parse(init.body).inputs;
+        const headers = {
+          'content-type': 'application/json',
+          'cf-aig-log-id': `log-${prompt}`,
+          'cf-ai-req-id': `request-${prompt}`,
+        };
+        if (prompt !== 'first') {
+          return Response.json({ prompt }, { status: 201, headers });
+        }
+        const body = new ReadableStream(
+          {
+            async pull(controller) {
+              markBodyStarted();
+              await releaseFirstBody;
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify({ prompt }))
+              );
+              controller.close();
+            },
+          },
+          { highWaterMark: 0 }
+        );
+        return new Response(body, { headers });
+      },
+    });
+
+    const first = ai.runWithMetadata('testModel', { prompt: 'first' });
+    await bodyStarted;
+    const second = await ai.runWithMetadata('testModel', { prompt: 'second' });
+    finishFirstCall();
+
+    assert.deepStrictEqual(await first, {
+      result: { prompt: 'first' },
+      logId: 'log-first',
+      requestId: 'request-first',
+      httpStatus: 200,
+    });
+    assert.deepStrictEqual(second, {
+      result: { prompt: 'second' },
+      logId: 'log-second',
+      requestId: 'request-second',
+      httpStatus: 201,
+    });
+    assert.strictEqual(ai.aiGatewayLogId, 'log-second');
+  },
+};
+
+export const reusedRunOptions = {
+  async test() {
+    for (const option of ['returnRawResponse', 'websocket']) {
+      const { promise: firstResponse, resolve: releaseFirstResponse } =
+        Promise.withResolvers();
+      const ai = new Ai({
+        async fetch(_url, init) {
+          if (init.headers.Upgrade === 'websocket') {
+            await firstResponse;
+            const [client] = Object.values(new WebSocketPair());
+            return new Response(null, { status: 101, webSocket: client });
+          }
+          const { inputs } = JSON.parse(init.body);
+          if (inputs.prompt === 'first') await firstResponse;
+          return Response.json(inputs);
+        },
+      });
+
+      const options = { [option]: true };
+      const first = ai.runWithMetadata(
+        'testModel',
+        { prompt: 'first' },
+        options
+      );
+      options[option] = false;
+      const second = await ai.run('testModel', { prompt: 'second' }, options);
+      releaseFirstResponse();
+
+      const { result } = await first;
+      assert.ok(result instanceof Response);
+      if (option === 'websocket') {
+        assert.strictEqual(result.status, 101);
+        assert.ok(result.webSocket);
+      } else {
+        assert.deepStrictEqual(await result.json(), { prompt: 'first' });
+      }
+      assert.deepStrictEqual(second, { prompt: 'second' });
+    }
+  },
+};
+
+export const concurrentLegacyDiagnostics = {
+  async test() {
+    const { promise: bodyStarted, resolve: markBodyStarted } =
+      Promise.withResolvers();
+    const { promise: firstBody, resolve: releaseFirstBody } =
+      Promise.withResolvers();
+    const ai = new Ai({
+      async fetch(_url, init) {
+        const { prompt } = JSON.parse(init.body).inputs;
+        const headers = {
+          'content-type': 'application/json',
+          'cf-aig-log-id': `log-${prompt}`,
+          'cf-ai-req-id': `request-${prompt}`,
+        };
+        const error = { internalCode: 7003, message: 'Bad inputs' };
+        if (prompt === 'transport') throw new Error('transport failed');
+        if (prompt === 'immediate-error') {
+          return Response.json(error, { status: 422, headers });
+        }
+        if (prompt !== 'first') {
+          return Response.json({ prompt }, { status: 201, headers });
+        }
+        const body = new ReadableStream(
+          {
+            async pull(controller) {
+              markBodyStarted();
+              await firstBody;
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify(error))
+              );
+              controller.close();
+            },
+          },
+          { highWaterMark: 0 }
+        );
+        return new Response(body, { status: 422, headers });
+      },
+    });
+
+    const first = assert.rejects(ai.run('testModel', { prompt: 'first' }), {
+      code: 7003,
+      httpStatus: 422,
+      logId: 'log-first',
+      requestId: 'request-first',
+    });
+    await bodyStarted;
+    await ai.run('testModel', { prompt: 'second' });
+    releaseFirstBody();
+    await first;
+
+    assert.strictEqual(ai.lastRequestId, 'request-second');
+    assert.strictEqual(ai.aiGatewayLogId, 'log-second');
+    assert.strictEqual(ai.lastRequestHttpStatusCode, 201);
+    assert.strictEqual(ai.lastRequestInternalStatusCode, null);
+
+    await assert.rejects(ai.run('testModel', { prompt: 'immediate-error' }), {
+      code: 7003,
+    });
+    assert.strictEqual(ai.lastRequestInternalStatusCode, 7003);
+    await ai.run('testModel', { prompt: 'success' });
+    assert.strictEqual(ai.lastRequestInternalStatusCode, null);
+
+    await assert.rejects(
+      ai.run('testModel', { prompt: 'transport' }),
+      /transport failed/
+    );
+    assert.strictEqual(ai.lastRequestId, 'request-success');
+    assert.strictEqual(ai.aiGatewayLogId, 'log-success');
+    assert.strictEqual(ai.lastRequestHttpStatusCode, 201);
+    assert.strictEqual(ai.lastRequestInternalStatusCode, null);
+  },
+};
 
 export const tests = {
   async test(_, env) {
@@ -62,6 +232,69 @@ export const tests = {
         assert.deepEqual;
         assert.deepStrictEqual(env.ai.lastRequestInternalStatusCode, 1001);
       }
+    }
+
+    {
+      // Test AI Gateway error preserves full message and exposes structured properties
+      await assert.rejects(
+        async () => {
+          await env.ai.run('gatewayInputErrorModel', { prompt: 'test' });
+        },
+        (e) => {
+          assert.strictEqual(e.name, 'AiGatewayError');
+          assert.strictEqual(
+            e.message,
+            '7003: Model execution failed (User Input Error): unsupported parameter reasoning_effort'
+          );
+          assert.strictEqual(e.code, 7003);
+          assert.strictEqual(e.httpStatus, 400);
+          assert.strictEqual(e.retryable, false);
+          assert.strictEqual(e.requestId, 'aig-req-123');
+          assert.strictEqual(e.logId, 'log-err-7003');
+          assert.strictEqual(e.description, 'User Input Error');
+          return true;
+        }
+      );
+    }
+
+    {
+      // Test concurrent run() calls do not clobber per-call options (returnRawResponse)
+      const [rawResp, parsedResp] = await Promise.all([
+        env.ai.run(
+          'slowRawModel',
+          { prompt: 'raw' },
+          { returnRawResponse: true }
+        ),
+        env.ai.run('testModel', { prompt: 'parsed' }),
+      ]);
+      assert.strictEqual(rawResp instanceof Response, true);
+      assert.deepStrictEqual(await rawResp.json(), {
+        response: 'slow raw response',
+      });
+      assert.deepStrictEqual(parsedResp, { response: 'model response' });
+    }
+
+    {
+      const parsed = await env.ai.runWithMetadata('testModel', {
+        prompt: 'parsed',
+      });
+      assert.deepStrictEqual(parsed, {
+        result: { response: 'model response' },
+        logId: null,
+        requestId: '3a1983d7-1ddd-453a-ab75-c4358c91b582',
+        httpStatus: 200,
+      });
+
+      const { result, logId } = await env.ai.runWithMetadata(
+        'slowRawModel',
+        { prompt: 'raw' },
+        { returnRawResponse: true }
+      );
+      assert.strictEqual(logId, 'log-slow-raw');
+      assert.strictEqual(logId, result.headers.get('cf-aig-log-id'));
+      assert.deepStrictEqual(await result.json(), {
+        response: 'slow raw response',
+      });
     }
 
     {

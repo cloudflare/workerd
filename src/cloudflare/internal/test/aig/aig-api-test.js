@@ -4,6 +4,30 @@
 
 import * as assert from 'node:assert';
 
+export const getLogRetries = {
+  async test(_, env) {
+    const gateway = env.ai.gateway('my-gateway');
+    await assert.rejects(gateway.getLog('default-no-retry'), {
+      name: 'AiGatewayLogNotFound',
+      message: 'Not Found (attempt 1)',
+    });
+
+    const options = { retryOnNotFound: true };
+    const log = await gateway.getLog('retry-once', options);
+    assert.strictEqual(log.id, 'retry-once');
+    assert.ok(log.created_at instanceof Date);
+
+    await assert.rejects(gateway.getLog('still-missing', options), {
+      name: 'AiGatewayLogNotFound',
+      message: 'Not Found (attempt 4)',
+    });
+    await assert.rejects(gateway.getLog('retry-stop-on-error', options), {
+      name: 'AiGatewayInternalError',
+      message: 'Internal Error (attempt 2)',
+    });
+  },
+};
+
 export const tests = {
   async test(_, env) {
     {

@@ -29,10 +29,13 @@ interface Fetcher {
 }
 
 interface AiError {
-  internalCode: number;
-  message: string;
-  name: string;
-  description: string;
+  internalCode?: number;
+  httpCode?: number;
+  message?: string;
+  name?: string;
+  description?: string;
+  retryable?: boolean;
+  requestId?: string;
   errors?: Array<{ code: number; message: string }>;
 }
 
@@ -54,6 +57,15 @@ export type AiOptions = {
   sessionOptions?: SessionOptions;
   signal?: AbortSignal;
 };
+
+export type AiRunResult<Result> = {
+  result: Result;
+  logId: string | null;
+  requestId: string | null;
+  httpStatus: number;
+};
+
+type AiRunOutput = Response | ReadableStream<Uint8Array> | object | null;
 
 export type AiWebSearchRequest = {
   gatewayId: string;
@@ -102,10 +114,42 @@ export type AiModelsSearchObject = {
   }[];
 };
 
+export interface InferenceUpstreamErrorDetails {
+  code?: number | undefined;
+  httpStatus?: number | undefined;
+  retryable?: boolean | undefined;
+  requestId?: string | undefined;
+  logId?: string | undefined;
+  description?: string | undefined;
+}
+
 export class InferenceUpstreamError extends Error {
-  constructor(message: string, name = 'InferenceUpstreamError') {
+  code?: number;
+  httpStatus?: number;
+  retryable?: boolean;
+  requestId?: string;
+  logId?: string;
+  description?: string;
+
+  constructor(
+    message: string,
+    name = 'InferenceUpstreamError',
+    details?: InferenceUpstreamErrorDetails
+  ) {
     super(message);
     this.name = name;
+    if (details) {
+      if (details.code !== undefined) this.code = details.code;
+      if (details.httpStatus !== undefined) {
+        this.httpStatus = details.httpStatus;
+      }
+      if (details.retryable !== undefined) this.retryable = details.retryable;
+      if (details.requestId !== undefined) this.requestId = details.requestId;
+      if (details.logId !== undefined) this.logId = details.logId;
+      if (details.description !== undefined) {
+        this.description = details.description;
+      }
+    }
   }
 }
 
@@ -150,6 +194,7 @@ function findReadableStreamKeys(
 
 export class Ai extends wrappedBinding.WrappedBinding {
   #fetcher: Fetcher;
+  #responseSequence = 0;
 
   /*
    * @deprecated this option is deprecated, do not use this
@@ -157,7 +202,6 @@ export class Ai extends wrappedBinding.WrappedBinding {
   // @ts-expect-error: deprecated var
   // eslint-disable-next-line no-unused-private-class-members
   #logs: Array<string> = [];
-  #options: AiOptions = {};
   #endpointURL = 'https://workers-binding.ai';
   lastRequestId: string | null = null;
   aiGatewayLogId: string | null = null;
@@ -178,6 +222,7 @@ export class Ai extends wrappedBinding.WrappedBinding {
    * */
   async #generateFetch(
     inputs: object,
+    options: AiOptions,
     cleanedOptions: CleanedAiOptions,
     model: string
   ): Promise<Response> {
@@ -191,15 +236,15 @@ export class Ai extends wrappedBinding.WrappedBinding {
       method: 'POST',
       body: body,
       headers: {
-        ...this.#options.sessionOptions?.extraHeaders,
-        ...this.#options.extraHeaders,
+        ...options.sessionOptions?.extraHeaders,
+        ...options.extraHeaders,
         'content-type': 'application/json',
         'cf-consn-sdk-version': '2.0.0',
-        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
+        'cf-consn-model-id': `${options.prefix ? `${options.prefix}:` : ''}${model}`,
       },
     };
-    if (this.#options.signal) {
-      fetchOptions.signal = this.#options.signal;
+    if (options.signal) {
+      fetchOptions.signal = options.signal;
     }
 
     let endpointUrl = `${this.#endpointURL}/run?version=3`;
@@ -215,6 +260,7 @@ export class Ai extends wrappedBinding.WrappedBinding {
    * */
   async #generateStreamFetch(
     inputs: Record<string, string | AiInputReadableStream>,
+    options: AiOptions,
     cleanedOptions: CleanedAiOptions,
     model: string,
     streamKeys: string[]
@@ -243,15 +289,15 @@ export class Ai extends wrappedBinding.WrappedBinding {
       method: 'POST',
       body: body,
       headers: {
-        ...this.#options.sessionOptions?.extraHeaders,
-        ...this.#options.extraHeaders,
+        ...options.sessionOptions?.extraHeaders,
+        ...options.extraHeaders,
         'content-type': contentType,
         'cf-consn-sdk-version': '2.0.0',
-        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
+        'cf-consn-model-id': `${options.prefix ? `${options.prefix}:` : ''}${model}`,
       },
     };
-    if (this.#options.signal) {
-      fetchOptions.signal = this.#options.signal;
+    if (options.signal) {
+      fetchOptions.signal = options.signal;
     }
 
     // Fetch the additional input params
@@ -277,6 +323,7 @@ export class Ai extends wrappedBinding.WrappedBinding {
    * */
   async #generateWebsocketFetch(
     inputs: object,
+    options: AiOptions,
     cleanedOptions: CleanedAiOptions,
     model: string
   ): Promise<Response> {
@@ -288,15 +335,15 @@ export class Ai extends wrappedBinding.WrappedBinding {
 
     const fetchOptions: RequestInit = {
       headers: {
-        ...this.#options.sessionOptions?.extraHeaders,
-        ...this.#options.extraHeaders,
+        ...options.sessionOptions?.extraHeaders,
+        ...options.extraHeaders,
         'cf-consn-sdk-version': '2.0.0',
-        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
+        'cf-consn-model-id': `${options.prefix ? `${options.prefix}:` : ''}${model}`,
         Upgrade: 'websocket',
       },
     };
-    if (this.#options.signal) {
-      fetchOptions.signal = this.#options.signal;
+    if (options.signal) {
+      fetchOptions.signal = options.signal;
     }
 
     const aiEndpoint = new URL(`${this.#endpointURL}/run`);
@@ -306,13 +353,45 @@ export class Ai extends wrappedBinding.WrappedBinding {
     return await this.#fetcher.fetch(aiEndpoint, fetchOptions);
   }
 
-  async run(
+  run(
     model: string,
     inputs: Record<string, string | AiInputReadableStream>,
     options: AiOptions = {}
-  ): Promise<Response | ReadableStream<Uint8Array> | object | null> {
-    this.#options = options;
-    this.lastRequestId = '';
+  ): Promise<AiRunOutput> {
+    return this.#run(model, inputs, options, (result) => result);
+  }
+
+  runWithMetadata(
+    model: string,
+    inputs: Record<string, string | AiInputReadableStream>,
+    options: AiOptions = {}
+  ): Promise<AiRunResult<AiRunOutput>> {
+    return this.#run(
+      model,
+      inputs,
+      options,
+      (result, logId, requestId, httpStatus) => ({
+        result,
+        logId,
+        requestId,
+        httpStatus,
+      })
+    );
+  }
+
+  async #run<Output>(
+    model: string,
+    inputs: Record<string, string | AiInputReadableStream>,
+    options: AiOptions,
+    formatResult: (
+      result: AiRunOutput,
+      logId: string | null,
+      requestId: string | null,
+      httpStatus: number
+    ) => Output
+  ): Promise<Output> {
+    const websocket = options.websocket;
+    const returnRawResponse = options.returnRawResponse || websocket;
 
     // This removes some unwanted options from getting sent in the body
     const cleanedOptions = (({
@@ -321,12 +400,17 @@ export class Ai extends wrappedBinding.WrappedBinding {
       sessionOptions,
       signal,
       ...object
-    }): CleanedAiOptions => object)(this.#options);
+    }): CleanedAiOptions => object)(options);
 
     let res: Response;
 
-    if (this.#options.websocket) {
-      res = await this.#generateWebsocketFetch(inputs, cleanedOptions, model);
+    if (websocket) {
+      res = await this.#generateWebsocketFetch(
+        inputs,
+        options,
+        cleanedOptions,
+        model
+      );
     } else {
       /**
        * Inputs that contain a ReadableStream which will be sent directly to
@@ -335,7 +419,7 @@ export class Ai extends wrappedBinding.WrappedBinding {
       const streamKeys = findReadableStreamKeys(inputs);
 
       if (streamKeys.length === 0) {
-        res = await this.#generateFetch(inputs, cleanedOptions, model);
+        res = await this.#generateFetch(inputs, options, cleanedOptions, model);
       } else if (streamKeys.length > 1) {
         throw new AiInternalError(
           `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
@@ -343,6 +427,7 @@ export class Ai extends wrappedBinding.WrappedBinding {
       } else {
         res = await this.#generateStreamFetch(
           inputs,
+          options,
           cleanedOptions,
           model,
           streamKeys
@@ -350,24 +435,38 @@ export class Ai extends wrappedBinding.WrappedBinding {
       }
     }
 
-    this.lastRequestId = res.headers.get('cf-ai-req-id');
-    this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
-    this.lastRequestHttpStatusCode = res.status;
+    const requestId = res.headers.get('cf-ai-req-id');
+    const logId = res.headers.get('cf-aig-log-id');
+    const httpStatus = res.status;
+    const responseSequence = ++this.#responseSequence;
+    this.lastRequestId = requestId;
+    this.aiGatewayLogId = logId;
+    this.lastRequestHttpStatusCode = httpStatus;
+    this.lastRequestInternalStatusCode = null;
 
-    if (this.#options.returnRawResponse || this.#options.websocket) {
-      return res;
+    if (returnRawResponse) {
+      return formatResult(res, logId, requestId, httpStatus);
     }
 
     if (!res.ok || !res.body) {
-      throw await this._parseError(res);
+      throw await this._parseError(res, (code): void => {
+        if (this.#responseSequence === responseSequence) {
+          this.lastRequestInternalStatusCode = code;
+        }
+      });
     }
 
     const contentType = res.headers.get('content-type');
     if (contentType === 'application/json') {
-      return (await res.json()) as object;
+      return formatResult(
+        (await res.json()) as object,
+        logId,
+        requestId,
+        httpStatus
+      );
     }
 
-    return res.body;
+    return formatResult(res.body, logId, requestId, httpStatus);
   }
 
   /*
@@ -379,16 +478,40 @@ export class Ai extends wrappedBinding.WrappedBinding {
 
   // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
-  private async _parseError(res: Response): Promise<InferenceUpstreamError> {
+  private async _parseError(
+    res: Response,
+    setInternalStatusCode?: (code: number) => void
+  ): Promise<InferenceUpstreamError> {
     const content = await res.text();
+    const httpStatus = res.status || undefined;
+    const logId = res.headers.get('cf-aig-log-id') ?? undefined;
+    const headerRequestId = res.headers.get('cf-ai-req-id') ?? undefined;
 
     try {
       const parsedContent = JSON.parse(content) as AiError;
       if (parsedContent.internalCode) {
-        this.lastRequestInternalStatusCode = parsedContent.internalCode;
+        setInternalStatusCode?.(parsedContent.internalCode);
+        const defaultMessage =
+          parsedContent.name && parsedContent.description
+            ? `${parsedContent.name}: ${parsedContent.description}`
+            : undefined;
+        const detail =
+          parsedContent.message && parsedContent.message !== defaultMessage
+            ? parsedContent.message
+            : parsedContent.description
+              ? parsedContent.description
+              : (parsedContent.message ?? content);
         return new InferenceUpstreamError(
-          `${parsedContent.internalCode}: ${parsedContent.description}`,
-          parsedContent.name
+          `${parsedContent.internalCode}: ${detail}`,
+          parsedContent.name,
+          {
+            code: parsedContent.internalCode,
+            httpStatus: parsedContent.httpCode ?? httpStatus,
+            retryable: parsedContent.retryable,
+            requestId: parsedContent.requestId ?? headerRequestId,
+            logId,
+            description: parsedContent.description,
+          }
         );
       } else if (
         parsedContent.errors &&
@@ -396,13 +519,29 @@ export class Ai extends wrappedBinding.WrappedBinding {
         parsedContent.errors[0]
       ) {
         return new InferenceUpstreamError(
-          `${parsedContent.errors[0].code}: ${parsedContent.errors[0].message}`
+          `${parsedContent.errors[0].code}: ${parsedContent.errors[0].message}`,
+          'InferenceUpstreamError',
+          {
+            code: parsedContent.errors[0].code,
+            httpStatus: parsedContent.httpCode ?? httpStatus,
+            retryable: parsedContent.retryable,
+            requestId: parsedContent.requestId ?? headerRequestId,
+            logId,
+          }
         );
       } else {
-        return new InferenceUpstreamError(content);
+        return new InferenceUpstreamError(content, 'InferenceUpstreamError', {
+          httpStatus,
+          requestId: headerRequestId,
+          logId,
+        });
       }
     } catch {
-      return new InferenceUpstreamError(content);
+      return new InferenceUpstreamError(content, 'InferenceUpstreamError', {
+        httpStatus,
+        requestId: headerRequestId,
+        logId,
+      });
     }
   }
 

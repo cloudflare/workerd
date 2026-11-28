@@ -4,12 +4,14 @@
 
 export {
   type AiOptions,
+  type AiRunResult,
   InferenceUpstreamError,
   Ai,
 } from 'cloudflare-internal:ai-api';
 
 export {
   AiGateway,
+  type AiGatewayGetLogOptions,
   AiGatewayInternalError,
   AiGatewayLogNotFound,
 } from 'cloudflare-internal:aig-api';

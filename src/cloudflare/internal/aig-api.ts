@@ -37,6 +37,10 @@ export type AiGatewayPatchLog = {
   metadata?: Record<string, number | string | boolean | null | bigint> | null;
 };
 
+export type AiGatewayGetLogOptions = {
+  retryOnNotFound?: boolean;
+};
+
 export type AiGatewayLog = {
   id: string;
   provider: string;
@@ -50,17 +54,17 @@ export type AiGatewayLog = {
   response_content_type?: string;
   success: boolean;
   cached: boolean;
-  tokens_in?: number;
-  tokens_out?: number;
-  metadata?: Record<string, number | string | boolean | null | bigint>;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  metadata?: Record<string, number | string | boolean | null | bigint> | null;
   step?: number;
-  cost?: number;
+  cost?: number | null;
   custom_cost?: boolean;
-  request_size: number;
-  request_head?: string;
+  request_size?: number | null;
+  request_head?: string | null;
   request_head_complete: boolean;
-  response_size: number;
-  response_head?: string;
+  response_size?: number | null;
+  response_head?: string | null;
   response_head_complete: boolean;
   created_at: Date;
 };
@@ -172,13 +176,23 @@ export class AiGateway {
     return data.result.url;
   }
 
-  async getLog(logId: string): Promise<AiGatewayLog> {
-    const res = await this.#fetcher.fetch(
-      `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/logs/${logId}`,
-      {
-        method: 'GET',
+  async getLog(
+    logId: string,
+    options?: AiGatewayGetLogOptions
+  ): Promise<AiGatewayLog> {
+    const url = `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/logs/${logId}`;
+    const fetchLog = (): Promise<Response> =>
+      this.#fetcher.fetch(url, { method: 'GET' });
+    let res = await fetchLog();
+
+    if (options?.retryOnNotFound) {
+      for (const delay of [100, 250, 500]) {
+        if (res.status !== 404) break;
+        await res.body?.cancel();
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        res = await fetchLog();
       }
-    );
+    }
 
     switch (res.status) {
       case 200: {

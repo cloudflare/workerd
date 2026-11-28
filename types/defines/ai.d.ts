@@ -6392,6 +6392,12 @@ export type AiOptions = {
   extraHeaders?: object;
   signal?: AbortSignal;
 };
+export type AiRunResult<Result> = {
+  result: Result;
+  logId: string | null;
+  requestId: string | null;
+  httpStatus: number;
+};
 export type AiModelsSearchParams = {
   author?: string;
   hide_experimental?: boolean;
@@ -6421,7 +6427,14 @@ export type AiModelsSearchObject = {
 export type ChatCompletionsBase = ChatCompletionsMessagesInput;
 export type ChatCompletionsInput = ChatCompletionsMessagesInput;
 
-export interface InferenceUpstreamError extends Error {}
+export interface InferenceUpstreamError extends Error {
+  code?: number;
+  httpStatus?: number;
+  retryable?: boolean;
+  requestId?: string;
+  logId?: string;
+  description?: string;
+}
 export interface AiInternalError extends Error {}
 export type AiModelListType = Record<string, any>;
 export type AiAsyncBatchResponse = { request_id: string };
@@ -6509,6 +6522,42 @@ export declare abstract class Ai<
     inputs: Record<string, unknown>,
     options?: AiOptions
   ): Promise<Record<string, unknown>>;
+
+  runWithMetadata<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]['inputs'],
+    options: AiOptions & ({ returnRawResponse: true } | { websocket: true })
+  ): Promise<AiRunResult<Response>>;
+
+  runWithMetadata<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: { requests: AiModelList[Name]['inputs'][] },
+    options: AiOptions & { queueRequest: true }
+  ): Promise<AiRunResult<AiAsyncBatchResponse>>;
+
+  runWithMetadata<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]['inputs'] & { stream: true },
+    options?: AiOptions
+  ): Promise<AiRunResult<ReadableStream>>;
+
+  runWithMetadata<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]['inputs'],
+    options?: AiOptions
+  ): Promise<AiRunResult<AiModelList[Name]['postProcessedOutputs']>>;
+
+  runWithMetadata<Model extends string>(
+    model: Model extends keyof AiModelList ? never : Model,
+    inputs: Record<string, unknown>,
+    options: AiOptions & ({ returnRawResponse: true } | { websocket: true })
+  ): Promise<AiRunResult<Response>>;
+
+  runWithMetadata<Model extends string>(
+    model: Model extends keyof AiModelList ? never : Model,
+    inputs: Record<string, unknown>,
+    options?: AiOptions
+  ): Promise<AiRunResult<Record<string, unknown>>>;
 
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
   toMarkdown(): ToMarkdownService;

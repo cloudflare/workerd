@@ -12213,6 +12213,12 @@ type AiOptions = {
   extraHeaders?: object;
   signal?: AbortSignal;
 };
+type AiRunResult<Result> = {
+  result: Result;
+  logId: string | null;
+  requestId: string | null;
+  httpStatus: number;
+};
 type AiModelsSearchParams = {
   author?: string;
   hide_experimental?: boolean;
@@ -12240,7 +12246,14 @@ type AiModelsSearchObject = {
 };
 type ChatCompletionsBase = ChatCompletionsMessagesInput;
 type ChatCompletionsInput = ChatCompletionsMessagesInput;
-interface InferenceUpstreamError extends Error {}
+interface InferenceUpstreamError extends Error {
+  code?: number;
+  httpStatus?: number;
+  retryable?: boolean;
+  requestId?: string;
+  logId?: string;
+  description?: string;
+}
 interface AiInternalError extends Error {}
 type AiModelListType = Record<string, any>;
 type AiAsyncBatchResponse = {
@@ -12328,6 +12341,58 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
     inputs: Record<string, unknown>,
     options?: AiOptions,
   ): Promise<Record<string, unknown>>;
+  runWithMetadata<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]["inputs"],
+    options: AiOptions &
+      (
+        | {
+            returnRawResponse: true;
+          }
+        | {
+            websocket: true;
+          }
+      ),
+  ): Promise<AiRunResult<Response>>;
+  runWithMetadata<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: {
+      requests: AiModelList[Name]["inputs"][];
+    },
+    options: AiOptions & {
+      queueRequest: true;
+    },
+  ): Promise<AiRunResult<AiAsyncBatchResponse>>;
+  runWithMetadata<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]["inputs"] & {
+      stream: true;
+    },
+    options?: AiOptions,
+  ): Promise<AiRunResult<ReadableStream>>;
+  runWithMetadata<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]["inputs"],
+    options?: AiOptions,
+  ): Promise<AiRunResult<AiModelList[Name]["postProcessedOutputs"]>>;
+  runWithMetadata<Model extends string>(
+    model: Model extends keyof AiModelList ? never : Model,
+    inputs: Record<string, unknown>,
+    options: AiOptions &
+      (
+        | {
+            returnRawResponse: true;
+          }
+        | {
+            websocket: true;
+          }
+      ),
+  ): Promise<AiRunResult<Response>>;
+  runWithMetadata<Model extends string>(
+    model: Model extends keyof AiModelList ? never : Model,
+    inputs: Record<string, unknown>,
+    options?: AiOptions,
+  ): Promise<AiRunResult<Record<string, unknown>>>;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
   toMarkdown(): ToMarkdownService;
   toMarkdown(
@@ -12355,7 +12420,7 @@ type GatewayOptions = {
   requestTimeoutMs?: number;
   retries?: GatewayRetries;
 };
-type UniversalGatewayOptions = Exclude<GatewayOptions, "id"> & {
+type UniversalGatewayOptions = Omit<GatewayOptions, "id"> & {
   /**
    ** @deprecated
    */
@@ -12365,6 +12430,9 @@ type AiGatewayPatchLog = {
   score?: number | null;
   feedback?: -1 | 1 | null;
   metadata?: Record<string, number | string | boolean | null | bigint> | null;
+};
+type AiGatewayGetLogOptions = {
+  retryOnNotFound?: boolean;
 };
 type AiGatewayLog = {
   id: string;
@@ -12379,17 +12447,17 @@ type AiGatewayLog = {
   response_content_type?: string;
   success: boolean;
   cached: boolean;
-  tokens_in?: number;
-  tokens_out?: number;
-  metadata?: Record<string, number | string | boolean | null | bigint>;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  metadata?: Record<string, number | string | boolean | null | bigint> | null;
   step?: number;
-  cost?: number;
+  cost?: number | null;
   custom_cost?: boolean;
-  request_size: number;
-  request_head?: string;
+  request_size?: number | null;
+  request_head?: string | null;
   request_head_complete: boolean;
-  response_size: number;
-  response_head?: string;
+  response_size?: number | null;
+  response_head?: string | null;
   response_head_complete: boolean;
   created_at: Date;
 };
@@ -12449,7 +12517,10 @@ interface AiGatewayInternalError extends Error {}
 interface AiGatewayLogNotFound extends Error {}
 declare abstract class AiGateway {
   patchLog(logId: string, data: AiGatewayPatchLog): Promise<void>;
-  getLog(logId: string): Promise<AiGatewayLog>;
+  getLog(
+    logId: string,
+    options?: AiGatewayGetLogOptions,
+  ): Promise<AiGatewayLog>;
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
     options?: {
