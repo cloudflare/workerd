@@ -1075,8 +1075,8 @@ KJ_TEST("multi-piece write(): more empty pieces than IOV_MAX before the data sti
 }
 
 KJ_TEST("every stream operation starts inside the call: an unawaited write goes out") {
-  // kj-http queues header writes without awaiting them. started() (async-io.c++) puts the
-  // operation under way inside the call, so a kept-but-unawaited write completes as the loop
+  // kj-http queues header writes without awaiting them. kj-rs's eager bridged promises put
+  // the operation under way inside the call, so a kept-but-unawaited write completes as the loop
   // turns. (When the syscall happens is tokio's
   // decision, see stream.rs; only a write *dropped* on the spot on a never-yet-ready descriptor
   // is not covered, and no test pins that.)
@@ -1250,7 +1250,7 @@ KJ_TEST("abortRead() ends a pending read with EOF (shutdown(SHUT_RD), like KJ)")
 
 KJ_TEST("an unawaited multi-piece write() goes out too (coroutine start)") {
   // writePieces is the one stream method whose eager start relies on the coroutine polling its
-  // bridged future synchronously rather than on started().
+  // bridged future synchronously rather than on the bridged promise itself being eager.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pair = makeTcpPair(io);

@@ -102,6 +102,50 @@ mod tests;
 - `wd_rust_crate`, `wd_rust_binary` and `wd_rust_proc_macro` take the `*-test.rs` files out of the crate's `srcs` and compile them only into its `<name>_test` target (`split_rust_test_srcs` in `build/wd_rust_test.bzl`). A crate defined with `rust_library` directly does the same by hand: `exclude = ["*-test.rs"]` in the library's `srcs` glob, and `compile_data = glob(["*-test.rs"])` on its `wd_rust_test` (a `rust_test` built from a `crate` rejects `srcs`). An unconditional `mod` declaration of a test file therefore fails the production build.
 - Crates that are test code throughout are exempt: a test-support crate in a `tests/` directory (e.g. `cxx/kj-rs/tests/`), and a `wd_rust_test` built from its own `srcs` (e.g. `tsan/`).
 
+## OWNERSHIP AND LIFETIMES ACROSS THE FFI
+
+These are the load-bearing rules for any code that stores state across the Rust/C++ boundary or
+holds references past a single synchronous call. Violations here are how use-after-free hides in a
+codebase where each side trusts the other's lifetime comments.
+
+- **No borrowed reference or raw pointer may be *stored* beyond the synchronous call that received
+  it.** Passing `&T`/`const T&` down a call is fine; squirreling it away in a member for a later
+  callback is not — no matter how good the "the referent outlives us because…" comment is. Every
+  stored edge must be one of:
+  - **Owning**: `kj::Own`, `kj::Arc`, `rust::Box`, `Box`, or an owned raw handle with single-owner
+    drop glue (the `OwnPromiseNode` pattern: raw pointer + `!Send` + `Drop` that destroys it).
+  - **Checked-weak**: `kj::Weak<T>` with a `kj::PtrTarget` base (expires automatically; but see
+    the threading rule below), or an owner-invalidated cell where the owner's destructor
+    structurally nulls the link (RAII guard, not a destructor body remembering to).
+  - **Assertion-enforced intrusive**: `kj::List`/`kj::ListLink` (a leaf destroyed while linked
+    trips `ListLink`'s destructor assert).
+- **Ownership must be expressed in the type system, not in comments.** If a design needs a "caller
+  must call exactly one of X/Y" or "must outlive Z" convention, reach for a type that enforces it
+  before writing the comment. On this bridge that is almost always available:
+  - C++ owning a Rust object: opaque `extern "Rust"` type held as `rust::Box<T>` — move-only,
+    automatic drop glue, methods via `fn f(self: &T)` in the bridge. This is how C++ should hold
+    a `std::task::Waker` clone, a channel handle, etc.
+  - Rust owning a C++ object: `kj::Own`/`kj::Arc` via `ExternType` (`KjOwn`/`KjArc`), as kj-rs
+    does for `FutureWakerCell`.
+- **Never smuggle a pointer through an integer or a word-pair.** The existing V8 rule ("handles
+  never cross as a bare `usize`") is a special case of the general one: if you find yourself
+  decomposing an object into raw words so the other language can hold it, use an opaque bridged
+  type instead. Raw-parts designs push ownership back into comments (see previous rule) and defeat
+  both languages' tooling.
+- **Know each primitive's thread contract before storing it in a cross-thread object.**
+  `kj::Weak`/`kj::Ptr`/`kj::Pin` are single-threaded (non-atomic control block); KJ promises and
+  `kj::Own` are single-loop; only `kj::CrossThreadPromiseFulfiller`, `kj::Executor`,
+  `kj::AtomicRefcounted`/`kj::Arc` cross threads. Anything reachable from a `std::task::Waker`
+  must be `Send + Sync` — `Waker` is unconditionally both, and type erasure means the compiler
+  will not catch a single-threaded type hiding behind one (kj-rs's `FutureWakerCell` exists
+  precisely because `kj::Weak` cannot live in a cell that foreign threads may destroy).
+- **Prefer methods on bridged types over free functions**, in both directions — `fn f(self: &T)`
+  in the bridge, not `fn f(t: &T)` — so the API surfaces as `handle.f()` on the C++ side.
+- **Opaque-size handshakes**: when Rust owns storage for a C++ object (bindgen-style
+  `_bindgen_opaque_blob`), the C++ side must `static_assert` size/alignment against the generated
+  repr (see awaiter.c++). When the C++ type changes, rebuild and let the assert tell you the new
+  size rather than computing it by hand.
+
 ## CXX BRIDGE: ASYNC AND ERROR HANDLING
 
 ### C++ calling async Rust (`extern "Rust"`)

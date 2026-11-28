@@ -1,5 +1,7 @@
 //! The `workerd-cxx` module containing the [`Own<T>`] type, which is bindings to the `kj::Own<T>` C++ type
-
+//!
+//! FFI island: `KjOwn` mirrors `kj::Own` — raw-pointer
+//! deref and `extern "C"` disposer/refcount calls. A genuine unsafe seam.
 #![allow(
     unsafe_code,
     reason = "`KjOwn` mirrors `kj::Own<T>` and runs its C++ disposer"
@@ -45,6 +47,19 @@ pub unsafe trait OwnTarget: Sized {
     unsafe fn __drop(own: *mut KjOwn<Self>);
 }
 
+/// Makes `KjOwn<Self>` `Send`, by asserting that a `kj::Own<Self>` may be destroyed on any thread.
+///
+/// `Self: Send` says that the object may move to another thread, which covers running its
+/// destructor there. Dropping a `KjOwn` also runs its `kj::Disposer` on the dropping thread, and
+/// nothing about `Self` says that the disposer is safe there: the one `kj::Rc::toOwn()` installs
+/// decrements a non-atomic refcount, and an arena's frees into the arena.
+///
+/// # Safety
+///
+/// Every `kj::Own<Self>` that reaches Rust must have a disposer that is safe to run on any
+/// thread, such as `kj::heap()`'s, which only runs the destructor `Self: Send` already covers.
+pub unsafe trait DisposableOnAnyThread: OwnTarget + Send {}
+
 /// Implements [`OwnTarget`] for the primitive types a bridge accepts in a `KjOwn`. They share one
 /// untyped drop (`own.c++`): a primitive is never polymorphic, so `kj::Own<T>::~Own()` hands the
 /// disposer the pointer unchanged, the same as `kj::Own<void>::~Own()`.
@@ -82,18 +97,16 @@ impl<T> NonNullExceptMaybe<T> {
     }
 
     pub unsafe fn as_ref(&self) -> &T {
-        // Safety:
-        //     This value will only be null when in a [`Maybe<T>`], which does niche value optimization
-        //     for a null pointer, so the inner [`Own<T>`] can never be accessed if it is null
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `self.0` is null only when this `NonNullExceptMaybe` lives inside a
+        // `Maybe<T>` (which niche-optimizes the null pointer and never dereferences the inner
+        // `Own`), so here — reached only through the non-null `Own<T>` API — it is a valid,
+        // live pointer. The caller's `unsafe` obligation is that `self` outlives the borrow.
         unsafe { &*self.0 }
     }
 
     pub unsafe fn as_mut(&mut self) -> &mut T {
-        // Safety:
-        //     This value will only be null when in a [`Maybe<T>`], which does niche value optimization
-        //     for a null pointer, so the inner [`Own<T>`] can never be accessed if it is null
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: as in `as_ref`, `self.0` is non-null and live when reached through the
+        // `Own<T>` API; `&mut self` gives exclusive access, so the mutable reborrow is unique.
         unsafe { &mut *self.0 }
     }
 }
@@ -115,6 +128,7 @@ pub mod repr {
     use std::ops::DerefMut;
     use std::pin::Pin;
 
+    use super::DisposableOnAnyThread;
     use super::NonNullExceptMaybe;
     use super::OwnTarget;
 
@@ -182,10 +196,12 @@ pub mod repr {
         }
     }
 
-    // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-    unsafe impl<T: OwnTarget + Send> Send for KjOwn<T> {}
+    // SAFETY: moving a `KjOwn` to another thread moves the object, which `T: Send` allows, and
+    // moves where its disposer will run, which `DisposableOnAnyThread` allows.
+    unsafe impl<T: DisposableOnAnyThread> Send for KjOwn<T> {}
 
-    // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+    // SAFETY: a shared `KjOwn` reaches the object only through `&T`, which `T: Sync` allows to
+    // be shared, and cannot run the disposer, which takes ownership.
     unsafe impl<T: OwnTarget + Sync> Sync for KjOwn<T> {}
 
     impl<T: OwnTarget> Deref for KjOwn<T> {
@@ -251,3 +267,7 @@ pub mod repr {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "own-test.rs"]
+mod tests;

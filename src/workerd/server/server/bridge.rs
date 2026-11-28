@@ -1241,6 +1241,9 @@ pub mod ffi {
 // SAFETY: a thread logger is made to be moved to the thread it is for, as `kj::Thread` moves the
 // initializer it wraps to the thread it starts; it is used there alone.
 unsafe impl Send for ffi::ThreadLogger {}
+// SAFETY: `thread_logger()` allocates it with `kj::heap()`, whose disposer only runs the
+// destructor, which `Send` above allows on any thread.
+unsafe impl kj_rs::DisposableOnAnyThread for ffi::ThreadLogger {}
 
 // =====================================================================================
 /// A KJ object that forwards to another, which it borrows for its life; the type carries the
