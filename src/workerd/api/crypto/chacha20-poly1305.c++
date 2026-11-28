@@ -112,6 +112,9 @@ class Chacha20Poly1305Key final: public CryptoKey::Impl {
   size_t getSymmetricKeySize() const override {
     return keyData.size();
   }
+  kj::Maybe<kj::ArrayPtr<const kj::byte>> getSecretKeyMaterial() const override {
+    return keyData.asPtr();
+  }
   bool equals(const Impl& other) const override {
     return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
   }

@@ -137,6 +137,9 @@ class AesKeyBase: public CryptoKey::Impl {
   size_t getSymmetricKeySize() const override final {
     return keyData.size();
   }
+  kj::Maybe<kj::ArrayPtr<const kj::byte>> getSecretKeyMaterial() const override final {
+    return keyData.asPtr();
+  }
 
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final {
     JSG_REQUIRE(format == "raw" || format == "raw-secret" || format == "jwk", DOMNotSupportedError,

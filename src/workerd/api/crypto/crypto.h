@@ -287,6 +287,16 @@ class CryptoKey: public jsg::Object {
   // Returns the name of this CryptoKey's algorithm in a normalized, statically-allocated string.
   kj::StringPtr getAlgorithmName() const;
 
+  // Returns the raw key material of a secret key (AES, HMAC, HKDF, PBKDF2 or ChaCha20-Poly1305)
+  // whether or not the key is extractable, or kj::none for any other key. The bytes stay valid
+  // for the life of this CryptoKey.
+  //
+  // This is for native code that needs a key a script imported through WebCrypto for an operation
+  // WebCrypto doesn't offer, so the script can keep the key non-extractable. It is deliberately not
+  // exposed to JavaScript. Callers must check the key's algorithm and usages themselves, and must
+  // never return the bytes, or anything that reveals them, to JavaScript.
+  kj::Maybe<kj::ArrayPtr<const kj::byte>> getSecretKeyMaterial() const;
+
   // JS API
 
   using AlgorithmVariant = kj::OneOf<KeyAlgorithm,

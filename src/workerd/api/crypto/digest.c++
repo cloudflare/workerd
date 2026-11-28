@@ -111,6 +111,9 @@ class HmacKey final: public CryptoKey::Impl {
   size_t getSymmetricKeySize() const override {
     return keyData.size();
   }
+  kj::Maybe<kj::ArrayPtr<const kj::byte>> getSecretKeyMaterial() const override {
+    return keyData.asPtr();
+  }
 
   bool equals(const CryptoKey::Impl& other) const override final {
     return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));

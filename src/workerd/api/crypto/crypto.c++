@@ -736,6 +736,9 @@ CryptoKey::~CryptoKey() noexcept(false) {}
 kj::StringPtr CryptoKey::getAlgorithmName() const {
   return impl->getAlgorithmName();
 }
+kj::Maybe<kj::ArrayPtr<const kj::byte>> CryptoKey::getSecretKeyMaterial() const {
+  return impl->getSecretKeyMaterial();
+}
 CryptoKey::AlgorithmVariant CryptoKey::getAlgorithm(jsg::Lock& js) const {
   return impl->getAlgorithm(js);
 }

@@ -299,6 +299,12 @@ class CryptoKey::Impl {
     return 0;
   }
 
+  // The raw key material of a secret key, or kj::none for a key that has none. See
+  // CryptoKey::getSecretKeyMaterial().
+  virtual kj::Maybe<kj::ArrayPtr<const kj::byte>> getSecretKeyMaterial() const {
+    return kj::none;
+  }
+
   virtual CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError,
         "The getAsymmetricKeyDetail operation is not implemented for \"", getAlgorithmName(),
