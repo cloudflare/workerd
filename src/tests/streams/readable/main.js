@@ -13,6 +13,7 @@
 // string-chunks.js's response, instead.
 
 import { compressedResponse, shortResponse } from 'expected-length';
+import { nonBytesResponse } from 'integration-body-failures';
 import { stringsResponse } from 'string-chunks';
 
 export default {
@@ -26,6 +27,9 @@ export default {
     }
     if (url.pathname === '/strings') {
       return stringsResponse();
+    }
+    if (url.pathname === '/non-bytes') {
+      return nonBytesResponse();
     }
     return new Response(request.body, {
       headers: {
@@ -220,6 +224,7 @@ export {
   everyConsumerCancelsOnNonBytes,
   nonBytesCancelRejectionReplacesFailure,
   nonBytesChunkInClosingBatch,
+  nonBytesChunkInServedResponse,
   transformExpectedLengthOverflow,
   transformExpectedLengthMet,
   sourceExpectedLengthOverflow,
