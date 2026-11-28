@@ -56,6 +56,38 @@ pub mod tests {
     }
 
     #[test]
+    fn test_weak_rc() {
+        let rc = ffi::get_rc();
+        let weak = rc.downgrade();
+        // A weak reference does not count as a strong one.
+        assert!(!rc.is_shared());
+        assert!(weak.is_alive());
+        assert_eq!(
+            weak.try_get().map(|p| p.as_ptr().cast_const()),
+            Some(rc.get())
+        );
+
+        // SAFETY: no reference from `get_mut` is live.
+        let upgraded = unsafe { weak.upgrade() }.unwrap();
+        assert_eq!(upgraded.get_data(), 15);
+        assert!(rc.is_shared());
+        std::mem::drop(upgraded);
+
+        let weak_clone = weak.clone();
+        std::mem::drop(rc);
+        // The weak references outlive the referent, and observe that it has expired.
+        assert!(!weak.is_alive());
+        assert!(weak.try_get().is_none());
+        // SAFETY: the referent has expired, so no reference to it is live.
+        assert!(unsafe { weak.upgrade() }.is_none());
+        assert!(!weak_clone.is_alive());
+        // A clone of an expired weak reference has expired too, and outlives the original.
+        let expired_clone = weak.clone();
+        std::mem::drop(weak);
+        assert!(!expired_clone.is_alive());
+    }
+
+    #[test]
     fn test_arc() {
         let arc = ffi::get_arc();
         assert_eq!(arc.get_data(), 16);
