@@ -403,9 +403,16 @@ pub mod ffi {
         /// The server's owner of its shared OTLP exporter. Dropping it cancels outstanding
         /// exports and releases the collector, even if spans still hold exporter references.
         type OtlpExporter;
+        /// Spans go to `collector` at `<path>/v1/traces`; with `export_logs`, invocations' logs
+        /// to `<path>/v1/logs`. With `json`, as OTLP/JSON rather than protobuf. Traces without an
+        /// upstream sampling decision are exported at `sample_ratio`.
         fn factory_new_otlp_exporter(
             factory: &WorkerFactory,
             collector: Box<SubrequestChannel>,
+            path: &str,
+            export_logs: bool,
+            json: bool,
+            sample_ratio: f64,
         ) -> Result<KjOwn<OtlpExporter>>;
         /// Disables export before the server starts tearing down its workers.
         fn otlp_exporter_unlink(exporter: &OtlpExporter);

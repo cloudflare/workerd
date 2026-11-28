@@ -1,0 +1,8 @@
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+
+# Telemetry, the bundled module `/workerd/telemetry.js` (Worker.Module.bundled).
+wd_cc_embed(
+    name = "telemetry-js",
+    src = "telemetry.js",
+    visibility = ["//src/workerd/server:__pkg__"],
+)

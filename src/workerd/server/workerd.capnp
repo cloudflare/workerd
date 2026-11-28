@@ -385,11 +385,20 @@ struct ClusterConfig {
 }
 
 struct TracingOptions {
+  # Without `tracing` in the config, the environment fills it in. `WORKERD_OTEL=1` sends traces
+  # and logs to the bundled telemetry Worker, `/workerd/telemetry.js`, which writes them to the
+  # cluster's bucket (see its header). `OTEL_EXPORTER_OTLP_ENDPOINT` sends them as OTLP/HTTP to a
+  # collector at `<endpoint>/v1/traces` and `<endpoint>/v1/logs`, with
+  # `OTEL_EXPORTER_OTLP_HEADERS` (comma-separated `name=value`, values percent-encoded) on each
+  # request and `OTEL_EXPORTER_OTLP_PROTOCOL` (`http/protobuf`, the default, or `http/json`).
+  # Either way, `OTEL_TRACES_SAMPLER_ARG` sets `sampleRatio`. With `tracing` set, the variables are
+  # ignored with a warning.
+
   otlp @0 :ServiceDesignator;
   # Export spans to an OpenTelemetry collector. Every Worker invocation produces a trace: a span
   # for the invocation itself, one for each subrequest and binding operation it performs, and any
   # the Worker opens with `ctx.tracing.enterSpan()`. They are POSTed to `/v1/traces` on this
-  # service in the OTLP/HTTP protobuf encoding, so the service is typically an `ExternalServer`
+  # service in the encoding `protocol` names, so the service is typically an `ExternalServer`
   # pointing at a collector's OTLP/HTTP port. For example, to see traces in a local Jaeger:
   #
   #     services = [
@@ -400,14 +409,33 @@ struct TracingOptions {
   #
   # Use `HttpOptions.injectRequestHeaders` to send credentials along. The `service.name` resource
   # attribute is the name of the Worker's service. A request arriving on a socket starts its trace
-  # with the Worker's invocation span. Traces without an upstream sampling decision are sampled.
+  # with the Worker's invocation span. Traces without an upstream sampling decision are sampled at
+  # `sampleRatio`.
   # Invocations of the designated service itself are not traced. While this is set, user spans are
   # exported over OTLP instead of being delivered to streaming tail workers.
   #
-  # The server allows 16 concurrent export POSTs and queues up to 4096 encoded requests. Queued
-  # requests are combined until a batch reaches 1 MiB. Each POST, including its response body, has
-  # a 10-second timeout. Requests are dropped when the queue is full or delivery fails; there are
-  # no retries.
+  # The server allows 16 concurrent export POSTs and queues up to 4096 encoded requests. A request
+  # waits up to a second to be combined with later ones, until a batch reaches 1 MiB. Each POST,
+  # including its response body, has a 10-second timeout. Requests are dropped when the queue is
+  # full or delivery fails; there are no retries.
+
+  exportLogs @1 :Bool;
+  # Also export the invocations' logs, their `console` calls and uncaught exceptions, to
+  # `/v1/logs` on the same service. Each record carries its invocation's trace and span ids.
+
+  protocol @2 :Protocol;
+  # The encoding of each request.
+
+  enum Protocol {
+    httpProtobuf @0;
+    # `application/x-protobuf`.
+    httpJson @1;
+    # `application/json`, OTLP's JSON encoding.
+  }
+
+  sampleRatio @3 :Float64 = 1.0;
+  # The share of traces without an upstream sampling decision that are exported, chosen by trace
+  # ID. An invocation whose trace is not exported still exports its logs, with `exportLogs`.
 }
 
 struct LoggingOptions {
@@ -784,10 +812,11 @@ struct Worker {
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
       # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker,
       # `/workerd/r2.js`, the R2 Worker, `/workerd/workflows.js`, a Workflows engine,
-      # `/workerd/d1.js`, D1 databases, `/workerd/ratelimit.js`, rate limiting, or
-      # `/workerd/secrets-store.js`, Secrets Store secrets (see each one's header for the config
-      # it takes). Unlike built-in modules such as `node:` ones, user code cannot import it; it is
-      # a Worker's source. Experimental.
+      # `/workerd/d1.js`, D1 databases, `/workerd/ratelimit.js`, rate limiting,
+      # `/workerd/secrets-store.js`, Secrets Store secrets, or `/workerd/telemetry.js`, an OTLP
+      # collector writing to a bucket (see each one's header for the config it takes). Unlike
+      # built-in modules such as `node:` ones, user code cannot import it; it is a Worker's source.
+      # Experimental.
     }
 
     namedExports @10 :List(Text);

@@ -247,5 +247,32 @@ KJ_TEST(
   KJ_EXPECT(f.collector.requests.size() == 16);
 }
 
+KJ_TEST("OTLP export queue with a linger batches requests made within it") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+  CollectorState collector;
+  OtlpExportQueue queue(kj::heap<MockTransport>(collector), timer, kj::SECONDS);
+  queue.exportSpans(makeMessage(1), 1);
+  ws.poll();
+  queue.exportSpans(makeMessage(2), 1);
+  ws.poll();
+  KJ_EXPECT(collector.requests.size() == 0);
+
+  timer.advanceTo(timer.now() + kj::SECONDS);
+  ws.poll();
+  KJ_ASSERT(collector.requests.size() == 1);
+  kj::Vector<kj::byte> expected;
+  expected.addAll(makeMessage(1));
+  expected.addAll(makeMessage(2));
+  KJ_EXPECT(collector.requests[0].asPtr() == expected.asPtr());
+
+  // A full batch goes at once, without waiting for the request in flight.
+  queue.exportSpans(makeMessage(3), 1);
+  queue.exportSpans(makeMessage(4, 1024 * 1024), 1);
+  ws.poll();
+  KJ_EXPECT(collector.requests.size() == 2);
+}
+
 }  // namespace
 }  // namespace workerd::server

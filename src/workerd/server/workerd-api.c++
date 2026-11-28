@@ -30,6 +30,7 @@
 #include <workerd/server/r2/r2_js.embed.h>
 #include <workerd/server/ratelimit/ratelimit_js.embed.h>
 #include <workerd/server/secrets-store/secrets_store_js.embed.h>
+#include <workerd/server/telemetry/telemetry_js.embed.h>
 #include <workerd/server/workflows/workflows_js.embed.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
@@ -69,6 +70,7 @@ kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
     map.insert("/workerd/d1.js"_kj, D1_JS);
     map.insert("/workerd/ratelimit.js"_kj, RATELIMIT_JS);
     map.insert("/workerd/secrets-store.js"_kj, SECRETS_STORE_JS);
+    map.insert("/workerd/telemetry.js"_kj, TELEMETRY_JS);
     return map;
   }();
   return bundled.find(name);

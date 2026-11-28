@@ -13,6 +13,8 @@ use std::io::Write;
 use capnp::message::ReaderOptions;
 use workerd_capnp::config;
 use workerd_capnp::service;
+use workerd_capnp::tracing_options;
+use workerd_server::telemetry;
 
 use crate::bridge::ffi;
 use crate::wrangler::CLUSTER_STORAGE;
@@ -236,6 +238,84 @@ impl Config {
         )))
     }
 
+    /// With `WORKERD_OTEL=1` and no `tracing` in the config, adds the telemetry Worker,
+    /// `workerd-telemetry` (`/workerd/telemetry.js`), and its bucket service,
+    /// `workerd-telemetry-store` at `telemetry`, and points `tracing` at them: traces and logs, as
+    /// OTLP/JSON, sampled at `OTEL_TRACES_SAMPLER_ARG`. See `TracingOptions` in workerd.capnp.
+    /// `var` reads an environment variable. A config that sets `tracing` keeps it, with a warning.
+    pub fn with_telemetry_environment(self, var: Env<'_>) -> Result<Self, String> {
+        let otel = telemetry::WORKERD_OTEL;
+        match var(otel).as_deref() {
+            None | Some("0") => return Ok(self),
+            Some("1") => {}
+            Some(v) => {
+                return Err(format!(
+                    "{otel}={v}: expected 0 or 1. For a collector, set {} instead.",
+                    telemetry::ENDPOINT
+                ));
+            }
+        }
+        if var(telemetry::ENDPOINT).is_some() {
+            return Err(format!(
+                "Set only one of {otel} and {}.",
+                telemetry::ENDPOINT
+            ));
+        }
+        let ratio = telemetry::sample_ratio(var)?;
+        let bytes = self.to_bytes();
+        let message = capnp::serialize::read_message(bytes.as_slice(), reader_options())
+            .map_err(|error| error.to_string())?;
+        let root = message
+            .get_root::<config::Reader>()
+            .map_err(|error| error.to_string())?;
+        if root.has_tracing() {
+            eprintln!("warning: {otel} is ignored: the config sets `tracing`.");
+            return Ok(self);
+        }
+        let old = root.get_services().map_err(|error| error.to_string())?;
+        for service in old {
+            let name = service.get_name().map_err(|error| error.to_string())?;
+            if name.to_str().is_ok_and(|n| n.starts_with(TELEMETRY)) {
+                return Err(format!(
+                    "{otel}=1: the config already has a service {name:?}."
+                ));
+            }
+        }
+        let mut message_ = capnp::message::Builder::new_default();
+        message_.set_root(root).map_err(|error| error.to_string())?;
+        let mut root_ = message_
+            .get_root::<config::Builder>()
+            .map_err(|error| error.to_string())?;
+        let mut services = root_.reborrow().init_services(old.len() + 2);
+        for (i, service) in (0u32..).zip(old) {
+            services
+                .set_with_caveats(i, service)
+                .map_err(|error| error.to_string())?;
+        }
+        let store = format!("{TELEMETRY}-store");
+        let mut service = services.reborrow().get(old.len());
+        service.set_name(TELEMETRY);
+        let mut worker = service.init_worker();
+        let mut module = worker.reborrow().init_modules(1).get(0);
+        module.set_name("telemetry.js");
+        module.set_bundled("/workerd/telemetry.js");
+        worker.set_compatibility_date("2026-01-01");
+        let mut binding = worker.init_bindings(1).get(0);
+        binding.set_name("STORE");
+        binding.init_service().set_name(&store);
+        let mut service = services.get(old.len() + 1);
+        service.set_name(&store);
+        service.init_bucket().set_path("telemetry");
+        let mut tracing = root_.init_tracing();
+        tracing.reborrow().init_otlp().set_name(TELEMETRY);
+        tracing.set_export_logs(true);
+        tracing.set_protocol(tracing_options::Protocol::HttpJson);
+        tracing.set_sample_ratio(ratio);
+        Ok(Self(words_from_bytes(
+            &capnp::serialize::write_message_to_words(&message_),
+        )))
+    }
+
     /// Writes the encoded config to stdout (`compile --config-only`).
     pub fn write_to_stdout(&self) -> io::Result<()> {
         let mut out = io::stdout().lock();
@@ -245,6 +325,9 @@ impl Config {
         out.flush()
     }
 }
+
+/// The telemetry Worker that `WORKERD_OTEL=1` adds, and the prefix of its services' names.
+const TELEMETRY: &str = "workerd-telemetry";
 
 /// Reads an environment variable: `None` when it is unset or empty.
 pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;

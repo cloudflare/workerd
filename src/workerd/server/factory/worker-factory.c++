@@ -1044,20 +1044,33 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     tracer->setStartInvocationSpanFunc(
         [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
             serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
-            identityTags = makeOtlpIdentityTags(service)](
-            tracing::InvocationSpanContext& invocation) mutable {
-      // Standalone export samples traces without an upstream decision. Set the invocation's
-      // context so user spans and subrequests inherit the same flags.
-      invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
+            identityTags = makeOtlpIdentityTags(service), exportsLogs = worker.otlpExportsLogs,
+            ratio = worker.otlpSampleRatio](
+            tracing::InvocationSpanContext& invocation) mutable -> StartedInvocationSpan {
+      // Standalone export samples traces without an upstream decision, by trace ID. Set the
+      // invocation's context so user spans and subrequests inherit the same flags.
+      bool sampled =
+          ratio >= 1 || invocation.getTraceId().getLow() < static_cast<uint64_t>(ratio * 0x1p64);
+      invocation.setDefaultTraceFlags(tracing::TraceFlags(sampled ? 0x01 : 0x00));
+      sampled =
+          invocation.getTraceFlags().map([](auto f) { return f.isSampled(); }).orDefault(true);
+      if (!sampled && !exportsLogs) return SpanBuilder(nullptr);
       auto parent = invocation.getParent().map(
           [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
-      return startExportedUserSpan(entropySource, exporter.addRef(),
-          tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
-          OtlpSpanSubmitter::Options{
-            .serviceName = serviceName,
-            .resource = resource,
-            .defaultTags = identityTags,
-          },
+      auto context =
+          tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags());
+      OtlpSpanSubmitter::Options options{
+        .serviceName = serviceName,
+        .resource = resource,
+        .defaultTags = identityTags,
+        .exportLogs = ExportLogs(exportsLogs),
+        .exportSpans = ExportSpans(sampled),
+      };
+      if (exportsLogs) {
+        return startExportedInvocationSpan(
+            entropySource, exporter.addRef(), context, options, invocation.getSpanId());
+      }
+      return startExportedUserSpan(entropySource, exporter.addRef(), context, options,
           "invocation"_kjc, invocation.getSpanId());
     });
   }
@@ -1916,6 +1929,10 @@ void worker_set_otlp_exporter(
     const CompiledWorker& worker, kj::Maybe<const OtlpExporter&> exporter) {
   worker.getImpl().otlpExporter =
       exporter.map([](const OtlpExporter& e) { return otlp_exporter_add_ref(e); });
+  KJ_IF_SOME(e, exporter) {
+    worker.getImpl().otlpExportsLogs = e.exportsLogs;
+    worker.getImpl().otlpSampleRatio = e.sampleRatio;
+  }
 }
 
 void worker_unlink(const CompiledWorker& worker) {

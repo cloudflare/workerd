@@ -28,6 +28,7 @@ use kj_rs::KjOwn;
 use workerd_capnp::config;
 use workerd_capnp::service;
 use workerd_capnp::service_designator;
+use workerd_capnp::tracing_options;
 use workerd_capnp::worker;
 use workerd_capnp::workflows_engine;
 
@@ -63,6 +64,7 @@ use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
 use crate::services::bucket::Home;
+use crate::telemetry;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -565,18 +567,45 @@ pub struct Server {
 }
 
 struct OtlpTracing {
-    collector: String,
+    /// The collector's service, whose own invocations are not traced.
+    collector: Option<String>,
     exporter: KjOwn<ffi::OtlpExporter>,
 }
 
 impl OtlpTracing {
     fn from_config(
-        factory: &Factory,
+        factory: &Rc<Factory>,
         config: config::Reader<'_>,
         services: &Services,
         report: &Reporter,
     ) -> Result<Option<Self>> {
         let tracing = config.get_tracing().map_err(capnp_error)?;
+        let env = match telemetry::Collector::read() {
+            Ok(env) => env,
+            Err(e) => {
+                report.error(e);
+                return Ok(None);
+            }
+        };
+        if config.has_tracing() && env.is_some() {
+            report.warning(format!(
+                "{} is ignored: the config sets `tracing`.",
+                telemetry::ENDPOINT
+            ));
+        } else if let Some(env) = env {
+            let (service, path) = telemetry::collector(factory, &env.url, &env.headers)?;
+            return Ok(Some(Self {
+                collector: None,
+                exporter: ffi::factory_new_otlp_exporter(
+                    factory.raw(),
+                    SubrequestChannel::new(service),
+                    &path,
+                    true,
+                    env.json,
+                    env.sample_ratio,
+                )?,
+            }));
+        }
         if !tracing.has_otlp() {
             return Ok(None);
         }
@@ -592,10 +621,17 @@ impl OtlpTracing {
         }
         let collector = lookup_service(&services.0, report, None, &designator);
         Ok(Some(Self {
-            collector: designator.service,
+            collector: Some(designator.service),
             exporter: ffi::factory_new_otlp_exporter(
                 factory.raw(),
                 SubrequestChannel::new(collector),
+                "",
+                tracing.get_export_logs(),
+                matches!(
+                    tracing.get_protocol(),
+                    Ok(tracing_options::Protocol::HttpJson)
+                ),
+                tracing.get_sample_ratio(),
             )?,
         }))
     }
@@ -606,7 +642,7 @@ impl Server {
     /// have no configured service name and are eligible too.
     pub fn otlp_exporter(&self, service: Option<&str>) -> Option<&ffi::OtlpExporter> {
         let otlp = self.otlp.as_ref()?;
-        if service == Some(otlp.collector.as_str()) {
+        if otlp.collector.is_some() && service == otlp.collector.as_deref() {
             return None;
         }
         Some(&otlp.exporter)

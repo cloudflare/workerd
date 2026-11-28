@@ -28,6 +28,7 @@ pub mod pyodide;
 pub mod run;
 pub mod services;
 pub mod tasks;
+pub mod telemetry;
 pub mod worker;
 
 pub type Error = cxx::KjError;
