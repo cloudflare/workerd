@@ -1026,6 +1026,11 @@ kj_test(
 )
 
 kj_test(
+    src = "io-timers-test.c++",
+    deps = [":io"],
+)
+
+kj_test(
     src = "timer-queue-test.c++",
     deps = [":io"],
 )
