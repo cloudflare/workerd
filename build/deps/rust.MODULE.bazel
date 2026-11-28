@@ -1,4 +1,10 @@
-RUST_STABLE_VERSION = "1.97.1"  # LLVM 22
+# rustc's LLVM (`rustc -vV`) must write the raw profile format of the Linux toolchain's clang, since
+# coverage and PGO-instrumented builds put rustc's and clang's counters in one binary, and the
+# profile runtime that clang links misreads data of another format. It must also be no newer than
+# lld's LLVM, which reads rustc's bitcode under cross-language LTO (rust-lto in .bazelrc), on
+# x86_64 and arm64 hosts alike (build/deps/llvm.MODULE.bazel). Rust 1.99 is the first on LLVM 23,
+# whose raw profiles are those of Chromium's clang 24.
+RUST_STABLE_VERSION = "1.99.1"  # LLVM 23
 
 RUST_NIGHTLY_VERSION = "nightly/2026-07-16"
 
