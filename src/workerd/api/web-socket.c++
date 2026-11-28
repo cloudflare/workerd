@@ -326,13 +326,6 @@ kj::Maybe<kj::Rc<NonHibernatableWebSocketCount>> checkNonHibernatableWebSocketLi
   return kj::none;
 }
 
-kj::Maybe<kj::Arc<const jsg::ExternalMemoryTarget>> getOutgoingMemoryTarget(jsg::Lock& js) {
-  if (util::Autogate::isEnabled(util::AutogateKey::WEBSOCKET_OUTGOING_QUEUE_MEMORY)) {
-    return js.getExternalMemoryTarget();
-  }
-  return kj::none;
-}
-
 }  // namespace
 
 IoOwn<LegacyWebSocketAdapter::Native> LegacyWebSocketAdapter::initNative(IoContext& ioContext,
@@ -365,7 +358,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js,
           kj::mv(ws),
           kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
           package.closedOutgoingConnection)),
-      outgoingMemory(getOutgoingMemoryTarget(js)),
+      outgoingMemory(js.getExternalMemoryTarget()),
       outgoingMessages(ioContext.createObject<OutgoingMessagesMap>()),
       autoResponseStatus(ioContext.createObject<AutoResponse>()) {
   autoResponseStatus->isClosed = farNative->closedOutgoing;
@@ -383,7 +376,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(
                                                                         : BinaryType::ARRAYBUFFER),
       allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
-      outgoingMemory(getOutgoingMemoryTarget(js)),
+      outgoingMemory(js.getExternalMemoryTarget()),
       outgoingMessages(IoContext::current().createObject<OutgoingMessagesMap>()),
       autoResponseStatus(IoContext::current().createObject<AutoResponse>()) {
   auto nativeObj = kj::heap<Native>();
@@ -398,7 +391,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js, WebSocket& shell, 
                                                                         : BinaryType::ARRAYBUFFER),
       allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
-      outgoingMemory(getOutgoingMemoryTarget(js)),
+      outgoingMemory(js.getExternalMemoryTarget()),
       outgoingMessages(IoContext::current().createObject<OutgoingMessagesMap>()),
       autoResponseStatus(IoContext::current().createObject<AutoResponse>()) {
   auto nativeObj = kj::heap<Native>();
@@ -1529,12 +1522,8 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
   completed = true;
 }
 
-kj::Maybe<jsg::ExternalMemoryAdjustment> LegacyWebSocketAdapter::chargeOutgoing(
-    size_t payloadBytes) {
-  KJ_IF_SOME(target, outgoingMemory) {
-    return target->getAdjustment(payloadBytes + sizeof(GatedMessage));
-  }
-  return kj::none;
+jsg::ExternalMemoryAdjustment LegacyWebSocketAdapter::chargeOutgoing(size_t payloadBytes) {
+  return outgoingMemory->getAdjustment(payloadBytes + sizeof(GatedMessage));
 }
 
 size_t LegacyWebSocketAdapter::getPendingAutoResponseCount() {
