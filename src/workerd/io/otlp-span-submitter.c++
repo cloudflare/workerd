@@ -318,7 +318,7 @@ bool OtlpSpanSubmitter::submitSpanOpen(tracing::SpanId spanId,
   if (spanId != rootSpanId && !exporter->exportsRuntimeSpan(operationName)) {
     return false;
   }
-  return open(spanId, parentSpanId, operationName, startTime);
+  return open(spanId, parentSpanId, operationName, startTime, rust::otlp::SpanOrigin::Runtime);
 }
 
 bool OtlpSpanSubmitter::submitUserSpanOpen(tracing::SpanId spanId,
@@ -328,17 +328,18 @@ bool OtlpSpanSubmitter::submitUserSpanOpen(tracing::SpanId spanId,
   if (!exporter->exportsUserSpan(operationName)) {
     return false;
   }
-  return open(spanId, parentSpanId, operationName, startTime);
+  return open(spanId, parentSpanId, operationName, startTime, rust::otlp::SpanOrigin::User);
 }
 
 bool OtlpSpanSubmitter::open(tracing::SpanId spanId,
     tracing::SpanId parentSpanId,
     kj::StringPtr operationName,
-    kj::Date startTime) {
+    kj::Date startTime,
+    rust::otlp::SpanOrigin origin) {
   // Not a dropped span: there is no trace to export it in.
   if (!exportSpans && spanId != rootSpanId) return false;
   if (rust::otlp::open_span(*buffer, spanId.getId(), parentSpanId.getId(), toRust(operationName),
-          toUnixNanos(startTime))) {
+          toUnixNanos(startTime), origin)) {
     return true;
   }
   exporter->spansDropped(1);

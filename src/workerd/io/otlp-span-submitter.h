@@ -92,10 +92,12 @@ kj::Array<Span::Tag> makeOtlpIdentityTags(const OtlpServiceInfo& service);
 // may wait for a garbage collection. It holds no tracer or request state, so stale SpanParents
 // held in async context storage are safe.
 //
-// At close each span gets URL attributes derived from `url.full`, the default tags, and
-// `cloudflare.invocation.sequence.number`, counted in open order so the root is 1. `fetch` spans
-// to a binding's internal host are not exported. Spans still open when the submitter is destroyed
-// are closed then and flagged with `cloudflare.warning.type` of `span_not_ended`.
+// At close each runtime span (including the root) gets URL attributes derived from `url.full`;
+// spans opened by user code do not (though `redactQueryString` still strips queries from
+// `url.full` and drops `url.query` on every span). Every span gets the default tags and
+// `cloudflare.invocation.sequence.number`, counted in open order so the root is 1. `fetch`
+// spans to a binding's internal host are not exported. Spans still open when the submitter is
+// destroyed are closed then and flagged with `cloudflare.warning.type` of `span_not_ended`.
 //
 // With ExportLogs::YES it also takes the invocation's logs and exceptions as log records carrying
 // the same resource and default tags. They are batched like spans, go out when the root span
@@ -176,7 +178,8 @@ class OtlpSpanSubmitter final: public SpanSubmitter, public InvocationLogSubmitt
   bool open(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::StringPtr operationName,
-      kj::Date startTime);
+      kj::Date startTime,
+      rust::otlp::SpanOrigin origin);
   void exportBatch(rust::otlp::Batch batch);
   void exportLogs(rust::otlp::LogBatch batch);
   // Adds the invocation record, if it is due, and hands out the logs.

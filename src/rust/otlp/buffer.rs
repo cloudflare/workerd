@@ -46,10 +46,18 @@ pub struct Batch {
     pub span_count: usize,
 }
 
+/// Whether a span came from the runtime (including the invocation root) or from user code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpanOrigin {
+    Runtime,
+    User,
+}
+
 struct OpenSpan {
     parent_span_id: u64,
     name: String,
     start: i64,
+    origin: SpanOrigin,
     sequence_number: i64,
     status: Option<proto::Status>,
     events: Vec<proto::Event>,
@@ -106,7 +114,14 @@ impl SpanBuffer {
 
     /// Starts buffering a span. Returns false, leaving the buffer unchanged, when the id is already
     /// open or too many spans are.
-    pub fn open(&mut self, span_id: u64, parent_span_id: u64, name: String, start: i64) -> bool {
+    pub fn open(
+        &mut self,
+        span_id: u64,
+        parent_span_id: u64,
+        name: String,
+        start: i64,
+        origin: SpanOrigin,
+    ) -> bool {
         if self.open.len() >= MAX_OPEN_SPANS || self.open.contains_key(&span_id) {
             return false;
         }
@@ -117,6 +132,7 @@ impl SpanBuffer {
                 parent_span_id,
                 name,
                 start,
+                origin,
                 sequence_number: self.last_sequence_number,
                 status: None,
                 events: Vec::new(),
@@ -209,7 +225,15 @@ impl SpanBuffer {
     /// Adds a closed span to the batch in its OTLP form.
     fn write(&mut self, span_id: u64, span: OpenSpan, end: i64, mut attributes: Attributes) {
         let is_root = span_id == self.options.root_span_id;
-        rules::add_url_attributes(&mut attributes, self.options.redact_query_string);
+        match span.origin {
+            SpanOrigin::Runtime => {
+                rules::add_url_attributes(&mut attributes, self.options.redact_query_string);
+            }
+            SpanOrigin::User if self.options.redact_query_string => {
+                rules::redact_url_query(&mut attributes);
+            }
+            SpanOrigin::User => {}
+        }
         attributes.set_defaults(&self.default_attributes);
         attributes.set(
             "cloudflare.invocation.sequence.number",

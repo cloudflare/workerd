@@ -118,6 +118,30 @@ fn redaction_cuts_the_query_from_url_full() {
 }
 
 #[test]
+fn redact_url_query_only_redacts_without_deriving() {
+    let mut attributes = with(&[
+        ("url.full", string("https://example.com:8443/p?secret=1#f")),
+        ("url.query", string("secret=1")),
+    ]);
+    redact_url_query(&mut attributes);
+    assert_eq!(
+        attributes,
+        with(&[("url.full", string("https://example.com:8443/p"))])
+    );
+
+    // Without a query string, url.full is left alone while any explicit url.query is still dropped.
+    let mut attributes = with(&[
+        ("url.full", string("https://example.com/p#f")),
+        ("url.query", string("secret=1")),
+    ]);
+    redact_url_query(&mut attributes);
+    assert_eq!(
+        attributes,
+        with(&[("url.full", string("https://example.com/p#f"))])
+    );
+}
+
+#[test]
 fn url_attributes_keep_what_the_span_already_carries() {
     let mut attributes = with(&[
         ("server.address", string("origin.internal")),

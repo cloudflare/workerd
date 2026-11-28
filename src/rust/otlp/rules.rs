@@ -44,12 +44,38 @@ pub fn derived_error_type(attributes: &Attributes, is_root: bool) -> Option<Stri
     }
 }
 
+/// Cuts the query (and any fragment) from `url.full` and drops `url.query`, without adding any
+/// derived URL attributes. A span whose `url.full` is absent, unparseable, or has no query keeps
+/// `url.full` as given.
+pub fn redact_url_query(attributes: &mut Attributes) {
+    attributes.remove("url.query");
+    let Some(url) = attributes
+        .string("url.full")
+        .and_then(|full| Url::parse(full, None).ok())
+    else {
+        return;
+    };
+    redact_parsed_url(attributes, &url);
+}
+
+fn redact_parsed_url(attributes: &mut Attributes, url: &Url) {
+    if url.search().trim_start_matches('?').is_empty() {
+        return;
+    }
+    let scheme = url.protocol().trim_end_matches(':');
+    let redacted = format!("{scheme}://{}{}", url.host(), url.pathname());
+    attributes.set("url.full", redacted);
+}
+
 /// Adds the attributes derived from `url.full` (`url.scheme`, `server.address`, `server.port` when
 /// the URL names one, `url.path`, `url.query` when there is a query, and `network.protocol.name`
 /// for HTTP), keeping any the span already carries. With `redact_query_string` the query and
-/// fragment are cut from `url.full` instead and `url.query` is not set. A span without a
+/// fragment are cut from `url.full` instead and `url.query` is dropped. A span without a
 /// parseable `url.full` is left alone.
 pub fn add_url_attributes(attributes: &mut Attributes, redact_query_string: bool) {
+    if redact_query_string {
+        attributes.remove("url.query");
+    }
     let Some(url) = attributes
         .string("url.full")
         .and_then(|full| Url::parse(full, None).ok())
@@ -73,8 +99,7 @@ pub fn add_url_attributes(attributes: &mut Attributes, redact_query_string: bool
         return;
     }
     if redact_query_string {
-        let redacted = format!("{scheme}://{}{}", url.host(), url.pathname());
-        attributes.set("url.full", redacted);
+        redact_parsed_url(attributes, &url);
     } else {
         attributes.set_default("url.query", query);
     }
