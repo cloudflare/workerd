@@ -115,8 +115,10 @@ class GrowableBuffer final {
     builder.resize(size);
   }
 
+  // Makes room for up to another chunk, but never past the maximum capacity: the output that is
+  // still to come may fit in less.
   void addChunk() {
-    reserve(size() + chunkSize);
+    reserve(kj::min(size() + chunkSize, maxCapacity));
   }
 
   void reserve(size_t size) {
@@ -127,6 +129,9 @@ class GrowableBuffer final {
 
   bool atMaxCapacity() const {
     return size() >= maxCapacity;
+  }
+  size_t getMaxCapacity() const {
+    return maxCapacity;
   }
 
  private:
@@ -798,7 +803,10 @@ static kj::Array<kj::byte> syncProcessBuffer(jsg::Lock& js, Context& ctx, Growab
       // If the stream is done, the output just happened to fit exactly — return it.
       // Otherwise the decompressed data exceeds maxOutputLength.
       if (!ctx.isStreamEnd()) {
-        throwWithCode(js, js.rangeError("Memory limit exceeded"_kj), "ERR_BUFFER_TOO_LARGE"_kj);
+        throwWithCode(js,
+            js.rangeError(
+                kj::str("Cannot create a Buffer larger than ", result.getMaxCapacity(), " bytes")),
+            "ERR_BUFFER_TOO_LARGE"_kj);
       }
       break;
     }

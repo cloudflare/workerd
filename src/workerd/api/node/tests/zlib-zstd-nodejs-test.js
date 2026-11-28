@@ -242,7 +242,11 @@ export const zstdMaxOutputLengthTest = {
     // Try to decompress with a maxOutputLength that's too small
     assert.throws(
       () => zlib.zstdDecompressSync(compressed, { maxOutputLength: 10 }),
-      /Memory limit exceeded/,
+      {
+        name: 'RangeError',
+        code: 'ERR_BUFFER_TOO_LARGE',
+        message: 'Cannot create a Buffer larger than 10 bytes',
+      },
       'Should throw when maxOutputLength is exceeded'
     );
   },
@@ -543,7 +547,11 @@ export const zstdCompressSyncMaxOutputLengthTest = {
         zlib.zstdCompressSync(xorshiftBytes(200_000), {
           maxOutputLength: 64 * 1024,
         }),
-      { name: 'RangeError', message: /Memory limit exceeded/ }
+      {
+        name: 'RangeError',
+        code: 'ERR_BUFFER_TOO_LARGE',
+        message: /^Cannot create a Buffer larger than \d+ bytes$/,
+      }
     );
   },
 };
@@ -556,7 +564,11 @@ export const zstdCompressSyncMaxOutputLengthAtBufferBoundaryTest = {
         zlib.zstdCompressSync(xorshiftBytes(200_000), {
           maxOutputLength: 2 * syncFirstBufferSize,
         }),
-      { name: 'RangeError', message: /Memory limit exceeded/ }
+      {
+        name: 'RangeError',
+        code: 'ERR_BUFFER_TOO_LARGE',
+        message: /^Cannot create a Buffer larger than \d+ bytes$/,
+      }
     );
   },
 };
@@ -739,6 +751,31 @@ export const zstdDecompressEmptyInputTest = {
     assert.strictEqual(zlib.zstdDecompressSync(Buffer.alloc(0)).length, 0);
   },
 };
+
+// A maxOutputLength the output fits in, but that leaves less than the 40 KiB the sync output
+// buffer grows by, is enough.
+export const zstdMaxOutputLengthAfterBufferGrowthTest = {
+  test() {
+    for (const size of [40961, 50000, 100000, 200000]) {
+      const original = xorshiftBytes(size);
+      const compressed = zlib.zstdCompressSync(original);
+      for (const maxOutputLength of [size, size + 1, size + 20000]) {
+        assert(
+          original.equals(
+            zlib.zstdDecompressSync(compressed, { maxOutputLength })
+          ),
+          `${size} bytes, maxOutputLength ${maxOutputLength}`
+        );
+      }
+      assert.throws(
+        () =>
+          zlib.zstdDecompressSync(compressed, { maxOutputLength: size - 1 }),
+        { name: 'RangeError', code: 'ERR_BUFFER_TOO_LARGE' }
+      );
+    }
+  },
+};
+
 // Bytes that zstd cannot compress, so it stores them in raw blocks.
 function incompressibleBytes(length) {
   const bytes = Buffer.allocUnsafe(length);
