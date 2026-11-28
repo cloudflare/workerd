@@ -2004,6 +2004,22 @@ KJ_TEST("confirmed put blocks output gate") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
+KJ_TEST("scheduleCommit() commits without a write and blocks output gate") {
+  ActorSqliteTest test;
+
+  auto committed = test.actor.scheduleCommit();
+  KJ_ASSERT(test.actor.isCommitScheduled());
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+
+  auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  KJ_ASSERT(!committed.poll(test.ws));
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+
+  commitFulfiller->fulfill();
+  committed.wait(test.ws);
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+}
+
 KJ_TEST("mixed confirmed and unconfirmed writes in same transaction use output gate") {
   ActorSqliteTest test;
 
@@ -2742,6 +2758,82 @@ KJ_TEST("confirmed put in explicit transaction blocks output gate on commit") {
 
   // Verify data was written
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
+}
+
+KJ_TEST("scheduleCommit() in explicit transaction blocks output gate on commit") {
+  ActorSqliteTest test;
+
+  auto txn = test.startTransaction();
+
+  // The promise doesn't wait for the transaction, which may itself be waiting for the promise.
+  test.actor.scheduleCommit().wait(test.ws);
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  txn->commit();
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+}
+
+KJ_TEST("scheduleCommit() in explicit transaction commits after the transaction rolls back") {
+  ActorSqliteTest test;
+
+  {
+    auto txn = test.startTransaction();
+    test.actor.scheduleCommit().wait(test.ws);
+    txn->rollback().wait(test.ws);
+
+    // The transaction is still open, so nothing can commit yet.
+    test.pollAndExpectCalls({});
+    KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+  }
+
+  // Rolling back the database doesn't undo what the embedder asked to commit.
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // The request doesn't outlive the transaction.
+  {
+    auto txn = test.startTransaction();
+    txn->rollback().wait(test.ws);
+  }
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+}
+
+KJ_TEST("scheduleCommit() in explicit transaction commits after the transaction is dropped") {
+  ActorSqliteTest test;
+
+  {
+    auto txn = test.startTransaction();
+    test.actor.scheduleCommit().wait(test.ws);
+  }
+
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+}
+
+KJ_TEST("scheduleCommit() in a nested transaction that rolls back blocks output gate on commit") {
+  ActorSqliteTest test;
+
+  auto txn = test.startTransaction();
+  {
+    auto nested = test.startTransaction();
+    test.actor.scheduleCommit().wait(test.ws);
+    nested->rollback().wait(test.ws);
+  }
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  txn->commit();
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 }
 
 KJ_TEST("mixed confirmed and unconfirmed puts in explicit transaction use output gate") {
