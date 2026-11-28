@@ -36,6 +36,7 @@ mod jsg_oneof;
 mod jsg_oneof_variants;
 mod jsg_struct;
 mod json;
+mod kj_io_objects;
 mod local_cast;
 mod local_handle;
 mod local_value;

@@ -179,6 +179,17 @@ bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
 // own guard, or allows it again.
 void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed);
 
+// A KJ async object (kj::AsyncObject), as KJ I/O objects are, whose destruction
+// kj::DisallowAsyncDestructorsScope makes fatal.
+struct TestAsyncObject: kj::AsyncObject {};
+
+kj::Own<TestAsyncObject> new_test_async_object();
+
+// Installs KJ's crash and std::terminate() handlers so an unhandled kj::Exception prints its
+// description to stderr before exiting, even when the C++ runtime's default terminate handler is
+// silent (MSVC, libc++abi built with LIBCXXABI_SILENT_TERMINATE).
+void print_stack_trace_on_crash();
+
 // Allows or disallows eval() and WebAssembly compilation, as jsg::Lock::setAllowEval() does.
 void set_allow_eval(Isolate* isolate, bool allow);
 

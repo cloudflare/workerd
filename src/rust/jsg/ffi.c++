@@ -120,6 +120,12 @@ kj::Rc<Wrappable> Wrappable::allocate(size_t size, size_t align, uintptr_t& stor
 }
 
 Wrappable::~Wrappable() {
+  // A resource is a JavaScript heap object, so as for a C++ JSG object
+  // (workerd::jsg::Wrappable::maybeDeferDestruction()), a KJ I/O object it holds other than
+  // through an IoOwn aborts the process when the resource is destroyed: by a release under the
+  // lock or queued for it, by GC, or at isolate teardown. An IoOwn's destructor allows it.
+  kj::DisallowAsyncDestructorsScope disallow(
+      "JavaScript heap objects must not contain KJ I/O objects without a IoOwn"_kj);
   wrappable_invoke_drop(*this);
 }
 
