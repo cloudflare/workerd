@@ -8,6 +8,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/util.h>
 #include <workerd/io/access-info.h>
+#include <workerd/io/entrypoint-fetch.h>
 #include <workerd/io/entrypoint-invocation.h>
 #include <workerd/io/entrypoint/ffi.h>
 #include <workerd/io/features.h>
@@ -28,6 +29,8 @@
 namespace workerd {
 
 namespace {
+
+using entrypoint::exceptionToPropagate;
 
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
@@ -90,9 +93,17 @@ class WorkerEntrypoint final: public entrypoint::CxxEntrypoint, public kj::PtrTa
       bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
   kj::Own<entrypoint::Invocation> takeInvocation() override;
+  kj::Own<entrypoint::Fetch> takeFetch(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response,
+      const void* flowId) override;
+  kj::Maybe<kj::Canceler&> getCanceler() override {
+    return canceler;
+  }
 
  private:
-  class ResponseSentTracker;
   class ConnectResponseSentTracker;
 
   // Members initialized at startup.
@@ -108,13 +119,8 @@ class WorkerEntrypoint final: public entrypoint::CxxEntrypoint, public kj::PtrTa
   kj::Maybe<kj::String> cfBlobJson;
   kj::Maybe<Worker::VersionInfo> versionInfo;
 
-  // Hacky members used to hold some temporary state while processing a request.
-  // See gory details in WorkerEntrypoint::request().
-
-  kj::Maybe<kj::Promise<void>> proxyTask;
-  kj::Maybe<kj::Own<WorkerInterface>> failOpenService;
+  // Set once connect() has logged its handler's exception, so that it isn't logged again.
   bool loggedExceptionEarlier = false;
-  kj::Maybe<jsg::Ref<api::AbortController>> abortController;
 
   void init(kj::Own<const Worker> worker,
       kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -161,44 +167,7 @@ class WorkerEntrypoint final: public entrypoint::CxxEntrypoint, public kj::PtrTa
       kj::Maybe<Worker::VersionInfo> versionInfo);
 };
 
-// Simple wrapper around `HttpService::Response` to let us know if the response was sent
-// already.
-class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Response {
- public:
-  ResponseSentTracker(kj::HttpService::Response& inner): inner(inner) {}
-  KJ_DISALLOW_COPY_AND_MOVE(ResponseSentTracker);
-
-  bool isSent() const {
-    return sent;
-  }
-  uint getHttpResponseStatus() const {
-    return httpResponseStatus;
-  }
-
-  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
-      kj::StringPtr statusText,
-      const kj::HttpHeaders& headers,
-      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-    TRACE_EVENT(
-        "workerd", "WorkerEntrypoint::ResponseSentTracker::send()", "statusCode", statusCode);
-    sent = true;
-    httpResponseStatus = statusCode;
-    return inner.send(statusCode, statusText, headers, expectedBodySize);
-  }
-
-  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
-    TRACE_EVENT("workerd", "WorkerEntrypoint::ResponseSentTracker::acceptWebSocket()");
-    sent = true;
-    return inner.acceptWebSocket(headers);
-  }
-
- private:
-  uint httpResponseStatus = 0;
-  kj::HttpService::Response& inner;
-  bool sent = false;
-};
-
-// Like ResponseSentTracker, for the response to a CONNECT request.
+// Like entrypoint::Fetch::ResponseSentTracker, for the response to a CONNECT request.
 class WorkerEntrypoint::ConnectResponseSentTracker final: public kj::HttpService::ConnectResponse,
                                                           public kj::PtrTarget {
  public:
@@ -350,70 +319,6 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
                         .attach(kj::mv(actor));
 }
 
-// To match our historical behavior (when we used to pull the headers from the JavaScript object
-// later on), headers are canonicalized: names are lower-cased and values with the same name are
-// combined into a comma-delimited list. (This explicitly breaks the Set-Cookie header,
-// incidentally, but should be equivalent for all other headers.)
-tracing::FetchEventInfo buildFetchEventInfo(kj::HttpMethod method,
-    kj::StringPtr url,
-    const kj::HttpHeaders& headers,
-    kj::Maybe<kj::StringPtr> cfBlobJson) {
-  kj::String cfJson;
-  KJ_IF_SOME(c, cfBlobJson) {
-    cfJson = kj::str(c);
-  }
-
-  kj::TreeMap<kj::String, kj::Vector<kj::StringPtr>> traceHeaders;
-  headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
-    kj::String lower = toLower(name);
-    auto& slot = traceHeaders.findOrCreate(
-        lower, [&]() { return decltype(traceHeaders)::Entry{kj::mv(lower), {}}; });
-    slot.add(value);
-  });
-  auto traceHeadersArray = KJ_MAP(entry, traceHeaders) {
-    return tracing::FetchEventInfo::Header(kj::mv(entry.key), kj::strArray(entry.value, ", "));
-  };
-
-  return tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray));
-}
-
-kj::Exception exceptionToPropagate(bool isInternalException, kj::Exception&& exception) {
-  if (isInternalException) {
-    // We've already logged it here, the only thing that matters to the client is that we failed
-    // due to an internal error. Note that this does not need to be labeled "remote." since jsg
-    // will sanitize it as an internal error. Note that we use `setDescription()` to preserve
-    // the exception type for `jsg::exceptionToJs(...)` downstream.
-    exception.setDescription(kj::str("worker_do_not_log; Request failed due to internal error"));
-    return kj::mv(exception);
-  } else {
-    // We do not care how many remote capnp servers this went through since we are returning
-    // it to the worker via jsg.
-    // TODO(someday) We also do this stripping when making the tunneled exception for
-    // `jsg::isTunneledException(...)`. It would be lovely if we could simply store some type
-    // instead of `loggedExceptionEarlier`. It would save use some work.
-    kj::Maybe<kj::String> newDescription;
-    {
-      auto description = jsg::stripRemoteExceptionPrefix(exception.getDescription());
-      if (!description.startsWith("remote.")) {
-        // If we already were annotated as remote from some other worker entrypoint, no point
-        // adding an additional prefix.
-        newDescription = kj::str("remote.", description);
-      }
-    }
-    KJ_IF_SOME(description, newDescription) {
-      exception.setDescription(kj::mv(description));
-    }
-    return kj::mv(exception);
-  }
-}
-
-// True for a retry-claim or predecessor rejection, which the runtime raises before the fetch
-// handler runs. The sender classifies it by its details, so it must propagate unchanged.
-bool isActorDispatchRejection(const kj::Exception& exception) {
-  return exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none ||
-      exception.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none;
-}
-
 kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     kj::StringPtr url,
     const kj::HttpHeaders& headers,
@@ -430,249 +335,40 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
   TRACE_EVENT("workerd", "WorkerEntrypoint::request()", "url", url.cStr(),
       PERFETTO_FLOW_FROM_POINTER(this));
 
+  // The steps are the Rust WorkerEntrypoint's too (entrypoint/fetch.rs); see entrypoint::Fetch.
+
   // ----- Stage 1: Set up per-request state. -----
 
-  auto incomingRequest =
-      kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "request() can only be called once"));
-  this->incomingRequest = kj::none;
-  auto& context = incomingRequest->getContext();
-  auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
-  bool isActor = context.getActor() != kj::none;
-
-  // HACK: Capture workerTracer directly, it's unclear how to acquire the right tracer from context
-  // when we need it (for DOs, IoContext may point to a different WorkerTracer by the time we use
-  // it). The tracer lives as long or longer than the IoContext (based on being co-owned
-  // by IncomingRequest and PipelineTracer) so long enough.
-  kj::Maybe<BaseTracer&> workerTracer;
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(*incomingRequest, buildFetchEventInfo(method, url, headers, cfBlobJson));
-    workerTracer = t;
-  }
-
-  incomingRequest->delivered("fetch"_kj);
-
-  auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
-  auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
-
-  TRACE_EVENT_BEGIN("workerd", "WorkerEntrypoint::request() waiting on context",
-      PERFETTO_TRACK_FROM_POINTER(&context), PERFETTO_FLOW_FROM_POINTER(this));
+  auto fetch = takeFetch(method, url, headers, requestBody, response, this);
+  fetch->setEventInfo();
+  fetch->getRequest().delivered("fetch"_kj);
+  fetch->delivered();
 
   KJ_TRY {
-    // Cancel any in-flight deferred-proxy task on the way out, including on cancellation of this
-    // request and including when the fail-open fallback (in the outer KJ_CATCH) runs. This is the
-    // outermost cleanup so that the proxy task is never left pinning the IoContext past this
-    // function. (It's a no-op when `proxyTask` was never set, e.g. if Stage 2 threw.)
-    KJ_DEFER({ proxyTask = kj::none; });
-
     // ----- Stage 2: Run the JS request handler. -----
 
     {
-      // Drain the incoming request and trigger the client-disconnect abort signal on scope exit
-      // (success, failure, or cancellation). This must run regardless of outcome so that the
-      // incoming request is always drained and the AbortController is released; it must also run
-      // before final error handling so that `failOpenService` is populated when needed.
-      KJ_DEFER({
-        // The request has been canceled, but allow it to continue executing in the background.
-        if (context.isFailOpen()) {
-          // Fail-open behavior has been chosen, we'd better save an interface that we can use for
-          // that purpose later.
-          //
-          // Opening the channel can throw, as a null global outbound does. This runs in a
-          // destructor, usually while the handler's exception unwinds, so it must not throw.
-          // Instead the fail-open request fails with the exception, as it would have had the
-          // channel opened lazily, as a channel to another process does.
-          KJ_TRY {
-            failOpenService = context.getSubrequestChannelNoChecks(
-                IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
-          }
-          KJ_CATCH(exception) {
-            failOpenService = WorkerInterface::fromException(kj::mv(exception));
-          }
-        }
-
-        // When the client disconnects, trigger an abort on request.signal, unless the request has
-        // already completed normally, or failed with an exception.
-        // TODO(perf): Don't add a task to trigger the abort unless we know it has at least one
-        // listener.
-        if (proxyTask == kj::none && !loggedExceptionEarlier && abortController != kj::none) {
-          auto ctrl = KJ_ASSERT_NONNULL(abortController).addRef();
-          context.addWaitUntil(context.run([ctrl = kj::mv(ctrl)](Worker::Lock& lock) mutable {
-            ctrl->getSignal()->triggerAbort(
-                lock, JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The client has disconnected"));
-          }));
-        }
-
-        // Release reference to the AbortController.
-        // Either the waitUntilTask holds a reference to it, or it will never be triggered at all.
-        abortController = kj::none;
-
-        incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
-      });
+      // Ends the handler on scope exit (success, failure, or cancellation): drains the incoming
+      // request and releases the AbortController. It must run before final error handling so that
+      // the fail-open service is ready when needed.
+      KJ_DEFER(fetch->endHandler());
 
       KJ_TRY {
-        api::DeferredProxy<void> deferredProxy = co_await context.run(
-            [this, method, url, &headers, &requestBody, &wrappedResponse = *wrappedResponse,
-                entrypointName = entrypointName.clone(),
-                metrics = kj::addRef(incomingRequest->getMetrics())](
-                Worker::Lock& lock, IoContext& context) mutable {
-          TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
-          TRACE_EVENT(
-              "workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
-          auto traceScope = context.makeRequestTraceScope(lock);
-
-          kj::Maybe<jsg::Ref<api::AbortSignal>> signal;
-          auto featureFlags = FeatureFlags::get(lock);
-          if (featureFlags.getEnableRequestSignal()) {
-            auto abortSignalFlag = featureFlags.getRequestSignalPassthrough()
-                ? api::AbortSignal::Flag::NONE
-                : api::AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS;
-            jsg::Lock& js = lock;
-            signal.emplace(
-                abortController.emplace(js.alloc<api::AbortController>(js, abortSignalFlag))
-                    ->getSignal());
-          }
-
-          // Getting the handler finishes actor construction, so the claim sees a constructed actor
-          // but still precedes the choice and invocation of the fetch handler.
-          auto handler = lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
-              context.getActor(), isDynamicDispatch);
-          auto retryable = IsRetryableHandler::NO;
-          KJ_IF_SOME(h, handler) {
-            retryable = h->isFetchRetryable(lock);
-          }
-          metrics->claimRetryTokenBeforeUserCode(retryable);
-          return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
-              cfBlobJson, lock, handler, kj::mv(signal));
-        });
-
-        // Record the proxy task and the tracer return time on the success path.
-        TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
-            PERFETTO_FLOW_FROM_POINTER(this));
-        proxyTask = kj::mv(deferredProxy.proxyTask);
-        KJ_IF_SOME(t, workerTracer) {
-          auto httpResponseStatus = wrappedResponse->getHttpResponseStatus();
-          if (httpResponseStatus != 0) {
-            t.setReturn(context.now(), tracing::FetchResponseInfo(httpResponseStatus));
-          } else {
-            t.setReturn(context.now());
-          }
-        }
+        co_await fetch->runHandler();
       }
       KJ_CATCH(exception) {
-        TRACE_EVENT(
-            "workerd", "WorkerEntrypoint::request() catch", PERFETTO_FLOW_FROM_POINTER(this));
-        // Log JS exceptions to the JS console, if inspector is attached. This also has the effect
-        // of logging internal errors to syslog. A dispatch rejection is a runtime decision rather
-        // than an uncaught exception, so it is not logged.
-        loggedExceptionEarlier = true;
-        bool dispatchRejected = isActorDispatchRejection(exception);
-        if (!dispatchRejected) {
-          context.logUncaughtExceptionAsync(
-              UncaughtExceptionSource::REQUEST_HANDLER, exception.clone(), *incomingRequest);
-        }
-
-        // Record a failure if cancellation interrupts either wait. Otherwise the WorkerInterface
-        // wrapper reports it. An output-gate failure takes precedence over the handler failure.
-        kj::Maybe<kj::Exception> outputGateException;
-        auto reportFailure = kj::defer([&]() {
-          KJ_IF_SOME(e, outputGateException) {
-            metricsForCatch->reportFailure(e);
-          } else {
-            metricsForCatch->reportFailure(exception);
-          }
-        });
-
-        // Do not allow the exception to escape the isolate without waiting for the output gate to
-        // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
-        // If the gate is broken, that exception propagates and replaces the original, unless the
-        // original is a dispatch rejection.
-        KJ_TRY {
-          co_await context.waitForOutputLocks();
-        }
-        KJ_CATCH(e) {
-          if (!dispatchRejected) {
-            outputGateException.emplace(kj::mv(e));
-          }
-        }
-        TRACE_EVENT("workerd", "WorkerEntrypoint::request() after output lock wait",
-            PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
-        // Yield to give a pending cancellation (e.g., the caller dropping our promise because
-        // the upstream WebSocket was torn down) a chance to take effect before propagating to
-        // the final catch. The original `.then()` chain had an implicit yield point here where
-        // the chain crossed into the next `.then` after this catch; without it, downstream
-        // observers can mistake a canceled request for one that threw.
-        co_await kj::yield();
-        KJ_IF_SOME(e, outputGateException) {
-          reportFailure.cancel();
-          kj::throwException(kj::mv(e));
-        }
-        reportFailure.cancel();
-        kj::throwException(kj::mv(exception));
+        co_await fetch->handlerFailed(kj::mv(exception));
       }
-    }  // Above KJ_DEFER fires here: abort signal + drain.
+    }  // Above KJ_DEFER fires here.
 
     // ----- Stage 3: Wait for the deferred-proxy task (if any). -----
 
-    KJ_IF_SOME(p, proxyTask) {
-      TRACE_EVENT("workerd", "WorkerEntrypoint::request() finish proxying",
-          PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
-      // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
-      // without pinning it or the isolate into memory.
-      KJ_TRY {
-        co_await p;
-        // Match the continuation boundary in the old promise chain. This lets the completed
-        // awaiter's WebSocket ownership unwind before the HTTP request handler completes.
-        co_await kj::yield();
-      }
-      KJ_CATCH(e) {
-        metricsForProxyTask->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
-        // See the matching yield in stage 2's catch.
-        co_await kj::yield();
-        kj::throwException(kj::mv(e));
-      }
-    }
+    co_await fetch->finishProxying();
   }
   KJ_CATCH(exception) {
     // ----- Stage 4: Handle whatever exception escaped the stages above. -----
 
-    TRACE_EVENT("workerd", "WorkerEntrypoint::request() exception",
-        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
-
-    // Stage 1 called `delivered()`, so exceptions reaching this catch are post-delivery failures.
-    markExceptionAsDelivered(exception);
-
-    auto isInternalException = !jsg::isTunneledException(exception.getDescription()) &&
-        !jsg::isDoNotLogException(exception.getDescription());
-    if (!loggedExceptionEarlier) {
-      // This exception seems to have originated during the deferred proxy task, so it was not
-      // logged to the IoContext earlier.
-      if (exception.getType() != kj::Exception::Type::DISCONNECTED && isInternalException) {
-        LOG_EXCEPTION("workerEntrypoint", exception);
-      } else {
-        KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
-      }
-    }
-
-    if (wrappedResponse->isSent()) {
-      // Can't fail open if a response was already started.
-      failOpenService = kj::none;
-    }
-
-    auto sendSyntheticStatus = [&](uint statusCode, kj::StringPtr statusText) {
-      KJ_TRY {
-        if (wrappedResponse->isSent()) return;
-        kj::HttpHeaders errorHeaders(threadContext.getHeaderTable());
-        wrappedResponse->send(statusCode, statusText, errorHeaders, static_cast<uint64_t>(0));
-        KJ_IF_SOME(t, workerTracer) {
-          t.setReturn(
-              kj::none, tracing::FetchResponseInfo(wrappedResponse->getHttpResponseStatus()));
-        }
-      }
-      KJ_CATCH(e) {
-        markExceptionAsDelivered(e);
-        kj::throwException(kj::mv(e));
-      }
-    };
+    auto prepared = fetch->prepareFailure(kj::mv(exception));
 
     // Decide what to do with the exception. Exactly one of these branches runs:
     //   1. Actor -> tunnel exception back to the caller.
@@ -680,67 +376,26 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     //   3. `tunnelExceptions` set (worker-to-worker) -> tunnel exception back to the caller.
     //   4. Otherwise -> synthesize a 5xx response.
 
-    if (isActor) {
-      // Reaching this catch means the request reached the actor (we are past
-      // `delivered()` in Stage 1), so user code may have run. Annotate every failure, whatever its
-      // type, so the caller-side actor-call classifier knows it must not be retried, even if it is
-      // retryable. Preserve not-delivered only for a predecessor rejection, which occurs before the
-      // fetch handler runs, though possibly after the actor constructor. Set before
-      // exceptionToPropagate() so the detail survives the internal-exception description rewrite
-      // and serializes back across the RPC boundary.
-      if (!jsg::isActorPredecessorRejection(exception)) {
-        exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
-        exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-      }
-      // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
-      // worker, not just for actors (and W2W below), but getting that right will require cleaning
-      // up error handling more generally.
-      auto propagated = exceptionToPropagate(isInternalException, kj::mv(exception));
-      // See the matching yield in stage 2's catch.
+    if (fetch->isActor()) {
+      auto propagated = fetch->propagateFromActor(kj::mv(prepared));
+      // See the matching yield in Fetch::handlerFailed().
       co_await kj::yield();
       kj::throwException(kj::mv(propagated));
     }
 
-    KJ_IF_SOME(service, failOpenService) {
-      // We're catching the exception, but metrics should still indicate an exception.
-      metricsForCatch->reportFailure(exception);
-
-      auto serviceOwn = kj::mv(service);
-      metricsForCatch->setFailedOpen(true);
-      KJ_TRY {
-        co_await serviceOwn->request(method, url, headers, requestBody, *wrappedResponse);
-      }
-      KJ_CATCH(e) {
-        metricsForCatch->setFailedOpen(false);
-        // Avoid logging recognized external errors here, such as invalid headers returned from
-        // the server.
-        if (e.getType() != kj::Exception::Type::DISCONNECTED &&
-            !jsg::isTunneledException(e.getDescription()) &&
-            !jsg::isDoNotLogException(e.getDescription())) {
-          LOG_EXCEPTION("failOpenFallback", e);
-        }
-        sendSyntheticStatus(500, "Internal Server Error"_kj);
-      }
+    if (fetch->hasFailOpenService()) {
+      co_await fetch->failOpen(kj::mv(prepared));
       co_return;
     }
 
-    if (tunnelExceptions) {
-      // Like with the isActor check, we want to return exceptions back to the caller. This case
-      // must happen after fail-open handling so that fail-open continues to operate normally.
-      auto propagated = exceptionToPropagate(isInternalException, kj::mv(exception));
-      // See the matching yield in stage 2's catch.
+    if (fetch->tunnelsExceptions()) {
+      auto propagated = fetch->propagate(kj::mv(prepared));
+      // See the matching yield in Fetch::handlerFailed().
       co_await kj::yield();
       kj::throwException(kj::mv(propagated));
     }
 
-    // We're catching the exception and replacing it with 5xx, but metrics should still indicate
-    // an exception.
-    metricsForCatch->reportFailure(exception);
-    if (exception.getType() == kj::Exception::Type::OVERLOADED) {
-      sendSyntheticStatus(503, "Service Unavailable"_kj);
-    } else {
-      sendSyntheticStatus(500, "Internal Server Error"_kj);
-    }
+    fetch->respondWithError(kj::mv(prepared));
   }
 }
 
@@ -953,6 +608,25 @@ kj::Own<entrypoint::Invocation> WorkerEntrypoint::takeInvocation() {
     .versionInfo = kj::mv(versionInfo),
     .props = kj::mv(props),
   });
+}
+
+kj::Own<entrypoint::Fetch> WorkerEntrypoint::takeFetch(kj::HttpMethod method,
+    kj::StringPtr url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    Response& response,
+    const void* flowId) {
+  auto request = kj::mv(KJ_REQUIRE_NONNULL(incomingRequest, "request() can only be called once"));
+  incomingRequest = kj::none;
+  return kj::heap<entrypoint::Fetch>(kj::heap(entrypoint::Invocation{
+                                       .request = kj::mv(request),
+                                       .entrypointName = kj::mv(entrypointName),
+                                       .versionInfo = kj::mv(versionInfo),
+                                       .props = kj::mv(props),
+                                     }),
+      waitUntilTasks, threadContext, kj::mv(cfBlobJson),
+      entrypoint::TunnelExceptions(tunnelExceptions), IsDynamicDispatch(isDynamicDispatch), method,
+      url, headers, requestBody, response, flowId);
 }
 
 kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(

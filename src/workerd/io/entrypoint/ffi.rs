@@ -46,6 +46,36 @@ pub mod bridge {
 
         type Invocation;
         type CxxEntrypoint;
+        type Fetch;
+
+        fn fetch_set_event_info(fetch: Pin<&mut Fetch>) -> Result<()>;
+        /// The event's request, until `fetch_end_handler()` drains it; then it fails.
+        fn fetch_request<'a>(fetch: Pin<&'a mut Fetch>) -> Result<Pin<&'a mut IncomingRequest>>;
+        fn fetch_delivered(fetch: Pin<&mut Fetch>) -> Result<()>;
+        async fn fetch_run_handler<'a>(fetch: Pin<&'a mut Fetch>) -> Result<()>;
+        async fn fetch_handler_failed<'a>(
+            fetch: Pin<&'a mut Fetch>,
+            exception: KjException,
+        ) -> Result<()>;
+        fn fetch_end_handler(fetch: Pin<&mut Fetch>) -> Result<()>;
+        async fn fetch_finish_proxying<'a>(fetch: Pin<&'a mut Fetch>) -> Result<()>;
+        fn fetch_prepare_failure(
+            fetch: Pin<&mut Fetch>,
+            exception: KjException,
+        ) -> Result<KjException>;
+        fn fetch_is_actor(fetch: &Fetch) -> bool;
+        fn fetch_has_fail_open_service(fetch: &Fetch) -> bool;
+        fn fetch_tunnels_exceptions(fetch: &Fetch) -> bool;
+        fn fetch_propagate_from_actor(
+            fetch: Pin<&mut Fetch>,
+            exception: KjException,
+        ) -> Result<KjException>;
+        async fn fetch_fail_open<'a>(
+            fetch: Pin<&'a mut Fetch>,
+            exception: KjException,
+        ) -> Result<()>;
+        fn fetch_propagate(fetch: Pin<&mut Fetch>, exception: KjException) -> Result<KjException>;
+        fn fetch_respond_with_error(fetch: Pin<&mut Fetch>, exception: KjException) -> Result<()>;
 
         fn cxx_entrypoint_take_invocation(
             entrypoint: Pin<&mut CxxEntrypoint>,
@@ -99,6 +129,15 @@ pub mod bridge {
         /// Waits for the request of a scheduled event to finish, up to the time limit of
         /// scheduled events. Dropping the future cancels the request.
         async fn scheduled_event_finish(event: Box<ScheduledEvent>) -> Result<ScheduledResult>;
+
+        type FetchEvent;
+
+        /// Starts the fetch event `fetch`: delivers it (see `fetch.rs`). Fails with the exception
+        /// that delivering it fails with.
+        fn fetch_event_start(fetch: KjOwn<Fetch>) -> Result<Box<FetchEvent>>;
+        /// Runs the rest of a fetch event: its handler, its deferred proxying, and the handling of
+        /// their failure. Dropping the future cancels the event.
+        async fn fetch_event_finish(event: Box<FetchEvent>) -> Result<()>;
 
         type TestEvent;
 
@@ -155,5 +194,20 @@ fn test_event_start(invocation: KjOwn<bridge::Invocation>) -> Result<Box<TestEve
 }
 
 async fn test_event_finish(event: Box<TestEvent>) -> Result<bool, KjException> {
+    event.0.await
+}
+
+/// What a fetch event that Rust has started finishes with.
+type FetchFinish = Pin<Box<dyn Future<Output = Result<(), KjException>>>>;
+
+/// A fetch event that Rust has started, until it finishes.
+pub struct FetchEvent(FetchFinish);
+
+fn fetch_event_start(fetch: KjOwn<bridge::Fetch>) -> Result<Box<FetchEvent>, KjException> {
+    let finished = crate::fetch::start(fetch)?;
+    Ok(Box::new(FetchEvent(Box::pin(finished))))
+}
+
+async fn fetch_event_finish(event: Box<FetchEvent>) -> Result<(), KjException> {
     event.0.await
 }

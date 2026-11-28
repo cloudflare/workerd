@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Sends a fetch event to a Worker whose handler responds and to one whose handler throws.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fetch",
+      worker = (
+        modules = [(name = "worker", esModule = embed "fetch.js")],
+        compatibilityDate = "2024-01-01",
+        bindings = [
+          (name = "HANDLER", service = "handler"),
+          (name = "THROWS", service = "throws"),
+        ],
+      ),
+    ),
+    ( name = "handler",
+      worker = (
+        modules = [(name = "worker", esModule = embed "handler.js")],
+        compatibilityDate = "2024-01-01",
+      ),
+    ),
+    ( name = "throws",
+      worker = (
+        modules = [(name = "worker", esModule = embed "throws.js")],
+        compatibilityDate = "2024-01-01",
+      ),
+    ),
+  ],
+);

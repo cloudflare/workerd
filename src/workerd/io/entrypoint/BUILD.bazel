@@ -6,6 +6,7 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 wd_rust_crate(
     name = "entrypoint",
     srcs = [
+        "fetch.rs",
         "ffi.rs",
         "lib.rs",
         "scheduled.rs",

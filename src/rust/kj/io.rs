@@ -35,6 +35,10 @@ pub mod ffi {
         ) -> Result<usize>;
 
         fn async_input_stream_try_get_length(this_: Pin<&mut AsyncInputStream>) -> KjMaybe<u64>;
+
+        /// `kj::yield()`: resolves once the event loop has run the events that were queued when
+        /// it was called, so that, for example, a pending cancellation takes effect first.
+        async fn yield_to_event_loop() -> Result<()>;
     }
 
     // Dropping a `KjOwn` of these is generated here, where they are declared; the bridges that
@@ -43,6 +47,8 @@ pub mod ffi {
     impl KjOwn<AsyncIoStream> {}
     impl KjOwn<AsyncOutputStream> {}
 }
+
+pub use ffi::yield_to_event_loop;
 
 pub type AsyncInputStream = ffi::AsyncInputStream;
 pub type AsyncIoStream = ffi::AsyncIoStream;
