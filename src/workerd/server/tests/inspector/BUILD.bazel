@@ -41,3 +41,32 @@ wd_js_test(
         "//conditions:default": [],
     }),
 )
+
+wd_js_test(
+    name = "inspector-debugger-test",
+    size = "large",
+    data = [
+        ":backend-worker.mjs",
+        ":cdp-client.mjs",
+        ":debugger-config.capnp",
+        ":debugger-worker.mjs",
+        ":inspector-test-harness.mjs",
+        ":node-inspector-worker.mjs",
+        ":top-level-debugger.mjs",
+        "//:node_modules/chrome-remote-interface",
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:server-harness_js_lib",
+    ],
+    entry_point = "debugger-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_CONFIG": "$(rootpath :debugger-config.capnp)",
+        "WORKERD_LISTEN_PORTS": "http,node",
+    },
+    tags = ["js-test"],
+    # The busy-loop gap check is slow under ThreadSanitizer.
+    target_compatible_with = select({
+        "//build/platforms:sanitizer_thread": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)

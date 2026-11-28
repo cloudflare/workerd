@@ -23,8 +23,9 @@ beforeEach(async () => {
     workerdBinary: env.WORKERD_BINARY,
     workerdConfig: env.WORKERD_CONFIG,
 
-    // Hard-coded to match a socket name expected in the `workerdConfig` file.
-    listenPortNames: ['http'],
+    // Socket names expected in the `workerdConfig` file: `WORKERD_LISTEN_PORTS`, comma-separated,
+    // or `http` alone.
+    listenPortNames: env.WORKERD_LISTEN_PORTS?.split(',') ?? ['http'],
 
     // The config's Worker Loader binding needs the "experimental" compat flag.
     extraArgs: ['--experimental'],
