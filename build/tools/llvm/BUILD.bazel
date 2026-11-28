@@ -9,8 +9,8 @@ toolchain_type(
 
 llvm_coverage_toolchain(
     name = "coverage_tools_linux_x86_64",
-    llvm_cov = "@llvm_linux_x86_64//:llvm-cov",
-    llvm_profdata = "@llvm_linux_x86_64//:llvm-profdata",
+    llvm_cov = "@chromium_clang//:bin/llvm-cov",
+    llvm_profdata = "@chromium_clang//:bin/llvm-profdata",
 )
 
 toolchain(

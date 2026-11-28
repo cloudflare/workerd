@@ -74,7 +74,6 @@ git_repository(
     ],
     remote = "https://github.com/llvm/llvm-project.git",
     sparse_checkout_patterns = [
-        "cmake",
         "libc/hdr",
         "libc/include",
         "libc/shared",
@@ -82,7 +81,6 @@ git_repository(
         "libcxx",
         "libcxxabi",
         "libunwind",
-        "runtimes",
     ],
 )
 

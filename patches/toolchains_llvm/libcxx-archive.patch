@@ -1,0 +1,121 @@
+diff --git a/toolchain/cc_toolchain_config.bzl b/toolchain/cc_toolchain_config.bzl
+index 9cfb012..f72cdad 100644
+--- a/toolchain/cc_toolchain_config.bzl
++++ b/toolchain/cc_toolchain_config.bzl
+@@ -444,8 +444,12 @@ def cc_toolchain_config(
+         print("WARNING: Using libc++ for host architecture while cross compiling, this is " +
+               "probably not what you want. Explicitly set standard_libraries to libc++ to silence.")
+ 
++    # A libc++ archive built for the target (see the libcxx_archive attribute) leaves the
++    # distribution only libc++'s headers, which serve every target.
++    libcxx_archive = compiler_configuration.get("libcxx_archive")
++
+     # Darwin has a universal sysroot so the builtin can compile cross-arch.
+-    if stdlib == "builtin-libc++" and is_xcompile and not is_darwin_exec_and_target:
++    if stdlib == "builtin-libc++" and is_xcompile and not is_darwin_exec_and_target and not libcxx_archive:
+         stdlib = "stdc++"
+ 
+     # "dynamic-stdc++"[-<ver>] is libstdc++ linked dynamically rather than
+@@ -509,14 +513,15 @@ def cc_toolchain_config(
+             ])
+         else:
+             # For single-platform builds, we can statically link the bundled
+-            # libraries.
+-            stdlib_link_libs.extend([
+-                "-l:libc++.a",
+-                "-l:libc++abi.a",
+-            ])
++            # libraries. The libcxx_archive replaces all three; it is linked
++            # by the <name>_nomsan_stdlib feature below.
++            if not libcxx_archive:
++                stdlib_link_libs.extend([
++                    "-l:libc++.a",
++                    "-l:libc++abi.a",
++                ])
+             compiler_rt_link_flags = ["-rtlib=compiler-rt"]
+-            libunwind_link_flags = [
+-                "-l:libunwind.a",
++            libunwind_link_flags = ([] if libcxx_archive else ["-l:libunwind.a"]) + [
+                 # To support libunwind.
+                 "-lpthread",
+                 "-ldl",
+@@ -874,11 +879,16 @@ def cc_toolchain_config(
+             )
+             nomsan_args.append(":" + name + "_nomsan_cxx_args")
+         nomsan_link_flags = default_link_search_flags + stdlib_link_libs
++        libcxx_archive_link = stdlib == "builtin-libc++" and libcxx_archive
++        if libcxx_archive_link:
++            nomsan_link_flags = nomsan_link_flags + ["{libcxx_archive}"]
+         if nomsan_link_flags:
+             cc_args(
+                 name = name + "_nomsan_link_args",
+                 actions = ["@rules_cc//cc/toolchains/actions:link_actions"],
+                 args = nomsan_link_flags,
++                data = [libcxx_archive] if libcxx_archive_link else [],
++                format = {"libcxx_archive": libcxx_archive} if libcxx_archive_link else {},
+                 requires_any_of = [":" + name + "_not_msan"],
+             )
+             nomsan_args.append(":" + name + "_nomsan_link_args")
+diff --git a/toolchain/internal/configure.bzl b/toolchain/internal/configure.bzl
+index 410e182..210712d 100644
+--- a/toolchain/internal/configure.bzl
++++ b/toolchain/internal/configure.bzl
+@@ -354,6 +354,7 @@ def llvm_config_impl(rctx):
+         llvm_version = llvm_version,
+         extra_compiler_files = rctx.attr.extra_compiler_files,
+         extra_linker_files = rctx.attr.extra_linker_files,
++        libcxx_archive = rctx.attr.libcxx_archive,
+         extra_compiler_files_dict = rctx.attr.extra_compiler_files_dict,
+         extra_linker_files_dict = rctx.attr.extra_linker_files_dict,
+         extra_exec_compatible_with = rctx.attr.extra_exec_compatible_with,
+@@ -802,6 +803,7 @@ cc_toolchain_config(
+       "extra_coverage_compile_flags": {extra_coverage_compile_flags},
+       "extra_coverage_link_flags": {extra_coverage_link_flags},
+       "extra_unfiltered_compile_flags": {extra_unfiltered_compile_flags},
++      "libcxx_archive": {libcxx_archive},
+     }},
+     extra_known_features = {extra_known_features},
+     extra_enabled_features = {extra_enabled_features},
+@@ -841,6 +843,7 @@ filegroup(
+     srcs = [
+         ":sysroot-components-{suffix}",
+         {extra_linker_files}
++        {libcxx_archive_file}
+     ],
+ )
+ 
+@@ -892,6 +895,7 @@ filegroup(
+         "{target_toolchain_root}:{lib_label}",
+         {linker_file}
+         {extra_linker_files}
++        {libcxx_archive_file}
+     ],
+ )
+ 
+@@ -1066,6 +1070,8 @@ filegroup(
+         # explicit legacy file list and still need the selected linker here.
+         linker_file = repr(linker.file) + "," if linker.file and not bazel_features.rules.merkle_cache_v2 else "",
+         extra_linker_files = ("\"%s\"," % _extra_linker_label) if _extra_linker_label else "",
++        libcxx_archive = repr(str(toolchain_info.libcxx_archive)) if toolchain_info.libcxx_archive else "None",
++        libcxx_archive_file = (repr(str(toolchain_info.libcxx_archive)) + ",") if toolchain_info.libcxx_archive else "",
+         runtime_lib_attrs = runtime_lib_attrs,
+         sanitizer_runtime_filegroup = runtime_lib_filegroup,
+     )
+diff --git a/toolchain/internal/repo.bzl b/toolchain/internal/repo.bzl
+index 5cbabd1..ad646b9 100644
+--- a/toolchain/internal/repo.bzl
++++ b/toolchain/internal/repo.bzl
+@@ -417,6 +417,13 @@ _compiler_configuration_attrs = {
+         doc = ("Files to be made available in the sandbox for link actions. " +
+                "Useful for providing files such as linker scripts."),
+     ),
++    "libcxx_archive": attr.label(
++        mandatory = False,
++        doc = ("A static library, built for the target, holding libc++, libc++abi and " +
++               "libunwind. Linux `builtin-libc++` toolchains link it in place of the " +
++               "distribution's libraries, of which they then use only libc++'s headers, so " +
++               "a cross-compiling toolchain keeps libc++ too. Must be a single file."),
++    ),
+     "extra_compiler_files_dict": attr.string_dict(
+         mandatory = False,
+         doc = ("Per-target files to be made available in the sandbox for compile actions. " +

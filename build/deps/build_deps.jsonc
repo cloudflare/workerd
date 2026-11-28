@@ -192,15 +192,13 @@
         "//:patches/llvm_runtimes/0001-libunwind-Trust-the-eh_frame_hdr-table-on-a-miss.patch"
       ],
       "sparse_checkout_patterns": [
-        "cmake",
         "libc/hdr",
         "libc/include",
         "libc/shared",
         "libc/src/__support",
         "libcxx",
         "libcxxabi",
-        "libunwind",
-        "runtimes"
+        "libunwind"
       ]
     }
   ]

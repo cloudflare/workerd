@@ -1,0 +1,73 @@
+load(":libcxx.bzl", "libcxx_runtime")
+
+exports_files(["BUILD.chromium_clang"])
+
+# The C++ runtime that the Linux toolchain links into every program (libcxx.bzl).
+libcxx_runtime(
+    name = "libcxx",
+    hdrs = ["@llvm_runtimes//:hdrs"],
+    ar = "@chromium_clang//:bin/llvm-ar",
+    c_flags = {"libunwind": [
+        "-std=c99",
+        "-fexceptions",
+    ]},
+    clang = "@chromium_clang//:bin/clang",
+    compiler_files = ["@chromium_clang//:libcxx_compiler_files"],
+    cxx_flags = {"libunwind": [
+        "-fno-exceptions",
+        "-fno-rtti",
+    ]},
+    # Each runs on a Linux x86_64 host, like the toolchain.
+    exec_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    flags = {
+        "libcxx": [
+            "-D_LIBCPP_BUILDING_LIBRARY",
+            "-D_LIBCPP_AVAILABILITY_MINIMUM_HEADER_VERSION=2",
+            "-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES",
+            "-DLIBCXX_BUILDING_LIBCXXABI",
+            "-DLIBC_NAMESPACE=__llvm_libc_common_utils",
+            "-faligned-allocation",
+            "-fsized-deallocation",
+            "-fvisibility-inlines-hidden",
+            "-fvisibility=hidden",
+            "-I",
+            "{llvm_project}/libcxx/src",
+            "-isystem",
+            "{llvm_project}/libc",
+        ],
+        "libcxxabi": [
+            "-D_LIBCXXABI_BUILDING_LIBRARY",
+            "-D_LIBCPP_BUILDING_LIBRARY",
+            "-D_LIBCPP_AVAILABILITY_MINIMUM_HEADER_VERSION=2",
+            "-DHAVE___CXA_THREAD_ATEXIT_IMPL",
+            "-I",
+            "{llvm_project}/libcxxabi/include",
+            "-I",
+            "{llvm_project}/libcxx/src",
+            "-I",
+            "{llvm_project}/libunwind/include",
+        ],
+        "libunwind": [
+            "-D_LIBUNWIND_IS_NATIVE_ONLY",
+            "-funwind-tables",
+            "-I",
+            "{llvm_project}/libunwind/include",
+        ],
+    },
+    libcxx_srcs = ["@llvm_runtimes//:libcxx_srcs"],
+    libcxxabi_srcs = ["@llvm_runtimes//:libcxxabi_srcs"],
+    libunwind_srcs = ["@llvm_runtimes//:libunwind_srcs"],
+    sysroot = select({
+        "@platforms//cpu:aarch64": "@sysroot_linux_aarch64//sysroot",
+        "@platforms//cpu:x86_64": "@sysroot_linux_x86_64//sysroot",
+    }),
+    target = select({
+        "@platforms//cpu:aarch64": "aarch64-unknown-linux-gnu",
+        "@platforms//cpu:x86_64": "x86_64-unknown-linux-gnu",
+    }),
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)

@@ -439,9 +439,10 @@ build:macos-cross-x86_64 --cpu=darwin_x86_64 --host_cpu=darwin_arm64 --platforms
 # Test performance is still very much satisfactory considering that emulation is being used here.
 build:macos-cross-x86_64 --test_timeout=1,30,60,60
 
-# On Linux, the toolchain is LLVM's own, over a pinned sysroot (build/deps/llvm.MODULE.bazel), and
-# nothing is taken from the host. It links libc++, libc++abi and libunwind statically, so binaries
-# depend only on glibc; macOS links with dynamic libc++, which has good backwards compatibility.
+# On Linux, the toolchain is Chromium's clang, over a pinned sysroot (build/deps/llvm.MODULE.bazel),
+# and nothing is taken from the host. It links libc++, libc++abi and libunwind, built from source,
+# statically, so binaries depend only on glibc; macOS links with dynamic libc++, which has good
+# backwards compatibility.
 build:linux --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 # rules_python's default launcher runs on the host's python3; this one runs on the hermetic
 # interpreter.
