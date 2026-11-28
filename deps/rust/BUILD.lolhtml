@@ -2,10 +2,44 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 cc_library(
     name = "lolhtml",
-    hdrs = ["@crates_vendor//lol_html_c_api_include_lol_html_h"],
-    strip_include_prefix = "include",
     visibility = ["//visibility:public"],
     deps = [
+        ":headers",
         "@crates_vendor//lol_html_c_api",
-    ],
+    ] + select({
+        "@platforms//os:macos": [":c-api-references"],
+        "//conditions:default": [],
+    }),
+)
+
+cc_library(
+    name = "headers",
+    hdrs = ["@crates_vendor//lol_html_c_api_include_lol_html_h"],
+    strip_include_prefix = "include",
+)
+
+# The dylibs of macOS tests can't take lol_html's Rust code from its archive, as the macOS linker
+# doesn't take an object from an archive when only a dylib needs it (see CC_TEST_LINKOPTS in
+# workerd's build/linking.bzl), and crate_universe can't make the crate alwayslink. So on macOS,
+# binaries take this object, which refers to every function of the C API, and with it their code.
+cc_library(
+    name = "c-api-references",
+    srcs = [":c-api-references-c"],
+    linkstatic = True,
+    deps = [":headers"],
+    alwayslink = True,
+)
+
+genrule(
+    name = "c-api-references-c",
+    srcs = ["@crates_vendor//lol_html_c_api_include_lol_html_h"],
+    outs = ["c-api-references.c"],
+    cmd = """
+        {
+            echo '#include "lol_html.h"'
+            echo 'const void* const lol_html_c_api_references[] = {'
+            sed -nE 's/^[a-zA-Z_][a-zA-Z_0-9 ]*[ *](lol_html_[a-z_0-9]+)\\(.*/    (const void*)\\1,/p' $<
+            echo '};'
+        } > $@
+    """,
 )

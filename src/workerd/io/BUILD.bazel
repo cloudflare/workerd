@@ -829,6 +829,8 @@ kj_test(
 
 kj_test(
     src = "tracer-test.c++",
+    # protobuf's dylibs can't link on macOS (CC_TEST_LINKSTATIC_WITHOUT_MACOS_DYLIBS).
+    macos_dylibs = False,
     deps = [
         ":io",
         ":otlp-span-submitter",

@@ -39,7 +39,11 @@
       "name": "apple_support",
       "type": "bazel_dep",
       // 2.10 breaks the ring crate due to libtool changes, unfreeze once that's fixed
-      "freeze_version": "2.9.1"
+      "freeze_version": "2.9.1",
+      // Lets the macOS toolchain link tests dynamically, as on Linux (build/linking.bzl).
+      "patches": [
+        "//:patches/apple_support/0001-Support-the-dynamic-linker-on-macOS.patch"
+      ]
     },
     {
       "name": "rules_cc",

@@ -1,7 +1,7 @@
 """wd_cc_benchmark definition"""
 
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
-load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
+load("//:build/linking.bzl", "CC_TEST_LINKOPTS", "CC_TEST_LINKSTATIC")
 load("//:build/test_attrs.bzl", "test_attrs")
 
 def wd_cc_benchmark(
@@ -27,6 +27,7 @@ def wd_cc_benchmark(
         name = name,
         defines = ["WD_IS_BENCHMARK"],
         linkstatic = 1 if tool else CC_TEST_LINKSTATIC,
+        linkopts = ([] if tool else CC_TEST_LINKOPTS) + kwargs.pop("linkopts", []),
         visibility = visibility,
         deps = deps + [
             # Runs each benchmark once under `bazel test`; see bench-main.c++.
