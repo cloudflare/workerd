@@ -54,7 +54,9 @@ chromium_rust(
 # Ahead of rules_rust's toolchains, which match the same platforms.
 register_toolchains(
     "//build/rust:chromium_toolchain_linux_x86_64",
+    "//build/rust:chromium_toolchain_linux_x86_64_cargo",
     "//build/rust:chromium_toolchain_linux_aarch64",
+    "//build/rust:chromium_toolchain_linux_aarch64_cargo",
     "@rust_toolchains//:all",
 )
 

@@ -9,6 +9,7 @@ build/deps/rust.MODULE.bazel registers them ahead of rules_rust's toolchains, wh
 """
 
 load("@chromium_rust//:version.bzl", "CHROMIUM_RUST_VERSION")
+load("@rules_rust//cargo:cargo_toolchain.bzl", "cargo_toolchain")
 load("@rules_rust//rust:toolchain.bzl", "rust_toolchain")
 load(":build_std.bzl", "rust_std_from_source")
 
@@ -20,10 +21,12 @@ _HOST_CONSTRAINTS = [
 ]
 
 def chromium_rust_toolchain(name, cpu, target_triple, extra_rustc_flags):
-    """A Linux x86_64 host's Rust toolchain for one Linux target.
+    """A Linux x86_64 host's Rust and Cargo toolchains for one Linux target.
 
     Args:
-        name: the registrable toolchain's name; `<name>_impl` is the rust_toolchain.
+        name: the registrable Rust toolchain's name; `<name>_impl` is the rust_toolchain, and
+            `<name>_cargo` the registrable Cargo toolchain, which rules_rust requires from the
+            rustc's release.
         cpu: the target's @platforms//cpu constraint name.
         target_triple: the target's triple.
         extra_rustc_flags: rustc flags for the target, those that rust.toolchain() gives it in
@@ -89,4 +92,20 @@ def chromium_rust_toolchain(name, cpu, target_triple, extra_rustc_flags):
         target_compatible_with = target_constraints,
         toolchain = ":" + name + "_impl",
         toolchain_type = "@rules_rust//rust:toolchain_type",
+    )
+
+    cargo_toolchain(
+        name = name + "_cargo_impl",
+        cargo = "@chromium_rust//:cargo",
+        channel = "stable",
+        tags = ["manual"],
+        version = CHROMIUM_RUST_VERSION,
+    )
+
+    native.toolchain(
+        name = name + "_cargo",
+        exec_compatible_with = _HOST_CONSTRAINTS,
+        target_compatible_with = target_constraints,
+        toolchain = ":" + name + "_cargo_impl",
+        toolchain_type = "@rules_rust//cargo:toolchain_type",
     )
