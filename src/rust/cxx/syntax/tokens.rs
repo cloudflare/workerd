@@ -263,7 +263,7 @@ impl ToTokens for Future {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let output = &self.output;
         tokens.extend(
-            quote_spanned!(self.output.span()=> impl ::std::future::Future<Output = ::std::result::Result<#output, ::cxx::KjException>>),
+            quote_spanned!(self.output.span()=> impl ::kj_rs::KjFuture<Output = ::std::result::Result<#output, ::cxx::KjException>>),
         );
     }
 }

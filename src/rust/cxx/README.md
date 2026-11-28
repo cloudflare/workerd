@@ -100,6 +100,13 @@ Bridge declarations support async calls in both directions:
 These bridge futures and promises are driven by the KJ event loop. Rust-native futures that do not
 cross the bridge can still use executors such as Tokio.
 
+Calling a C++ `async` function needs an event loop on the thread. The future it returns, a
+`kj_rs::KjFuture`, belongs to that loop, so it is not `Send`. Its `into_send()` makes it a
+`kj_rs::SendKjFuture`, which is `Send` and may move between OS threads with its loop: polling it
+off the loop returns an error, and dropping it off the loop aborts the process. To hold another
+value of the loop in a `Send` future, wrap it in a `kj_rs::LoopChecked`. See
+[`kj-rs/README.md`](kj-rs/README.md#event-loop-bound-values-in-send-futures) for when to use each.
+
 ### Shared Rust type aliases
 
 The fork includes support for reusing Rust type aliases across bridge modules, based on

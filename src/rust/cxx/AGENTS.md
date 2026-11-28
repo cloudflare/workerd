@@ -72,6 +72,17 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - An `extern "C++"` function is called through a shim that catches every exception, unless it is
   `#[nothrow]` (README.md, "`#[nothrow]` C++ functions"); keep a `#[nothrow]` shim free of
   exception handling so that LTO can still inline it into Rust.
+- Event-loop-bound values in `Send` futures (such as `IoContext::await_io` / `await_io_and_run`):
+  - `extern "C++"` `async fn` requires a current KJ event loop and returns a `!Send`, `!Unpin`
+    `kj_rs::KjFuture`; call `.into_send()` to opt into `SendKjFuture` for `Send` futures driven on
+    the same KJ event loop.
+  - Use `kj_rs::LoopChecked<T>` for non-future values that belong to a KJ event loop (KJ objects,
+    or an `Rc` whose clones all belong to the loop), kept as a private field inside the binding's
+    wrapper struct and constructed at the C++ creation site (as in `io_context::SpanBuilder`). Keep such wrappers `!Traced` so JSG resources must go through
+    `IoOwned`.
+  - Single-loop code on `kj_rs_tokio::spawn` (`LocalSet`) uses plain `!Send` `KjFuture`/`KjOwn`
+    directly. Never pass `SendKjFuture` or `LoopChecked` to `tokio::spawn` (dropping off-loop
+    aborts). See `kj-rs/README.md`.
 - Run formatting and the full component tests after changing generated ABI behavior.
 
 ## kj-rs-io ownership and reactor rules

@@ -8,9 +8,11 @@
 
 pub mod test_date;
 mod test_futures;
+mod test_loop_checked;
 mod test_maybe;
 pub mod test_own;
 mod test_refcount;
+mod test_send_kj_future;
 
 use kj_rs::KjOwn;
 use test_futures::clear_retained_waker;
@@ -45,6 +47,15 @@ use test_futures::stashed_future_poll_count;
 use test_futures::unstash_and_await_promise_future;
 use test_futures::wake_retained_waker_from_background_thread;
 use test_futures::wake_stashed_waker;
+use test_loop_checked::LoopCheckedFuture;
+use test_loop_checked::LoopCheckedSlot;
+use test_loop_checked::loop_checked_drops;
+use test_loop_checked::loop_checked_get;
+use test_loop_checked::loop_checked_set;
+use test_loop_checked::loop_checked_take;
+use test_loop_checked::new_loop_checked_future;
+use test_loop_checked::new_loop_checked_slot;
+use test_loop_checked::poll_loop_checked_future;
 use test_maybe::take_maybe_own;
 use test_maybe::take_maybe_own_ret;
 use test_maybe::take_maybe_ref;
@@ -54,6 +65,11 @@ use test_maybe::take_maybe_shared_ret;
 use test_refcount::modify_own_ret_arc;
 use test_refcount::modify_own_ret_rc;
 use test_refcount::take_maybe_rc_ret;
+use test_send_kj_future::SendKjFutureBox;
+use test_send_kj_future::new_fulfillable_send_kj_future;
+use test_send_kj_future::new_pending_send_kj_future;
+use test_send_kj_future::new_ready_send_kj_future;
+use test_send_kj_future::poll_send_kj_future;
 
 type Result<T> = std::io::Result<T>;
 type Error = std::io::Error;
@@ -346,6 +362,41 @@ pub mod ffi {
         async fn unstash_and_await_promise_future() -> Result<()>;
     }
 
+    extern "Rust" {
+        type LoopCheckedSlot;
+        /// A `LoopChecked` value that counts its drops.
+        #[expect(clippy::unnecessary_box_returns)]
+        fn new_loop_checked_slot(value: u32) -> Box<LoopCheckedSlot>;
+        fn loop_checked_get(slot: &LoopCheckedSlot) -> Result<u32>;
+        fn loop_checked_set(slot: &mut LoopCheckedSlot, value: u32) -> Result<()>;
+        /// Takes the value out of its `LoopChecked`, leaving it in `slot` if that fails.
+        fn loop_checked_take(slot: &mut LoopCheckedSlot) -> Result<u32>;
+        /// How many `LoopChecked` values have been dropped.
+        fn loop_checked_drops() -> usize;
+
+        type LoopCheckedFuture;
+        /// A ready KJ promise's future, wrapped to be `Send`.
+        #[expect(clippy::unnecessary_box_returns)]
+        fn new_loop_checked_future(value: i32) -> Box<LoopCheckedFuture>;
+        /// Polls `future` once, returning its value, or -1 if it is pending.
+        fn poll_loop_checked_future(future: &mut LoopCheckedFuture) -> Result<i32>;
+    }
+
+    extern "Rust" {
+        type SendKjFutureBox;
+        /// The `Send` future of a ready KJ promise.
+        #[expect(clippy::unnecessary_box_returns)]
+        fn new_ready_send_kj_future() -> Box<SendKjFutureBox>;
+        /// The `Send` future of a KJ promise that never settles.
+        #[expect(clippy::unnecessary_box_returns)]
+        fn new_pending_send_kj_future() -> Box<SendKjFutureBox>;
+        /// The `Send` future of a KJ promise that `fulfill_stored_promise()` fulfills.
+        #[expect(clippy::unnecessary_box_returns)]
+        fn new_fulfillable_send_kj_future() -> Box<SendKjFutureBox>;
+        /// Polls `future` once and returns whether it is ready.
+        fn poll_send_kj_future(future: &mut SendKjFutureBox) -> Result<bool>;
+    }
+
     // these are used to check compilation only
     extern "Rust" {
 
@@ -425,10 +476,21 @@ mod tests {
     use crate::ffi;
 
     #[test]
-    fn compilation() {
-        // These promises can't be driven by the Rust side, so just check that they compile.
-        drop(ffi::new_ready_promise_void());
-        drop(ffi::new_ready_promise_i32(42));
-        drop(ffi::new_ready_promise_shared_type());
+    fn async_fn_requires_event_loop() {
+        // C++ makes each promise, but the bridge then fails to get the event loop's id and must
+        // destroy the promise, which LSan checks.
+        let calls: [fn(); 3] = [
+            || drop(ffi::new_ready_promise_void()),
+            || drop(ffi::new_ready_promise_i32(42)),
+            || drop(ffi::new_ready_promise_shared_type()),
+        ];
+        for call in calls {
+            let panic = std::panic::catch_unwind(call).expect_err("no event loop should panic");
+            let message = panic.downcast_ref::<String>().map(String::as_str);
+            assert!(
+                message.is_some_and(|m| m.contains("No event loop is running on this thread")),
+                "{message:?}"
+            );
+        }
     }
 }

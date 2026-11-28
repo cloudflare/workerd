@@ -80,6 +80,13 @@ void TokioEventPort::assertOwnerThread() const {
 
 void TokioEventPort::cancelSpawnedTasks() {
   assertOwnerThread();
+  // A task may hold a `kj_rs::SendKjFuture` or `kj_rs::LoopChecked`, which must be dropped with its
+  // loop current, but the port's owner may already have left the loop's scope, e.g. by destroying
+  // its WaitScope.
+  kj::Maybe<kj::WaitScope> scope;
+  if (kj::tryGetCurrentThreadExecutor() == kj::none) {
+    scope.emplace(*loop);
+  }
   // Guarded so a task-drop panic (surfaced as a kj::Exception by the cxx fork) does not
   // std::terminate if the caller is already unwinding (this runs from destructors).
   unwindDetector.catchExceptionsIfUnwinding([this]() { rustPort->cancel_spawned_tasks(); });

@@ -14,6 +14,7 @@ use test_helpers::spawn_detached_completing_task;
 use test_helpers::spawn_panicking_task;
 use test_helpers::spawn_pending_task;
 use test_helpers::spawn_task_awaiting_kj_never_promise;
+use test_helpers::spawn_task_awaiting_send_kj_never_promise;
 use test_helpers::spawn_task_holding_kj_timer;
 use test_helpers::spawn_task_on_runtime;
 use test_helpers::spawn_yield_loop_task;
@@ -67,6 +68,8 @@ mod ffi {
         fn spawn_task_holding_kj_timer();
         /// Same shape, but the task awaits a never-resolving bridged KJ promise.
         fn spawn_task_awaiting_kj_never_promise();
+        /// The same, but the task holds the promise's future as a `kj_rs::SendKjFuture`.
+        fn spawn_task_awaiting_send_kj_never_promise();
         /// Woken from a plain std::thread while the loop is parked in the tokio port.
         async fn std_thread_wake_future() -> Result<()>;
         /// A task that yields forever; poll() must stay bounded.

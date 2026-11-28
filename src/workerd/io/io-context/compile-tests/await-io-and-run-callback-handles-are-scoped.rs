@@ -5,14 +5,17 @@
 // The callback of `await_io_and_run` gets a new lock; the handles it creates cannot outlive the
 // callback.
 use std::cell::RefCell;
-use std::rc::Rc;
 
 use io_context::IoContext;
 use jsg::v8;
 
-pub fn t(context: &IoContext<'_>, stash: Rc<RefCell<Option<v8::Local<'static, v8::Object>>>>) {
-    let _ = context.await_io_and_run(async {}, move |lock, ()| {
-        *stash.borrow_mut() = Some(lock.new_object()); //~ ERROR E0521
+thread_local! {
+    static STASH: RefCell<Option<v8::Local<'static, v8::Object>>> = const { RefCell::new(None) };
+}
+
+pub fn t(context: &IoContext<'_>) {
+    let _ = context.await_io_and_run(async {}, |lock, ()| {
+        STASH.with(|stash| *stash.borrow_mut() = Some(lock.new_object())); //~ ERROR E0521
         Ok(())
     });
 }

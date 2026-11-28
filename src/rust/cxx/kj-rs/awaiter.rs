@@ -13,8 +13,10 @@ use crate::OwnPromiseNode;
 // Await syntax for OwnPromiseNode
 use crate::ffi::GuardedRustPromiseAwaiter;
 use crate::ffi::GuardedRustPromiseAwaiterRepr;
+use crate::loop_checked::EventLoopId;
 use crate::waker::try_into_kj_waker_ptr;
 
+/// Drives a KJ promise from Rust, on the event loop of `loop_id`, which the promise belongs to.
 pub struct PromiseAwaiter<Data> {
     node: Option<OwnPromiseNode>,
     pub(crate) data: Data,
@@ -26,10 +28,12 @@ pub struct PromiseAwaiter<Data> {
     // Safety: `option_waker` must be declared after `awaiter`, because `awaiter` contains a reference
     // to `option_waker`. This ensures `option_waker` will be dropped after `awaiter`.
     option_waker: OptionWaker,
+    loop_id: EventLoopId,
 }
 
 impl<Data> PromiseAwaiter<Data> {
-    pub fn new(node: OwnPromiseNode, data: Data) -> Self {
+    /// `loop_id` is the id of the event loop `node` belongs to.
+    pub(crate) fn new(node: OwnPromiseNode, data: Data, loop_id: EventLoopId) -> Self {
         Self {
             node: Some(node),
             data,
@@ -37,7 +41,13 @@ impl<Data> PromiseAwaiter<Data> {
             awaiter: MaybeUninit::uninit(),
             awaiter_initialized: false,
             option_waker: OptionWaker::empty(),
+            loop_id,
         }
+    }
+
+    /// Whether the promise's event loop is the current thread's.
+    pub(crate) fn is_current(&self) -> bool {
+        self.loop_id.is_current()
     }
 
     /// # Panics
@@ -48,7 +58,7 @@ impl<Data> PromiseAwaiter<Data> {
         clippy::expect_used,
         reason = "`node` is `Some` until the first call, the only one to reach this, takes it"
     )]
-    pub fn get_awaiter(mut self: Pin<&mut Self>) -> Pin<&mut GuardedRustPromiseAwaiter> {
+    fn get_awaiter(mut self: Pin<&mut Self>) -> Pin<&mut GuardedRustPromiseAwaiter> {
         // Safety: We never move out of `this`.
         // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
         let this = unsafe { Pin::into_inner_unchecked(self.as_mut()) };
@@ -94,7 +104,8 @@ impl<Data> PromiseAwaiter<Data> {
         }
     }
 
-    pub fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> bool {
+    /// Returns whether the promise is ready.
+    pub(crate) fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> bool {
         let maybe_kj_waker = try_into_kj_waker_ptr(cx.waker());
         let awaiter = self.as_mut().get_awaiter();
         // Safety: The awaiter is initialized by `get_awaiter()` above. `WakerRef` borrows the
@@ -102,6 +113,24 @@ impl<Data> PromiseAwaiter<Data> {
         // or points to the KjWaker inside the waker (validated by `try_into_kj_waker_ptr`).
         // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
         unsafe { awaiter.poll(&WakerRef(cx.waker()), maybe_kj_waker) }
+    }
+
+    /// As [`poll()`](Self::poll), but fails without touching the promise off its event loop.
+    ///
+    /// # Errors
+    ///
+    /// Fails off the promise's event loop.
+    pub(crate) fn poll_checked(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Result<bool, cxx::KjException> {
+        self.loop_id.require_current()?;
+        Ok(self.poll(cx))
+    }
+
+    /// Takes the promise's node once `poll()` has returned true, in the same poll.
+    pub(crate) fn take_own_promise_node(self: Pin<&mut Self>) -> OwnPromiseNode {
+        self.get_awaiter().take_own_promise_node()
     }
 }
 

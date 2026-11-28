@@ -16,8 +16,10 @@
 )]
 
 use std::ffi::CStr;
+use std::pin::Pin;
 
 use kj_rs::KjOwn;
+use kj_rs::LoopChecked;
 
 use crate::bridge;
 
@@ -82,8 +84,12 @@ impl From<&'static CStr> for TagValue<'_> {
 }
 
 /// A span being recorded, like C++ `SpanBuilder`, which it holds. The span ends when this is
-/// dropped. It is neither `Send` nor `Sync`.
-pub struct SpanBuilder(KjOwn<bridge::SpanBuilder>);
+/// dropped.
+///
+/// It belongs to the event loop of the request that started it. It is `Send`, so that a `Send`
+/// future or callback of the request can hold it, but not `Sync`. Using it off its loop panics,
+/// and dropping it off its loop aborts the process, as for a [`LoopChecked`].
+pub struct SpanBuilder(LoopChecked<KjOwn<bridge::SpanBuilder>>);
 
 impl SpanBuilder {
     /// [`IoContext::make_trace_span`](crate::IoContext::make_trace_span), for the `IoContext`
@@ -91,14 +97,43 @@ impl SpanBuilder {
     pub(crate) fn start(context_id: u64, name: &'static CStr) -> jsg::Result<Self> {
         // SAFETY: `name` is `'static`.
         let span = unsafe { bridge::io_context_make_trace_span(context_id, literal(name)) }?;
-        Ok(Self(span))
+        // The bridge made the span in the current `IoContext`, so on its event loop.
+        Ok(Self::on_current_loop(span))
+    }
+
+    /// Wraps `span`, which was made on the current event loop.
+    fn on_current_loop(span: KjOwn<bridge::SpanBuilder>) -> Self {
+        // SAFETY: a C++ `SpanBuilder` belongs to the event loop of its request: it shares its
+        // observer only with the request's other spans, through a non-atomic refcount, and neither
+        // it nor its observer keeps thread-local state across a return to the event loop.
+        Self(unsafe { LoopChecked::new(span) })
+    }
+
+    /// The C++ span.
+    ///
+    /// # Panics
+    ///
+    /// Panics off the span's event loop.
+    #[expect(
+        clippy::panic,
+        reason = "using a span off its event loop is a bug in the caller"
+    )]
+    fn span(&mut self) -> Pin<&mut bridge::SpanBuilder> {
+        match self.0.get_mut() {
+            Ok(span) => span.pin_mut(),
+            Err(err) => panic!("{}", err.what()),
+        }
     }
 
     /// Sets tag `key` to `value`, as C++ `SpanBuilder::setTag()` does. Does nothing if the span
     /// is not recorded. Set each tag at most once: as in C++, setting one again replaces its
     /// value, but is treated as a bug, logged as a warning, and as an error in predictable mode.
+    ///
+    /// # Panics
+    ///
+    /// Panics off the span's event loop.
     pub fn set_tag<'v>(&mut self, key: &'static CStr, value: impl Into<TagValue<'v>>) {
-        let (span, key) = (self.0.pin_mut(), literal(key));
+        let (span, key) = (self.span(), literal(key));
         // SAFETY: `key`, and a `Literal` value, are `'static`.
         unsafe {
             match value.into() {
@@ -114,16 +149,25 @@ impl SpanBuilder {
     }
 
     /// Starts a child span, as C++ `SpanBuilder::newChild()` does.
+    ///
+    /// # Panics
+    ///
+    /// Panics off the span's event loop.
     #[must_use]
     pub fn new_child(&mut self, name: &'static CStr) -> Self {
         // SAFETY: `name` is `'static`.
-        Self(unsafe { bridge::span_builder_new_child(self.0.pin_mut(), literal(name)) })
+        let child = unsafe { bridge::span_builder_new_child(self.span(), literal(name)) };
+        // `span()` checked that the current event loop is this span's, and so the child's.
+        Self::on_current_loop(child)
     }
 }
 
 /// A span of both internal and user tracing, like C++ `TraceContext`, which it holds. The spans
-/// end when this is dropped. It is neither `Send` nor `Sync`.
-pub struct TraceContext(KjOwn<bridge::TraceContext>);
+/// end when this is dropped.
+///
+/// It belongs to the event loop of its request, as a [`SpanBuilder`] does: it is `Send` but not
+/// `Sync`, using it off its loop panics, and dropping it off its loop aborts the process.
+pub struct TraceContext(LoopChecked<KjOwn<bridge::TraceContext>>);
 
 impl TraceContext {
     /// [`IoContext::make_user_trace_span`](crate::IoContext::make_user_trace_span), for the
@@ -132,14 +176,38 @@ impl TraceContext {
         // SAFETY: `name` is `'static`.
         let context =
             unsafe { bridge::io_context_make_user_trace_span(context_id, literal(name)) }?;
-        Ok(Self(context))
+        // SAFETY: the bridge made the spans in the current `IoContext`, so on its event loop, and
+        // they are as for `SpanBuilder::on_current_loop()`. Their async trace operation belongs to
+        // an `AsyncTracker`, which skips calls from any OS thread but the one it was made on:
+        // after its loop moves, the operation is not recorded, which is sound.
+        Ok(Self(unsafe { LoopChecked::new(context) }))
+    }
+
+    /// The C++ spans.
+    ///
+    /// # Panics
+    ///
+    /// Panics off the spans' event loop.
+    #[expect(
+        clippy::panic,
+        reason = "using a span off its event loop is a bug in the caller"
+    )]
+    fn context(&mut self) -> Pin<&mut bridge::TraceContext> {
+        match self.0.get_mut() {
+            Ok(context) => context.pin_mut(),
+            Err(err) => panic!("{}", err.what()),
+        }
     }
 
     /// Sets tag `key` to `value` on both spans, as C++ `TraceContext::setTag()` does. If the
     /// request has async tracing, it also annotates the span's operation, even if the spans are
     /// not recorded. Set each tag at most once, as for [`SpanBuilder::set_tag`].
+    ///
+    /// # Panics
+    ///
+    /// Panics off the spans' event loop.
     pub fn set_tag<'v>(&mut self, key: &'static CStr, value: impl Into<TagValue<'v>>) {
-        let (context, key) = (self.0.pin_mut(), literal(key));
+        let (context, key) = (self.context(), literal(key));
         // SAFETY: `key`, and a `Literal` value, are `'static`.
         unsafe {
             match value.into() {
@@ -159,8 +227,12 @@ impl TraceContext {
     /// `TraceContext::detachAsync()` does. Call it when this outlives the current call without
     /// being moved into the callback of the next `await_io_and_run()`, such as when it is stored
     /// for later; otherwise an unrelated wait later in the turn could take over the operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics off the spans' event loop.
     pub fn detach_async(&mut self) {
-        bridge::trace_context_detach_async(self.0.pin_mut());
+        bridge::trace_context_detach_async(self.context());
     }
 }
 
