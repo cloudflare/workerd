@@ -317,7 +317,7 @@ fn destroy_reports_only_unsettled_resources() {
     f.tracker.annotate(canceled, "k", "v");
     f.tracker.destroy(finished);
     assert_eq!(f.tracker.stats().unknown, 2);
-    assert!(f.events().is_empty());
+    assert_eq!(f.events(), [] as [crate::recording::Event; 0]);
 }
 
 #[test]
@@ -345,7 +345,7 @@ fn unknown_ids_are_counted() {
     f.tracker.annotate(12345, "k", "v");
     f.tracker.destroy(12345);
     assert_eq!(f.tracker.stats().unknown, 3);
-    assert!(f.events().is_empty());
+    assert_eq!(f.events(), [] as [crate::recording::Event; 0]);
 }
 
 #[test]
@@ -432,7 +432,7 @@ fn unknown_scope_stays_balanced_but_is_not_reported() {
     assert_eq!(f.tracker.current(), 0);
     assert_eq!(f.tracker.stats().unknown, 1);
     assert_eq!(f.tracker.stats().unbalanced, 0);
-    assert!(f.events().is_empty());
+    assert_eq!(f.events(), [] as [crate::recording::Event; 0]);
 }
 
 #[test]
@@ -716,7 +716,7 @@ fn close_reports_stats_then_ignores_everything() {
     f.tracker.turn_end();
     f.tracker.close();
     f.tracker.add_sink(Box::new(RecordingSink::new()));
-    assert!(f.sink.take().is_empty());
+    assert_eq!(f.sink.take(), [] as [crate::recording::Event; 0]);
 }
 
 #[test]
@@ -898,7 +898,7 @@ fn unsettled_adopted_operation_is_destroyed_once_by_its_last_holder() {
     let _ = f.events();
 
     f.tracker.destroy(op);
-    assert!(f.events().is_empty());
+    assert_eq!(f.events(), [] as [crate::recording::Event; 0]);
     f.tracker.destroy(op);
     assert_eq!(
         f.events(),

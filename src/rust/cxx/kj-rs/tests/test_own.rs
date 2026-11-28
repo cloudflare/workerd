@@ -240,7 +240,7 @@ pub mod tests {
     fn test_own_debug_display() {
         let own = ffi::cxx_kj_own();
         let debug_str = format!("{own:?}");
-        assert!(!debug_str.is_empty());
+        assert_ne!(debug_str, "");
     }
 
     #[test]

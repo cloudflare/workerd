@@ -38,7 +38,10 @@ fn head_response_minimal() {
     );
     assert!(http.cache_control.is_none());
     assert_eq!(http.cache_expiry, u64::MAX);
-    assert!(head.custom_fields.unwrap().is_empty());
+    assert_eq!(
+        head.custom_fields.unwrap(),
+        [] as [r2_api_serde_json::Record; 0]
+    );
     assert!(head.range.is_none());
     assert_eq!(head.checksums.unwrap().md5.unwrap().len(), 16);
     assert!(head.ssec.is_none());

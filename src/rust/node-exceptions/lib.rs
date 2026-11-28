@@ -14,8 +14,8 @@ use kj_rs::KjMaybe;
 #[cxx::bridge(namespace = "workerd::rust::node_exceptions")]
 #[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
-    /// Most Node.js exceptions are represented as either Error, TypeError, or
-    /// RangeError. This is a cxx *extern* enum: the C++ `api::node::JsErrorType`
+    /// Most Node.js exceptions are represented as either `Error`, `TypeError`, or
+    /// `RangeError`. This is a cxx *extern* enum: the C++ `api::node::JsErrorType`
     /// is the single source of truth, and cxx generates static-asserts that the
     /// variants below match it. `#[repr(u8)]` matches the C++ enum's `uint8_t`
     /// underlying type.

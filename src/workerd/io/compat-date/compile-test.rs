@@ -77,7 +77,7 @@ fn enable_and_disable_flags_override_the_date() {
     assert!(!is_on(&c, "formDataParserSupportsFiles"));
     let c = compile_at("2021-05-17", &["r2_internal_beta_bindings"], &TEST);
     assert!(!is_on(&c, "r2PublicBetaApi"));
-    assert!(errors(&c).is_empty());
+    assert_eq!(errors(&c), [] as [&str; 0]);
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn warns_about_redundant_flags() {
         &["formdata_parser_supports_files"],
         &with(DateValidation::CodeVersion),
     );
-    assert!(errors(&c).is_empty());
+    assert_eq!(errors(&c), [] as [&str; 0]);
     assert_eq!(
         warnings(&c),
         [
@@ -155,7 +155,7 @@ fn warns_about_redundant_flags() {
     );
 
     let c = compile_at("2021-11-04", &["formdata_parser_supports_files"], &TEST);
-    assert!(warnings(&c).is_empty());
+    assert_eq!(warnings(&c), [] as [&str; 0]);
 }
 
 #[test]
@@ -210,26 +210,26 @@ fn gates_experimental_flags() {
         allow_experimental: true,
         ..code
     };
-    assert!(
+    assert_eq!(
         errors(&compile_at(
             "2020-01-01",
             &["durable_object_rename"],
             &allowed
-        ))
-        .is_empty()
+        )),
+        [] as [&str; 0]
     );
 
     let allowlisted = CompileOptions {
         allowed_experimental_flags: &[b"durable_object_rename"],
         ..code
     };
-    assert!(
+    assert_eq!(
         errors(&compile_at(
             "2020-01-01",
             &["durable_object_rename"],
             &allowlisted
-        ))
-        .is_empty()
+        )),
+        [] as [&str; 0]
     );
 
     let cloudflare = CompileOptions {
@@ -249,7 +249,10 @@ fn gates_experimental_flags() {
     );
 
     // durable_object_alarms is obsolete and was never experimental.
-    assert!(errors(&compile_at("2020-01-01", &["durable_object_alarms"], &code)).is_empty());
+    assert_eq!(
+        errors(&compile_at("2020-01-01", &["durable_object_alarms"], &code)),
+        [] as [&str; 0]
+    );
 }
 
 #[test]
@@ -268,7 +271,7 @@ fn injects_python_workers() {
         ..TEST
     };
     let c = compile_at("2025-10-16", &["auto_inject_python_workers"], &python);
-    assert!(errors(&c).is_empty(), "{:?}", errors(&c));
+    assert_eq!(errors(&c), [] as [&str; 0]);
     assert!(is_on(&c, "pythonWorkers"));
     assert!(is_on(&c, "pythonWorkflows"));
     assert!(is_on(&c, "pythonWorkers20250116"));

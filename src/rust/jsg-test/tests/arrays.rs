@@ -649,7 +649,7 @@ fn vec_empty_roundtrip() {
         assert_eq!(ctx.eval::<u32>(lock, "arr.length").unwrap(), 0);
 
         let result: Vec<String> = ctx.eval(lock, "arr").unwrap();
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [String; 0]);
         Ok(())
     });
 }
@@ -853,7 +853,7 @@ fn typed_array_empty_roundtrip() {
         assert_eq!(ctx.eval::<u32>(lock, "arr.length").unwrap(), 0);
 
         let result: v8::Local<v8::Uint8Array> = ctx.eval(lock, "arr").unwrap();
-        assert!(result.as_slice(lock).is_empty());
+        assert_eq!(result.as_slice(lock), [] as [u8; 0]);
         Ok(())
     });
 }

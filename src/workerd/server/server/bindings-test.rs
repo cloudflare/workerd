@@ -268,7 +268,7 @@ fn unknown_durable_object_namespaces_take_no_channel() {
             ),
         ]
     );
-    assert!(compiled.actors.is_empty());
+    assert_eq!(compiled.actors, [] as [crate::bindings::ActorDesignator; 0]);
     assert_eq!(
         rendered(&compiled.globals),
         ["(name = \"CLASS\", actorClass = 0)"]
@@ -509,9 +509,15 @@ fn experimental_bindings_are_refused_without_the_flag() {
                  in the future. You must run workerd with `--experimental` to use this feature.",
         ]
     );
-    assert!(rendered(&compiled.globals).is_empty());
-    assert!(compiled.actor_classes.is_empty());
-    assert!(compiled.worker_loaders.is_empty());
+    assert_eq!(rendered(&compiled.globals), [] as [String; 0]);
+    assert_eq!(
+        compiled.actor_classes,
+        [] as [crate::bindings::Designator; 0]
+    );
+    assert_eq!(
+        compiled.worker_loaders,
+        [] as [crate::bindings::WorkerLoaderDesignator; 0]
+    );
     assert!(!compiled.has_debug_port);
 
     let compiled = compile(&worker_message(7, build), &no_actors(), true);
@@ -564,7 +570,7 @@ fn memory_cache_needs_limits() {
               configuration and try again."
         ]
     );
-    assert!(rendered(&compiled.globals).is_empty());
+    assert_eq!(rendered(&compiled.globals), [] as [String; 0]);
 }
 
 #[test]
@@ -590,7 +596,7 @@ fn unsupported_bindings() {
             "Worker \"main\"'s binding \"OLD\" uses an obsolete binding type.",
         ]
     );
-    assert!(rendered(&compiled.globals).is_empty());
+    assert_eq!(rendered(&compiled.globals), [] as [String; 0]);
 }
 
 #[test]
@@ -603,7 +609,7 @@ fn wasm_bindings_of_a_service_worker_script_are_skipped_silently() {
     wasm.set_wasm_module(&[0]);
     let compiled = compile(&message, &no_actors(), false);
     assert_eq!(compiled.errors, Vec::<String>::new());
-    assert!(rendered(&compiled.globals).is_empty());
+    assert_eq!(rendered(&compiled.globals), [] as [String; 0]);
 }
 
 #[test]

@@ -2,11 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#![expect(
-    clippy::float_cmp,
-    reason = "the expected values are exactly what the report holds"
-)]
-
 use super::*;
 
 const OVERHEAD: Overhead = Overhead {
@@ -211,5 +206,5 @@ fn words_to_bytes_keeps_memory_order() {
     let words = [0x0102_0304_0506_0708_u64, u64::MAX, 0];
     let expected: Vec<u8> = words.iter().flat_map(|word| word.to_ne_bytes()).collect();
     assert_eq!(words_to_bytes(&words), expected);
-    assert!(words_to_bytes(&[]).is_empty());
+    assert_eq!(words_to_bytes(&[]), [] as [u8; 0]);
 }

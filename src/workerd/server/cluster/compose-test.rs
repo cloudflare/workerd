@@ -500,13 +500,13 @@ fn a_deployment_that_breaks_a_rule_is_skipped_as_a_whole() {
         ]
     );
     let malformed = &composed.deployments[3];
-    assert!(malformed.services.is_empty());
+    assert_eq!(malformed.services, [] as [String; 0]);
     assert!(
         malformed.errors[0].starts_with("deployment \"d\" is not a valid config: "),
         "{:?}",
         malformed.errors
     );
-    assert!(composed.deployments[4].errors.is_empty());
+    assert_eq!(composed.deployments[4].errors, [] as [String; 0]);
 }
 
 #[test]

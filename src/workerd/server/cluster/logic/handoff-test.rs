@@ -70,7 +70,7 @@ fn the_busiest_object_is_handed_off_first() {
     let idle = Heat::default();
     // Three requests a minute ago count for less than two just now.
     assert_eq!(busiest_first(&[idle, cold, hot], 60_000), [2, 1, 0]);
-    assert!(busiest_first(&[], 0).is_empty());
+    assert_eq!(busiest_first(&[], 0), [] as [usize; 0]);
 }
 
 #[test]

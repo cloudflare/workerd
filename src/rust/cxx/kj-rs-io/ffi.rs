@@ -141,7 +141,7 @@ mod bridge {
     }
 
     /// `kj::LocalPeerIdentity::Credentials`: `pid` / `uid` of a unix-socket peer, each with a
-    /// validity flag (kj::Maybe has no cxx mapping).
+    /// validity flag (`kj::Maybe` has no cxx mapping).
     struct PeerCredentials {
         has_pid: bool,
         pid: i32,

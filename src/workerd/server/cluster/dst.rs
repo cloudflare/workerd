@@ -204,7 +204,7 @@ impl Harness {
 
     /// Drop `n`'s tasks wherever they wait.
     pub fn crash(&mut self, n: usize) {
-        for abort in self.aborts[n].drain(..) {
+        for abort in std::mem::take(&mut self.aborts[n]) {
             abort.abort();
         }
     }

@@ -10,7 +10,7 @@ fn test_decode() {
     assert_eq!(decode_hex(&input).unwrap().join(""), "issue");
 
     let empty_input: Vec<&str> = vec![];
-    assert!(decode_hex(&empty_input).unwrap().is_empty());
+    assert_eq!(decode_hex(&empty_input).unwrap(), [] as [String; 0]);
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn test_parse_naptr_record_presentation_wrong_field_count() {
 
 #[test]
 fn test_split_rdata_fields() {
-    assert!(split_rdata_fields("").unwrap().is_empty());
+    assert_eq!(split_rdata_fields("").unwrap(), [] as [String; 0]);
     assert_eq!(
         split_rdata_fields("  a  \"b c\" \"\" d ").unwrap(),
         vec!["a", "b c", "", "d"]

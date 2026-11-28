@@ -144,11 +144,11 @@ impl Dialect for SigV4 {
         })
     }
 
-    async fn authorize(&self, request: &mut Request<'_>) -> Result<Option<String>> {
+    fn authorize(&self, request: &mut Request<'_>) -> impl Future<Output = Result<Option<String>>> {
         self.refresh();
         let credentials = self.credentials.borrow().clone();
         sign(request, &credentials, &self.region, SystemTime::now());
-        Ok(None)
+        std::future::ready(Ok(None))
     }
 }
 

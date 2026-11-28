@@ -309,7 +309,7 @@ fn kind_status_and_url_rules_apply_at_close() {
         attribute(&root.attributes, "error.type"),
         Some(&string("exceededCpu"))
     );
-    assert!(root.parent_span_id.is_empty());
+    assert_eq!(root.parent_span_id, [] as [u8; 0]);
 }
 
 #[test]
@@ -344,7 +344,7 @@ fn ok_is_final_for_explicit_status_updates() {
     for name in ["after-ok-1", "after-ok-2"] {
         let span = named(&request, name);
         assert_eq!(status_code(span), StatusCode::Ok);
-        assert!(span.status.as_ref().unwrap().message.is_empty());
+        assert_eq!(span.status.as_ref().unwrap().message, "");
     }
 }
 

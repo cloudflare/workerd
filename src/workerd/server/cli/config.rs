@@ -453,7 +453,9 @@ impl fmt::Display for ffi::ConfigParseError {
 /// Converts bytes to native-endian words, ignoring a trailing partial word.
 pub fn words_from_bytes(bytes: &[u8]) -> Vec<u64> {
     bytes
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|chunk| {
             let mut word = [0u8; 8];
             word.copy_from_slice(chunk);

@@ -2,11 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#![expect(
-    clippy::float_cmp,
-    reason = "imported floats must round-trip bit for bit"
-)]
-
 use super::*;
 
 const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;

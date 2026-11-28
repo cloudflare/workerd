@@ -205,18 +205,15 @@ struct Words<'a>(&'a mut Vec<u64>);
 
 impl capnp::io::Write for Words<'_> {
     fn write_all(&mut self, buf: &[u8]) -> capnp::Result<()> {
-        let chunks = buf.chunks_exact(8);
-        if !chunks.remainder().is_empty() {
+        let (chunks, rest) = buf.as_chunks::<8>();
+        if !rest.is_empty() {
             return Err(capnp::Error::failed(format!(
                 "A write of {} bytes isn't a whole number of words.",
                 buf.len()
             )));
         }
-        self.0.extend(chunks.map(|chunk| {
-            let mut word = [0; 8];
-            word.copy_from_slice(chunk);
-            u64::from_ne_bytes(word)
-        }));
+        self.0
+            .extend(chunks.iter().map(|chunk| u64::from_ne_bytes(*chunk)));
         Ok(())
     }
 }

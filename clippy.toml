@@ -1,3 +1,6 @@
+# The oldest Rust that builds workerd: hosts other than Linux x86_64 build with rules_rust's stable
+# toolchain (build/deps/rust.MODULE.bazel), so no suggestion may need a newer standard library.
+msrv = "1.97.1"
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true

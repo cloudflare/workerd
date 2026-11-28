@@ -145,7 +145,7 @@ fn a_wake_before_the_wait_is_not_lost_and_a_second_waiter_is_rejected() {
     // The producer fires between the consumer's re-stamp and its wait: the permit makes the
     // wait return at once; with no change the consumer simply waits again.
     watcher.shared.wake.notify_one();
-    let mut first = Box::pin(watcher.on_change());
+    let mut first = std::pin::pin!(watcher.on_change());
     assert!(first.as_mut().poll(&mut cx).is_pending());
     // A change plus a wake resolves it. (A different length: "one" -> "two" within one
     // kernel timestamp tick is the documented blind spot, and CI's Linux is that fast.)
@@ -158,7 +158,7 @@ fn a_wake_before_the_wait_is_not_lost_and_a_second_waiter_is_rejected() {
 
     let mut second = Box::pin(watcher.on_change());
     assert!(second.as_mut().poll(&mut cx).is_pending());
-    let mut third = Box::pin(watcher.on_change());
+    let mut third = std::pin::pin!(watcher.on_change());
     let Poll::Ready(Err(e)) = third.as_mut().poll(&mut cx) else {
         panic!("a second concurrent onChange() must be rejected");
     };
@@ -168,7 +168,7 @@ fn a_wake_before_the_wait_is_not_lost_and_a_second_waiter_is_rejected() {
             .contains("at most one onChange()")
     );
     drop(second);
-    let mut fourth = Box::pin(watcher.on_change());
+    let mut fourth = std::pin::pin!(watcher.on_change());
     assert!(
         fourth.as_mut().poll(&mut cx).is_pending(),
         "the guard reset on drop"
@@ -191,7 +191,7 @@ fn rescan_follows_a_retargeted_symlink_and_reports_its_new_directory() {
     let mut files = files_for(&[&link]);
     let mut new_dirs = Vec::new();
     assert!(!files.rescan(&mut new_dirs));
-    assert!(new_dirs.is_empty());
+    assert_eq!(new_dirs, [] as [std::path::PathBuf; 0]);
 
     std::fs::remove_file(&link).unwrap();
     std::os::unix::fs::symlink(new_dir.join("real.txt"), &link).unwrap();
@@ -203,7 +203,7 @@ fn rescan_follows_a_retargeted_symlink_and_reports_its_new_directory() {
     );
     new_dirs.clear();
     assert!(!files.rescan(&mut new_dirs), "...once");
-    assert!(new_dirs.is_empty());
+    assert_eq!(new_dirs, [] as [std::path::PathBuf; 0]);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

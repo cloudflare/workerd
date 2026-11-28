@@ -284,7 +284,6 @@ fn test_std_error_into_kj_exception_chained() {
 }
 
 #[test]
-#[expect(clippy::std_instead_of_core, reason = "core::io is unstable")]
 fn test_std_error_into_kj_exception_io_error() {
     // Test converting a std::io::Error to kj::Exception
     let kind = std::io::ErrorKind::NotFound;

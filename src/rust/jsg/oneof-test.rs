@@ -199,6 +199,9 @@ fn names_flatten_as_categories_do() {
     let names = <Nullable<v8::Local<'static, v8::Value>> as UnionVariant>::UNION_NAMES;
     assert_eq!(names, ["v8::Value"]);
     assert_eq!(<SystemTime as UnionVariant>::UNION_NAMES, ["SystemTime"]);
-    assert!(<String as UnionVariant>::UNION_NAMES.is_empty());
-    assert!(<Vec<v8::Local<'static, v8::Value>> as UnionVariant>::UNION_NAMES.is_empty());
+    assert_eq!(<String as UnionVariant>::UNION_NAMES, [] as [&str; 0]);
+    assert_eq!(
+        <Vec<v8::Local<'static, v8::Value>> as UnionVariant>::UNION_NAMES,
+        [] as [&str; 0]
+    );
 }

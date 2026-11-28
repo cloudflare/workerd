@@ -331,8 +331,10 @@ fn log_outcome(
 /// `message`, encoded (segment table, then segments) in words.
 fn to_words<A: capnp::message::Allocator>(message: &capnp::message::Builder<A>) -> Vec<u64> {
     capnp::serialize::write_message_to_words(message)
-        .chunks_exact(8)
-        .map(|chunk| u64::from_ne_bytes(chunk.try_into().unwrap_or_default()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| u64::from_ne_bytes(*chunk))
         .collect()
 }
 

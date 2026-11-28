@@ -234,7 +234,7 @@ fn a_connect_is_answered_in_rust_and_the_tunnel_taken_over() {
             peer.shutdown().await.unwrap();
             let mut rest = Vec::new();
             peer.read_to_end(&mut rest).await.unwrap();
-            assert!(rest.is_empty());
+            assert_eq!(rest, [] as [u8; 0]);
         };
         let (served, ()) = futures::join!(served, client);
         served.unwrap();
@@ -259,7 +259,7 @@ fn shutdown_closes_an_idle_connection() {
             shutdown.shutdown();
             let mut rest = Vec::new();
             peer.read_to_end(&mut rest).await.unwrap();
-            assert!(rest.is_empty());
+            assert_eq!(rest, [] as [u8; 0]);
         };
         let (served, ()) = futures::join!(served, client);
         served.unwrap();

@@ -780,14 +780,14 @@ fn a_lost_request_ends_a_match_or_put_at_once() {
     // Its late answer is ignored.
     let hit = Some(Hit::Same);
     a.receive("b", Msg::Got { op: get, hit });
-    assert!(a.take_done().is_empty());
+    assert_eq!(a.take_done(), [] as [(u64, Done<i32>); 0]);
     let put = a.put(&key, 2);
     a.lost(put);
     assert_eq!(a.take_done(), [(put, Done::Put(None))]);
     // A delete waits for its answer, or for its target to leave the view.
     let delete = a.delete(&key);
     a.lost(delete);
-    assert!(a.take_done().is_empty());
+    assert_eq!(a.take_done(), [] as [(u64, Done<i32>); 0]);
     let reply = Reply::Applied(true);
     a.receive("b", Msg::Wrote { op: delete, reply });
     assert_eq!(a.take_done(), [(delete, Done::Delete(Some(true)))]);

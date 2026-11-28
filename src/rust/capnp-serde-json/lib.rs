@@ -295,16 +295,17 @@ const HEX_DIGITS: [u8; 256] = {
 /// digits. Faster than `data_encoding`'s decoder, which matters for the checksums in R2's
 /// responses: the loop has no early exit, so the compiler vectorizes it.
 fn decode_hex(text: &[u8]) -> Option<Vec<u8>> {
-    let pairs = text.chunks_exact(2);
-    if !pairs.remainder().is_empty() {
+    let (pairs, rest) = text.as_chunks::<2>();
+    if !rest.is_empty() {
         return None;
     }
     // A digit's value fits in the low four bits, so any high bit marks a byte that is not one.
     let mut invalid = 0;
     let bytes = pairs
-        .map(|pair| {
-            let high = HEX_DIGITS[usize::from(pair[0])];
-            let low = HEX_DIGITS[usize::from(pair[1])];
+        .iter()
+        .map(|&[high, low]| {
+            let high = HEX_DIGITS[usize::from(high)];
+            let low = HEX_DIGITS[usize::from(low)];
             invalid |= high | low;
             high << 4 | low
         })

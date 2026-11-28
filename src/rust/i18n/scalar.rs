@@ -96,9 +96,9 @@ pub fn transcode_into(source: &[u8], from: Encoding, to: Encoding, dest: &mut [u
             }
         }
         _ => {
-            let pairs = source.chunks_exact(2);
-            let truncated = !pairs.remainder().is_empty();
-            let units = pairs.map(|pair| u16::from_le_bytes([pair[0], pair[1]]));
+            let (pairs, rest) = source.as_chunks::<2>();
+            let truncated = !rest.is_empty();
+            let units = pairs.iter().map(|pair| u16::from_le_bytes(*pair));
             // A trailing odd byte is a truncated code unit, and with a lead
             // surrogate before it, one truncated character: a single U+FFFD
             // either way, as ICU gives.

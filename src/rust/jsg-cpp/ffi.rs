@@ -49,7 +49,7 @@ mod bridge {
         /// # Safety
         ///
         /// `edge_name` is a NUL-terminated string literal, or null for none: V8 reads it after
-        /// the snapshot's BuildEmbedderGraph callback returns.
+        /// the snapshot's `BuildEmbedderGraph` callback returns.
         unsafe fn cpp_ref_track(
             tracker: Pin<&mut MemoryTracker>,
             edge_name: *const c_char,
