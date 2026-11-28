@@ -1086,6 +1086,15 @@ jsg::Promise<T> rejectedMaybeHandledPromise(jsg::Lock& js, jsg::JsValue reason, 
   return kj::mv(prp.promise);
 }
 
+// Returns a promise rejected with `reason` for one step of a pipe, marked as handled. The pipe
+// machinery consumes every such promise, and the caller learns the outcome from the pipe
+// promise, which is settled separately. These promises are often returned already rejected
+// from a promise continuation, and V8 attaches the handler that adopts them only in a later
+// microtask; left unmarked, they can be reported as unhandled rejections before then.
+inline jsg::Promise<void> rejectedPipeStep(jsg::Lock& js, jsg::JsValue reason) {
+  return rejectedMaybeHandledPromise<void>(js, reason, true);
+}
+
 // Captures the current context's identity for stream objects without retaining a reference that
 // could be destroyed from a different thread during garbage collection.
 inline kj::Maybe<IoContext::Id> tryGetIoContextId() {

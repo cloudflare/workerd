@@ -22,9 +22,6 @@ namespace workerd::api {
 using DefaultController = jsg::Ref<ReadableStreamDefaultController>;
 using ByobController = jsg::Ref<ReadableByteStreamController>;
 
-// Whether a pipe was started by pipeThrough(), whose pipe promise is marked as handled.
-WD_STRONG_BOOL(IsPipeThrough);
-
 namespace {
 struct ValueReadable;
 struct ByteReadable;
@@ -597,25 +594,20 @@ void WritableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) {
 // with `reason` once the cancel completes, or with the cancel's error if it fails. Without the
 // pipe_to_backward_propagation compatibility flag, the pipe rejects with `reason` right away and
 // the cancel's outcome is ignored.
-jsg::Promise<void> rejectAfterCancel(jsg::Lock& js,
-    kj::Maybe<jsg::Promise<void>> maybeCancel,
-    jsg::JsValue reason,
-    IsPipeThrough isPipeThrough) {
-  bool pipeThrough = isPipeThrough.toBool();
+jsg::Promise<void> rejectAfterCancel(
+    jsg::Lock& js, kj::Maybe<jsg::Promise<void>> maybeCancel, jsg::JsValue reason) {
   if (!FeatureFlags::get(js).getPipeToBackwardPropagation()) {
-    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+    return rejectedPipeStep(js, reason);
   }
   KJ_IF_SOME(cancel, maybeCancel) {
-    auto onSuccess =
-        JSG_VISITABLE_LAMBDA((reason = reason.addRef(js), pipeThrough), (reason), (jsg::Lock& js) {
-          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
-        });
-    auto onFailure = [pipeThrough](jsg::Lock& js, jsg::Value error) {
-      return rejectedMaybeHandledPromise<void>(js, jsg::JsValue(error.getHandle(js)), pipeThrough);
+    auto onSuccess = JSG_VISITABLE_LAMBDA((reason = reason.addRef(js)), (reason),
+        (jsg::Lock& js) { return rejectedPipeStep(js, reason.getHandle(js)); });
+    auto onFailure = [](jsg::Lock& js, jsg::Value error) {
+      return rejectedPipeStep(js, jsg::JsValue(error.getHandle(js)));
     };
     return cancel.then(js, kj::mv(onSuccess), kj::mv(onFailure));
   }
-  return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+  return rejectedPipeStep(js, reason);
 }
 
 template <typename Controller>
@@ -623,7 +615,6 @@ void WritableLockImpl<Controller>::PipeLocked::shutDown(jsg::Lock& js, jsg::JsVa
   // Copy what we need first: the source's cancel algorithm can run user JS that re-enters the
   // controller and releases the write-side pipe lock, destroying *this.
   auto pipeResolver = resolver.addRef(js);
-  IsPipeThrough pipeThrough(flags.pipeThrough);
   auto cancel = flags.preventCancel ? releaseSource(js) : releaseSource(js, reason);
   if (!FeatureFlags::get(js).getPipeToBackwardPropagation()) {
     // Without the compatibility flag, the pipe promise is left to the pipe loop, which resolves
@@ -631,18 +622,18 @@ void WritableLockImpl<Controller>::PipeLocked::shutDown(jsg::Lock& js, jsg::JsVa
     return;
   }
   // Whatever the pipe loop later produces is ignored: a promise can only be resolved once.
-  pipeResolver.resolve(js, rejectAfterCancel(js, kj::mv(cancel), reason, pipeThrough));
+  pipeResolver.resolve(js, rejectAfterCancel(js, kj::mv(cancel), reason));
 }
 
 template <typename Controller>
 jsg::Promise<void> WritableLockImpl<Controller>::PipeLocked::finishAbortedPipe(
     jsg::Lock& js, Controller& self, jsg::JsValue reason, Flags flags) {
   if (!flags.preventAbort) {
-    return self.abort(js, reason).then(js, JSG_VISITABLE_LAMBDA((reason = reason.addRef(js), flags, ref = self.addRef()), (reason, ref), (jsg::Lock& js) {
-      return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), flags.pipeThrough);
+    return self.abort(js, reason).then(js, JSG_VISITABLE_LAMBDA((reason = reason.addRef(js), ref = self.addRef()), (reason, ref), (jsg::Lock& js) {
+      return rejectedPipeStep(js, reason.getHandle(js));
     }));
   }
-  return rejectedMaybeHandledPromise<void>(js, reason, flags.pipeThrough);
+  return rejectedPipeStep(js, reason);
 }
 
 template <typename Controller>
@@ -4415,7 +4406,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     auto reason = isErroredOrErroring(js).orDefault(
         [&] { return js.typeError("This pipe's source has already been released."_kj); });
     lock.releasePipeLock();
-    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+    return rejectedPipeStep(js, reason);
   }
 
   // At the start of each pipe step, we check to see if either the source or
@@ -4435,26 +4426,24 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     pipeLock.releaseSource(js);
     lock.releasePipeLock();
     if (!preventAbort) {
-      auto onSuccess = JSG_VISITABLE_LAMBDA(
-          (pipeThrough, reason = errored.addRef(js)), (reason), (jsg::Lock& js) {
-            return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
-          });
+      auto onSuccess = JSG_VISITABLE_LAMBDA((reason = errored.addRef(js)), (reason),
+          (jsg::Lock& js) { return rejectedPipeStep(js, reason.getHandle(js)); });
       return abort(js, errored).then(js, kj::mv(onSuccess));
     }
-    return rejectedMaybeHandledPromise<void>(js, errored, pipeThrough);
+    return rejectedPipeStep(js, errored);
   }
 
   KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
     auto reason = errored.getHandle(js);
     auto cancel = preventCancel ? pipeLock.releaseSource(js) : pipeLock.releaseSource(js, reason);
     lock.releasePipeLock();
-    return rejectAfterCancel(js, kj::mv(cancel), reason, IsPipeThrough(pipeThrough));
+    return rejectAfterCancel(js, kj::mv(cancel), reason);
   }
 
   KJ_IF_SOME(erroring, isErroring(js)) {
     auto cancel = preventCancel ? pipeLock.releaseSource(js) : pipeLock.releaseSource(js, erroring);
     lock.releasePipeLock();
-    return rejectAfterCancel(js, kj::mv(cancel), erroring, IsPipeThrough(pipeThrough));
+    return rejectAfterCancel(js, kj::mv(cancel), erroring);
   }
 
   if (pipeLock.source->isClosed()) {
@@ -4474,7 +4463,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     auto reason = js.typeError("This destination writable stream is closed."_kj);
     auto cancel = preventCancel ? pipeLock.releaseSource(js) : pipeLock.releaseSource(js, reason);
     lock.releasePipeLock();
-    return rejectAfterCancel(js, kj::mv(cancel), reason, IsPipeThrough(pipeThrough));
+    return rejectAfterCancel(js, kj::mv(cancel), reason);
   }
 
   // Assuming we get by that, we perform a read on the source. If the read errors,
@@ -4487,7 +4476,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   // source (again, depending on options). If the write operation is successful,
   // we call pipeLoop again to move on to the next iteration.
 
-  auto onSuccess = JSG_VISITABLE_LAMBDA((this, ref = addRef(), preventCancel, pipeThrough), (ref),
+  auto onSuccess = JSG_VISITABLE_LAMBDA((this, ref = addRef(), preventCancel), (ref),
       (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<void> {
         auto maybePipeLock = lock.tryGetPipe();
         if (maybePipeLock == kj::none) return js.resolvedPromise();
@@ -4506,7 +4495,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
 
         auto onSuccess = JSG_VISITABLE_LAMBDA((this, ref = addRef()),(ref) ,(jsg::Lock& js) { return pipeLoop(js); } );
 
-        auto onFailure = JSG_VISITABLE_LAMBDA((this, ref = addRef(), preventCancel, pipeThrough),(ref) ,(
+        auto onFailure = JSG_VISITABLE_LAMBDA((this, ref = addRef(), preventCancel),(ref) ,(
                          jsg::Lock& js, jsg::V8Ref<v8::Value> exception) mutable {
       // The write failed. We need to release the source if the pipe lock still exists.
       // The write-side pipe lock is left in place; doError() cleans it up when the
@@ -4516,7 +4505,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
       KJ_IF_SOME(pipeLock, lock.tryGetPipe()) {
         cancel = preventCancel ? pipeLock.releaseSource(js) : pipeLock.releaseSource(js, reason);
       } else {} // Trailing else() to squash compiler warning
-      return rejectAfterCancel(js, kj::mv(cancel), reason, IsPipeThrough(pipeThrough));
+      return rejectAfterCancel(js, kj::mv(cancel), reason);
     } );
 
         auto promise = write(js,

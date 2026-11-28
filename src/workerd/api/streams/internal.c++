@@ -915,7 +915,10 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             controller.doError(js, error);
           }
 
-          return js.rejectedPromise<ReadResult>(error);
+          // The read's promise adopts this one and carries the error to the caller. Mark it as
+          // handled: it is returned already rejected, and the handler that adopts it is attached
+          // only in a later microtask, so it could otherwise be reported as unhandled first.
+          return rejectedMaybeHandledPromise<ReadResult>(js, error, true);
         }));
       } else {
         return js.rejectedPromise<ReadResult>(
@@ -2661,12 +2664,12 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
     if (!preventAbort && parentRef.state.isActive()) {
       parentRef.state.whenActive(
           [&](IoOwn<Writable>& writable) { writable->abort(js.exceptionToKj(errored)); });
-      return js.rejectedPromise<void>(errored);
+      return rejectedPipeStep(js, errored);
     }
 
     // If preventAbort was true, we're going to unlock the destination now.
     parentRef.writeState.transitionTo<Unlocked>();
-    return js.rejectedPromise<void>(errored);
+    return rejectedPipeStep(js, errored);
   }
 
   auto getReadableRef = [&]() -> kj::Maybe<jsg::Ref<ReadableStream>> {
@@ -2682,7 +2685,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
     parentRef.writeState.transitionTo<Unlocked>();
     if (!preventCancel) {
       releaseSource(js, reason);
-      return js.rejectedPromise<void>(reason);
+      return rejectedPipeStep(js, reason);
     }
     releaseSource(js);
     return js.resolvedPromise();
@@ -2728,7 +2731,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
       releaseSource(js);
     }
 
-    return js.rejectedPromise<void>(destClosed);
+    return rejectedPipeStep(js, destClosed);
   }
 
   // The read can run the source's pull algorithm, and that code can end this pipe, destroying
