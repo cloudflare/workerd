@@ -1,0 +1,58 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+load("//:build/wd_test.bzl", "wd_test")
+
+# The parts of WebAssembly that workerd adds to V8's: compiles that settle in the request,
+# compileStreaming() and instantiateStreaming(), and compiling while handling a request under
+# webassembly_dynamic_compilation. WorkerdApi installs them in each isolate.
+wd_rust_crate(
+    name = "wasm-api",
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [":ffi"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io/io-context",
+    ],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/rust/jsg:ffi",
+        "//src/workerd/io",
+    ],
+)
+
+# Checked by //src/rust/jsg:cpp-jsg-allowlist-test.
+exports_files([
+    "ffi.c++",
+    "ffi.h",
+])
+
+# What the embedder sees of the modules a Worker compiles under webassembly_dynamic_compilation.
+kj_test(
+    src = "wasm-dynamic-compile-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+wd_test(
+    src = "wasm-compile-test.wd-test",
+    args = ["--experimental"],
+    data = ["wasm-compile-test.js"],
+)

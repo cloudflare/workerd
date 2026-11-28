@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "wasm-compile-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "wasm-compile-test.js")],
+        compatibilityFlags = [
+          "experimental", "nodejs_compat", "streams_enable_constructors", "webassembly_streaming", "webassembly_dynamic_compilation",
+        ],
+        bindings = [
+          (name = "self", service = "wasm-compile-test"),
+          (name = "enabled", json = "true"),
+        ],
+      ),
+    ),
+    ( name = "wasm-compile-disabled-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "wasm-compile-test.js")],
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+        bindings = [
+          (name = "self", service = "wasm-compile-disabled-test"),
+          (name = "enabled", json = "false"),
+        ],
+      ),
+    ),
+  ],
+);

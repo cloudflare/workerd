@@ -12,6 +12,8 @@
 #include <workerd/api/execution-context/execution-context.h>
 #include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/api/wasm-api/ffi.h>
+#include <workerd/api/wasm-api/ffi.rs.h>
 #include <workerd/io/features.h>
 #include <workerd/io/worker-modules.h>
 #include <workerd/jsg/modules-new.h>
@@ -235,6 +237,13 @@ kj::ArrayPtr<const Worker::Api::InboundListener> WorkerdApi::getInboundListeners
 }
 kj::Maybe<const EmbedderBootstrap&> WorkerdApi::getEmbedderBootstrap() const {
   return embedderBootstrap;
+}
+void WorkerdApi::installWasm(jsg::Lock& js) const {
+  api::wasm::install_wasm_callbacks(js.v8Isolate);
+}
+kj::Maybe<jsg::JsFunction> WorkerdApi::newWasmCompileFunction(jsg::Lock& js) const {
+  return jsg::JsFunction(jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Function>(
+      api::wasm::new_compile_function(js.v8Isolate))));
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {

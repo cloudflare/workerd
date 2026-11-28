@@ -14,6 +14,8 @@ CPP_SHIMS = glob([
     "//src/workerd/io/io-context:ffi.h",
     "//src/workerd/io/entrypoint:ffi.c++",
     "//src/workerd/io/entrypoint:ffi.h",
+    "//src/workerd/api/wasm-api:ffi.c++",
+    "//src/workerd/api/wasm-api:ffi.h",
     # The interop tier; see cpp-jsg-allowlist.txt.
     "//src/rust/jsg-cpp:ffi.c++",
     "//src/rust/jsg-cpp:jsg-cpp.h",

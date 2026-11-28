@@ -252,6 +252,20 @@ class IoChannelFactory: public virtual kj::Refcounted {
   // may implement Spectre mitigations.
   virtual TimerChannel& getTimer() = 0;
 
+  // Receives the bytes of each WebAssembly module a Worker compiles while handling a request under
+  // the webassembly_dynamic_compilation compatibility flag, before the Worker gets the module.
+  // compile() and instantiate() submit before V8 compiles; the streaming functions compile as the
+  // body arrives and submit the whole body once it ends, before V8 finishes. Throwing refuses the
+  // module. WebAssembly.compile(), instantiate() and the streaming functions don't
+  // settle until the promise resolves, and fail if it rejects. The synchronous WebAssembly.Module
+  // constructor can't wait, so the Worker gets its module at once. Throwing still refuses it, but
+  // if the promise rejects, the Worker may already have run the module, so the request is aborted
+  // and abortIsolate() condemns the isolate. Bytes arrive before V8 validates them, so they may
+  // not be a valid module.
+  virtual kj::Promise<void> submitWasmModule(kj::Array<const kj::byte> bytes) {
+    return kj::READY_NOW;
+  }
+
   // Write a log message to a logfwdr channel. Each log binding has its own channel number.
   //
   // The IoChannelFactory already knows which member of the overall message union is expected to
