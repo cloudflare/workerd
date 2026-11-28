@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_lint_config")
+load(":chromium_toolchain.bzl", "chromium_rust_toolchain")
 load(":sanitizer_toolchain.bzl", "sanitizer_rust_toolchain")
 
 exports_files(["build_std.sh"])
@@ -31,6 +32,22 @@ rust_lint_config(
         "unsafe_op_in_unsafe_fn": "deny",
     },
     visibility = ["//visibility:public"],
+)
+
+# Linux x86_64 hosts build Rust with Chromium's toolchain (chromium_toolchain.bzl), for each Linux
+# target. The flags are those that rust.toolchain() gives the target in build/deps/rust.MODULE.bazel.
+chromium_rust_toolchain(
+    name = "chromium_toolchain_linux_x86_64",
+    cpu = "x86_64",
+    extra_rustc_flags = ["-Ctarget-feature=+sse4.2,+pclmulqdq,+popcnt"],
+    target_triple = "x86_64-unknown-linux-gnu",
+)
+
+chromium_rust_toolchain(
+    name = "chromium_toolchain_linux_aarch64",
+    cpu = "aarch64",
+    extra_rustc_flags = ["-Ctarget-feature=+crc"],
+    target_triple = "aarch64-unknown-linux-gnu",
 )
 
 # One toolchain per sanitizer and supported host. `--config=asan` and `--config=tsan` /

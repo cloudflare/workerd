@@ -118,12 +118,12 @@ llvm.sysroot(
 )
 
 # Chromium's clang has no arm64 Linux build, so arm64 Linux hosts, which CI's arm64 jobs build on,
-# keep LLVM's release. Its lld must read the bitcode of rustc's LLVM (build/deps/rust.MODULE.bazel).
+# keep LLVM's release.
 llvm.toolchain(
     name = "llvm_linux_aarch64",
     exec_arch = "aarch64",
     exec_os = "linux",
-    llvm_version = "23.1.4",
+    llvm_version = "22.1.8",
 )
 llvm.sysroot(
     name = "llvm_linux_aarch64",

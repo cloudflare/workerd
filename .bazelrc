@@ -272,9 +272,9 @@ build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 
 # Cross-language LTO, thin-lto extended to Rust: Rust crates emit LLVM bitcode instead of machine
 # code, so lld's ThinLTO optimizes Rust and C++ together. Linux only, as it needs lld to link and
-# to read rustc's bitcode: rustc's LLVM (`rustc -vV`) must not be newer than lld's
-# (build/deps/rust.MODULE.bazel). macOS and Windows link with the host's linker, which does not
-# track rustc's LLVM.
+# to read rustc's bitcode: rustc's LLVM (`rustc -vV`) must share lld's major version and not be
+# newer. On Linux x86_64 hosts both come from one LLVM revision (build/rust/chromium_toolchain.bzl).
+# macOS and Windows link with the host's linker, which does not track rustc's LLVM.
 build:cross-lto --config=thin-lto
 build:cross-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
@@ -585,10 +585,11 @@ build:pgo-use --@rules_rust//:extra_rustc_flag=-Cprofile-use=${extra_rustc_input
 build:pgo-use --@rules_rust//:extra_rustc_flag=-Cllvm-args=-no-pgo-warn-mismatch
 
 # Compile the Rust code to bitcode only (-Clinker-plugin-lto), so the ThinLTO link optimizes the
-# Rust and C++ code together, inlining across the cxx bridge. rustc's LLVM must not be newer than
-# lld's (build/deps/rust.MODULE.bazel). rules_rust's lto setting isn't used: it also passes
-# -Clto to binaries, which then don't emit the object file that rules_rust's cc_common link
-# expects.
+# Rust and C++ code together, inlining across the cxx bridge. rustc and lld must share an LLVM
+# major version: one revision on Linux x86_64 hosts (build/rust/chromium_toolchain.bzl), and on
+# others the versions in build/deps/rust.MODULE.bazel. rules_rust's lto setting isn't used: it
+# also passes -Clto to binaries, which then don't emit the object file that rules_rust's cc_common
+# link expects.
 build:rust-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
 build:release_macos --config=release_unix

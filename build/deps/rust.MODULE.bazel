@@ -1,10 +1,5 @@
-# rustc's LLVM (`rustc -vV`) must write the raw profile format of the Linux toolchain's clang, since
-# coverage and PGO-instrumented builds put rustc's and clang's counters in one binary, and the
-# profile runtime that clang links misreads data of another format. It must also be no newer than
-# lld's LLVM, which reads rustc's bitcode under cross-language LTO (rust-lto in .bazelrc), on
-# x86_64 and arm64 hosts alike (build/deps/llvm.MODULE.bazel). Rust 1.99 is the first on LLVM 23,
-# whose raw profiles are those of Chromium's clang 24.
-RUST_STABLE_VERSION = "1.99.1"  # LLVM 23
+# The Rust of hosts other than Linux x86_64, which build with Chromium's (below).
+RUST_STABLE_VERSION = "1.97.1"  # LLVM 22
 
 RUST_NIGHTLY_VERSION = "nightly/2026-07-16"
 
@@ -42,11 +37,26 @@ use_repo(
     rust,
     "rust_toolchains",
     rust_nightly_linux_aarch64 = "rust_linux_aarch64__aarch64-unknown-linux-gnu__nightly_tools",
-    rust_nightly_linux_x86_64 = "rust_linux_x86_64__x86_64-unknown-linux-gnu__nightly_tools",
     rust_nightly_macos_aarch64 = "rust_macos_aarch64__aarch64-apple-darwin__nightly_tools",
 )
 
-register_toolchains("@rust_toolchains//:all")
+# Linux x86_64 hosts build Rust with Chromium's toolchain, from the LLVM revision of the C++
+# toolchain's clang (build/rust/chromium_toolchain.bzl). Its revision is the one that V8's DEPS
+# pins with the clang revision in build/deps/llvm.MODULE.bazel, and changes with it.
+chromium_rust = use_repo_rule("//build/toolchain:chromium_rust.bzl", "chromium_rust")
+
+chromium_rust(
+    name = "chromium_rust",
+    sha256 = "93a64626620085b45dd8da96dea87cd8699ac78188bd2968eb0164a917d86820",
+    url = "https://commondatastorage.googleapis.com/chromium-browser-clang/Linux_x64/rust-toolchain-96a18bf5ffa2b24f9cf3d1c731a9eb121c1acad9-4-llvmorg-24-init-17044-gc3223914.tar.xz",
+)
+
+# Ahead of rules_rust's toolchains, which match the same platforms.
+register_toolchains(
+    "//build/rust:chromium_toolchain_linux_x86_64",
+    "//build/rust:chromium_toolchain_linux_aarch64",
+    "@rust_toolchains//:all",
+)
 
 # rust-based lolhtml dependency, including the API header.
 # Presented as a separate repository to allow overrides.

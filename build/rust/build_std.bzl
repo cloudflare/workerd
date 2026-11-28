@@ -2,11 +2,12 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
-"""Builds an instrumented Rust standard library for a rules_rust toolchain.
+"""Builds a Rust standard library from source for a rules_rust toolchain.
 
-rules_rust consumes prebuilt standard-library rlibs but does not implement Cargo's
--Zbuild-std. This rule invokes Cargo as a Bazel action instead of reproducing
-Rust's internal crate graph as Bazel targets (which would introduce a toolchain
+It builds the sanitizer-instrumented standard libraries, and the standard libraries of targets
+that a toolchain has no prebuilt one for. rules_rust consumes prebuilt standard-library rlibs but
+does not implement Cargo's -Zbuild-std. This rule invokes Cargo as a Bazel action instead of
+reproducing Rust's internal crate graph as Bazel targets (which would introduce a toolchain
 cycle).
 """
 
@@ -71,7 +72,8 @@ def _shell_quote(s):
 
 # Cargo links the standard library's build scripts, which run on the execution platform. They link
 # as Bazel links C++ executables, with the C++ toolchain's driver and flags, so the action needs no
-# host C compiler. Cargo runs the linker from each crate's directory, while the toolchain's paths
+# host C compiler. When the target is another platform, that is the C++ toolchain of the execution
+# platform. Cargo runs the linker from each crate's directory, while the toolchain's paths
 # are relative to the execution root, which build_std.sh exports. Returns the wrapper and the
 # environment the driver needs (on macOS, Xcode's).
 def _linker_wrapper(ctx, cc_toolchain):
@@ -110,7 +112,11 @@ def _linker_wrapper(ctx, cc_toolchain):
     return wrapper, env
 
 def _rust_build_std_impl(ctx):
-    cc_toolchain = find_cc_toolchain(ctx)
+    host_triple = ctx.attr.host_triple or ctx.attr.target_triple
+    if host_triple == ctx.attr.target_triple:
+        cc_toolchain = find_cc_toolchain(ctx)
+    else:
+        cc_toolchain = ctx.attr._exec_cc_toolchain[cc_common.CcToolchainInfo]
     linker, linker_env = _linker_wrapper(ctx, cc_toolchain)
     outputs = [
         ctx.actions.declare_file("{}/lib{}_{}.rlib".format(ctx.label.name, crate, crate))
@@ -120,7 +126,10 @@ def _rust_build_std_impl(ctx):
     output_dir = outputs[0].dirname
     ctx.actions.run(
         mnemonic = "RustBuildStd",
-        progress_message = "Building the Rust standard library with {} instrumentation".format(ctx.attr.sanitizer),
+        progress_message = "Building the Rust standard library for {}{}".format(
+            ctx.attr.target_triple,
+            " with {} instrumentation".format(ctx.attr.sanitizer) if ctx.attr.sanitizer else "",
+        ),
         executable = ctx.executable._build_std,
         arguments = [
             ctx.executable.rustc.dirname.removesuffix("/bin"),
@@ -129,6 +138,7 @@ def _rust_build_std_impl(ctx):
             output_dir,
             output_dir + "-work",
             ctx.attr.target_triple,
+            host_triple,
             ctx.attr.sanitizer,
             " ".join(ctx.attr.rustflags),
             linker.path,
@@ -155,9 +165,14 @@ rust_build_std = rule(
         "rust_src": attr.label(mandatory = True, allow_files = True),
         "rust_src_manifest": attr.label(mandatory = True, allow_single_file = True),
         "rust_toolchain_files": attr.label_list(mandatory = True, allow_files = True),
+        "host_triple": attr.string(doc = "The execution platform's triple, if not the target's."),
         "rustflags": attr.string_list(),
-        "sanitizer": attr.string(mandatory = True),
+        "sanitizer": attr.string(doc = "The rustc -Zsanitizer value, if any."),
         "target_triple": attr.string(mandatory = True),
+        "_exec_cc_toolchain": attr.label(
+            default = Label("@rules_cc//cc:current_cc_toolchain"),
+            cfg = "exec",
+        ),
         "_build_std": attr.label(
             default = Label("//build/rust:build_std.sh"),
             executable = True,
@@ -169,33 +184,45 @@ rust_build_std = rule(
     toolchains = use_cc_toolchain(),
 )
 
-def instrumented_rust_std(
+def rust_std_from_source(
         name,
-        sanitizer,
         target_triple,
         rust_tools,
         rust_src,
+        rust_src_manifest,
+        rust_toolchain_files,
+        host_triple = "",
+        sanitizer = "",
         rustflags = [],
         tags = None,
         target_compatible_with = None,
         visibility = None):
-    """Defines a rules_rust standard library instrumented by `sanitizer`.
+    """Defines a rules_rust standard library built from `rust_src` for `target_triple`.
 
-    `rustflags` are extra rustc flags every standard-library crate is compiled with.
+    Args:
+        name: the standard library's name.
+        target_triple: the triple the standard library is for.
+        rust_tools: the repository of the toolchain that builds it, with rustc and Cargo.
+        rust_src: the standard library's sources.
+        rust_src_manifest: library/Cargo.toml of the sources.
+        rust_toolchain_files: what rustc needs besides itself: its libraries, and the prebuilt
+            standard library of the execution platform, and any linker, that the build scripts
+            link with.
+        host_triple: the triple of the execution platform, if not `target_triple`.
+        sanitizer: the rustc -Zsanitizer value to instrument the library with, if any.
+        rustflags: extra rustc flags every standard-library crate is compiled with.
+        tags: as for any target.
+        target_compatible_with: as for any target.
+        visibility: as for any target.
     """
     rust_build_std(
         name = name + "_build",
         cargo = rust_tools + "//:cargo",
         rustc = rust_tools + "//:rustc",
-        rust_src = rust_src + "//:rust_src",
-        rust_src_manifest = rust_src + "//:library/Cargo.toml",
-        # rustc's libraries, and the prebuilt standard library and self-contained linker that the
-        # build scripts link with.
-        rust_toolchain_files = [
-            rust_tools + "//:rustc_lib",
-            rust_tools + "//:rust-lld",
-            rust_tools + "//:rust_std-" + target_triple,
-        ],
+        rust_src = rust_src,
+        rust_src_manifest = rust_src_manifest,
+        rust_toolchain_files = rust_toolchain_files,
+        host_triple = host_triple,
         rustflags = rustflags,
         sanitizer = sanitizer,
         target_triple = target_triple,
