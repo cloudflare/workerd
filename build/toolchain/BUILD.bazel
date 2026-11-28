@@ -64,6 +64,9 @@ libcxx_runtime(
         "@platforms//cpu:aarch64": "@sysroot_linux_aarch64//sysroot",
         "@platforms//cpu:x86_64": "@sysroot_linux_x86_64//sysroot",
     }),
+    # Built only through the toolchain, so that //... on hosts without an x86_64 Linux execution
+    # platform, such as arm64 Linux, skips it.
+    tags = ["manual"],
     target = select({
         "@platforms//cpu:aarch64": "aarch64-unknown-linux-gnu",
         "@platforms//cpu:x86_64": "x86_64-unknown-linux-gnu",
