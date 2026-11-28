@@ -884,7 +884,7 @@ fn test_kj_exception_with_empty_detail() {
     let details = err.details().expect("Expected details to be present");
     assert_eq!(1, details.len());
     assert_eq!(7, details[0].0);
-    assert!(details[0].1.is_empty());
+    assert_eq!(details[0].1, [] as [u8; 0]);
 }
 
 #[test]

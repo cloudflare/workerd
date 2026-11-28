@@ -321,7 +321,10 @@ fn empty_address_lists_are_errors() {
             .description()
             .contains("no addresses to bind")
     );
-    assert!(addr.targets().unwrap().is_empty());
+    assert_eq!(
+        addr.targets().unwrap(),
+        [] as [crate::ffi::SocketAddress; 0]
+    );
 }
 
 #[test]
@@ -423,7 +426,7 @@ fn accept_off_the_loop_thread_is_refused() {
         .unwrap();
     let accept = listener_accept(&listener);
     let err = std::thread::spawn(move || {
-        let mut accept = Box::pin(accept);
+        let mut accept = std::pin::pin!(accept);
         let mut cx = Context::from_waker(Waker::noop());
         match accept.as_mut().poll(&mut cx) {
             Poll::Ready(Err(e)) => KjError::from(e),
@@ -446,7 +449,7 @@ fn accept_on_a_different_port_is_refused() {
     let accept = listener_accept(&listener);
     let err = std::thread::spawn(move || {
         let _other_port = kj_rs_tokio::TokioPort::new();
-        let mut accept = Box::pin(accept);
+        let mut accept = std::pin::pin!(accept);
         let mut cx = Context::from_waker(Waker::noop());
         match accept.as_mut().poll(&mut cx) {
             Poll::Ready(Err(e)) => KjError::from(e),

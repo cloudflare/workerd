@@ -175,8 +175,8 @@ fn empty_histogram() {
     let result = histogram_of([])
         .qrde(&[0.0, 1.0], Dequantization::Hdr)
         .unwrap();
-    assert!(result.quantiles.is_empty());
-    assert!(result.densities.is_empty());
+    assert_eq!(result.quantiles, [] as [f64; 0]);
+    assert_eq!(result.densities, [] as [f64; 0]);
     assert_eq!(result.bucket_count, 0);
 }
 

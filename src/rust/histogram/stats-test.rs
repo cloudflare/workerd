@@ -2,11 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#![expect(
-    clippy::float_cmp,
-    reason = "exact cases, such as zero skewness, are compared exactly; others use assert_close()"
-)]
-
 use super::*;
 use crate::Options;
 

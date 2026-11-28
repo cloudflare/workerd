@@ -82,7 +82,7 @@ fn rules_matcher_supports_splats_and_placeholders() {
     assert_eq!(rendered("example.com", "/foo/test/"), ["1/", "2/test/"]);
     assert_eq!(rendered("example.com", "/foo/test"), ["2/test"]);
     assert_eq!(rendered("example.com", "/foo/"), ["2/"]);
-    assert!(rendered("example.com", "/foo").is_empty());
+    assert_eq!(rendered("example.com", "/foo"), [] as [String; 0]);
     assert_eq!(
         rendered("example.com", "/blog/123/tricycle"),
         ["3/tricycle/123", "4/123/tricycle"]

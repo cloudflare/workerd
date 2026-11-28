@@ -11,7 +11,7 @@ fn js() {
     let out = tr("let x = 42;");
     assert!(out.success);
     assert_eq!("let x = 42;", out.code);
-    assert!(out.diagnostics.is_empty());
+    assert_eq!(out.diagnostics, [] as [ffi::Message; 0]);
 }
 
 #[test]
@@ -19,7 +19,7 @@ fn ts() {
     let out = tr("let x: Number = 42;");
     assert!(out.success);
     assert_eq!("let x         = 42;", out.code);
-    assert!(out.diagnostics.is_empty());
+    assert_eq!(out.diagnostics, [] as [ffi::Message; 0]);
 }
 
 #[test]

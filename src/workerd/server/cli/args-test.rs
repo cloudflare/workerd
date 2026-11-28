@@ -326,7 +326,7 @@ fn deploy_invocation() {
     assert_eq!(project, ".");
     assert_eq!(const_name, None);
     assert_eq!(deploy.name, None);
-    assert!(deploy.bucket_options().unwrap().is_empty());
+    assert_eq!(deploy.bucket_options().unwrap(), [] as [String; 0]);
 }
 
 #[test]

@@ -325,8 +325,10 @@ fn encode_globals(globals: &[GlobalMessage]) -> capnp::Result<Vec<u64>> {
         .init_globals(len_u32(globals));
     set_globals(list, globals)?;
     Ok(capnp::serialize::write_message_to_words(&message)
-        .chunks_exact(8)
-        .map(|chunk| u64::from_ne_bytes(chunk.try_into().unwrap_or_default()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| u64::from_ne_bytes(*chunk))
         .collect())
 }
 

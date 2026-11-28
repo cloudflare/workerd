@@ -427,7 +427,7 @@ fn constructed_rules_and_warnings() {
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].1.set, [("y".to_owned(), "2".to_owned())]);
     assert_eq!(rules[0].1.unset, ["z"]);
-    assert!(warnings.is_empty());
+    assert_eq!(warnings, [] as [String; 0]);
 }
 
 #[test]

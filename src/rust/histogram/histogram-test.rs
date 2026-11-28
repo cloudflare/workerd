@@ -2,11 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#![expect(
-    clippy::float_cmp,
-    reason = "the expected values are exactly what these operations compute"
-)]
-
 use super::*;
 
 fn histogram_of(values: &[i64]) -> Histogram {

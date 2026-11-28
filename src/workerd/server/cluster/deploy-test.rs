@@ -285,7 +285,7 @@ fn deployments_compose_and_conflicts_are_refused() {
         );
         assert_eq!(catalog_of(&bucket).await, before);
         // Refused before it was uploaded.
-        assert!(bucket.list("deploy/c/").await.unwrap().is_empty());
+        assert_eq!(bucket.list("deploy/c/").await.unwrap(), [] as [Entry; 0]);
 
         let names: Vec<_> = load(&bucket)
             .await
@@ -309,7 +309,7 @@ fn a_deployment_with_more_than_services_is_not_uploaded() {
         root.init_autogates(1).set(0, "gate");
         let config = capnp::serialize::write_message_to_words(&message);
         assert!(refusal(publish(&bucket, "app", &config).await).contains("sets `autogates`"));
-        assert!(bucket.list("").await.unwrap().is_empty());
+        assert_eq!(bucket.list("").await.unwrap(), [] as [Entry; 0]);
     });
 }
 
@@ -446,7 +446,7 @@ fn an_ambiguous_write_of_a_versions_object_is_resolved_by_reading_it() {
             let result = upload(&bucket, "app", &config).await;
             if fault == Fault::Fails {
                 assert!(matches!(result, Err(Error::Http(_))));
-                assert!(bucket.list("").await.unwrap().is_empty());
+                assert_eq!(bucket.list("").await.unwrap(), [] as [Entry; 0]);
             } else {
                 assert_eq!(result.unwrap(), version);
                 assert!(read(&bucket, "app", &version).await.is_ok());
@@ -463,7 +463,7 @@ fn a_bucket_that_ignores_conditional_writes_is_not_published_to() {
         let bucket = Bucket::new(lax, "");
         let result = publish(&bucket, "app", &services(&["app"])).await;
         assert!(matches!(result, Err(Error::Config(_))), "{result:?}");
-        assert!(bucket.list("").await.unwrap().is_empty());
+        assert_eq!(bucket.list("").await.unwrap(), [] as [Entry; 0]);
     });
 }
 
@@ -570,7 +570,10 @@ fn a_node_skips_a_deployment_it_cannot_read() {
             )
         );
         bucket.put(&key, config, &[]).await.unwrap();
-        assert!(load(&bucket).await.unwrap().unwrap().unreadable.is_empty());
+        assert_eq!(
+            load(&bucket).await.unwrap().unwrap().unreadable,
+            [] as [crate::deploy::Unreadable; 0]
+        );
 
         // The node skips a deployment whose manifest requires a feature or is missing.
         let key = format!("{prefix}/manifest.json");

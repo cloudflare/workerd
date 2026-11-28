@@ -1,11 +1,14 @@
-# The Linux C/C++ toolchain: LLVM's release build of clang, lld and libc++, over Chromium's Debian
-# bullseye sysroot (glibc 2.31), so Linux builds take no compiler, linker, headers or libraries from
-# the host. macOS builds keep Xcode's toolchain (apple_support).
+# The Linux C/C++ toolchain: Chromium's build of clang and lld, with libc++ built from source, over
+# Chromium's Debian bullseye sysroot (glibc 2.31), so Linux builds take no compiler, linker, headers
+# or libraries from the host. macOS builds keep Xcode's toolchain (apple_support).
 bazel_dep(name = "toolchains_llvm", version = "1.12.0")
 single_version_override(
     module_name = "toolchains_llvm",
     patch_strip = 1,
-    patches = ["//:patches/toolchains_llvm/per-action-files.patch"],
+    patches = [
+        "//:patches/toolchains_llvm/per-action-files.patch",
+        "//:patches/toolchains_llvm/libcxx-archive.patch",
+    ],
 )
 
 # Chromium's sysroots, pared down to the C library, kernel headers and GCC runtime support.
@@ -63,20 +66,59 @@ sysroot(
     urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/278c36fe3a785d7f89fbe3f46956899a3bd49fe665f68dc667d6f626a951fcd6"],
 )
 
-# One toolchain per Linux CPU. exec_os and exec_arch make each download the Linux distribution
-# whatever the host is, so a macOS client can build on Linux remote executors (--config=bazelflare).
+# The clang that V8 is built and tested with: Chromium's, at the revision of V8's DEPS
+# (tools/clang/scripts/update.py in Chromium names a revision's packages). Chromium publishes it for
+# Linux x86_64 hosts, in a package of about 60 MB, against about 1.8 GB for LLVM's release; its
+# coverage tools come in a second package. build/toolchain/chromium_clang.bzl unpacks both and adds
+# libc++'s headers, from the libc++ sources that //build/toolchain:libcxx compiles for each target.
+CHROMIUM_CLANG_PACKAGES = "https://commondatastorage.googleapis.com/chromium-browser-clang/Linux_x64/"
+
+CHROMIUM_CLANG_REVISION = "llvmorg-24-init-17044-gc3223914-1"
+
+chromium_clang = use_repo_rule("//build/toolchain:chromium_clang.bzl", "chromium_clang")
+
+chromium_clang(
+    name = "chromium_clang",
+    clang = {
+        "sha256": "4312432fd57f94766b62264161ec4afabeaca066fc812cf038efa88c154ef4da",
+        "url": CHROMIUM_CLANG_PACKAGES + "clang-" + CHROMIUM_CLANG_REVISION + ".tar.xz",
+    },
+    coverage = {
+        "sha256": "a11f7b0a33accd98f3555e0591226745cc10e341141ed99eca0928accf0621a3",
+        "url": CHROMIUM_CLANG_PACKAGES + "llvm-code-coverage-" + CHROMIUM_CLANG_REVISION + ".tar.xz",
+    },
+    libcxx_sources = "@llvm_runtimes//:BUILD.bazel",
+)
+
+# The x86_64 toolchain builds for both Linux CPUs: it links //build/toolchain:libcxx, built for the
+# target, and takes only libc++'s headers from the toolchain root. exec_os and exec_arch make it
+# Linux's whatever the host is, so a macOS client can build on Linux remote executors
+# (--config=bazelflare).
 llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
 llvm.toolchain(
     name = "llvm_linux_x86_64",
     exec_arch = "x86_64",
     exec_os = "linux",
-    llvm_version = "22.1.8",
+    libcxx_archive = "//build/toolchain:libcxx",
+    llvm_version = "24.0.0",
+)
+llvm.toolchain_root(
+    name = "llvm_linux_x86_64",
+    label = "@chromium_clang//:BUILD.bazel",
 )
 llvm.sysroot(
     name = "llvm_linux_x86_64",
     label = "@sysroot_linux_x86_64//sysroot",
     targets = ["linux-x86_64"],
 )
+llvm.sysroot(
+    name = "llvm_linux_x86_64",
+    label = "@sysroot_linux_aarch64//sysroot",
+    targets = ["linux-aarch64"],
+)
+
+# Chromium's clang has no arm64 Linux build, so arm64 Linux hosts, which CI's arm64 jobs build on,
+# keep LLVM's release.
 llvm.toolchain(
     name = "llvm_linux_aarch64",
     exec_arch = "aarch64",
@@ -88,10 +130,7 @@ llvm.sysroot(
     label = "@sysroot_linux_aarch64//sysroot",
     targets = ["linux-aarch64"],
 )
-
-# llvm_linux_x86_64_llvm is the x64 distribution itself, whose llvm-profdata merges PGO training
-# profiles (build/pgo).
-use_repo(llvm, "llvm_linux_aarch64", "llvm_linux_x86_64", "llvm_linux_x86_64_llvm")
+use_repo(llvm, "llvm_linux_aarch64", "llvm_linux_x86_64")
 
 # The PGO profile that the Linux release builds are optimized with (build/pgo/README.md).
 pgo_profile = use_extension("//build/pgo:profile.bzl", "pgo_profile")

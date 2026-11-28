@@ -338,7 +338,10 @@ fn resource_node_reports_its_fields() {
         // Plain data is one node of the allocation's size.
         let numbers = snapshot.target(node, "numbers");
         assert_eq!(snapshot.name(numbers), "workerd / Vec");
-        assert!(snapshot.nodes[numbers].edges.is_empty());
+        assert_eq!(
+            snapshot.nodes[numbers].edges,
+            [] as [(std::string::String, usize); 0]
+        );
         assert_eq!(
             snapshot.size(numbers),
             parent.get(lock).numbers.capacity() * size_of::<u32>()
@@ -363,8 +366,8 @@ fn resource_node_reports_its_fields() {
         assert_eq!(snapshot.nodes[object].kind, "object");
 
         // A field that holds nothing and a field that is not reported have no edge.
-        assert!(snapshot.targets(node, "missing").is_empty());
-        assert!(snapshot.targets(node, "unreported").is_empty());
+        assert_eq!(snapshot.targets(node, "missing"), [] as [usize; 0]);
+        assert_eq!(snapshot.targets(node, "unreported"), [] as [usize; 0]);
 
         // The node is linked to its wrapper, as for a C++ resource. V8 shows the wrapper as one
         // node with the cppgc object it holds.
@@ -860,7 +863,10 @@ fn other_collections() {
     with_fields(|snapshot, node, fields| {
         // Options of plain data are plain data.
         let optional = snapshot.target(node, "optional_numbers");
-        assert!(snapshot.nodes[optional].edges.is_empty());
+        assert_eq!(
+            snapshot.nodes[optional].edges,
+            [] as [(std::string::String, usize); 0]
+        );
         assert_eq!(
             snapshot.size(optional),
             fields.optional_numbers.capacity() * size_of::<Option<u32>>()
@@ -883,7 +889,10 @@ fn other_collections() {
 
         // A dict of plain data is one node, keys included.
         let plain_dict = snapshot.target(node, "plain_dict");
-        assert!(snapshot.nodes[plain_dict].edges.is_empty());
+        assert_eq!(
+            snapshot.nodes[plain_dict].edges,
+            [] as [(std::string::String, usize); 0]
+        );
         assert!(snapshot.size(plain_dict) >= 2 * size_of::<(String, u32)>() + "abb".len());
 
         let dict = snapshot.target(node, "dict");
@@ -897,7 +906,7 @@ fn other_collections() {
 #[test]
 fn handles_and_buffers() {
     with_fields(|snapshot, node, _| {
-        assert!(snapshot.targets(node, "weak").is_empty());
+        assert_eq!(snapshot.targets(node, "weak"), [] as [usize; 0]);
 
         let lenient = snapshot.target(node, "lenient");
         assert_eq!(snapshot.name(lenient), "workerd / Child");
@@ -910,8 +919,8 @@ fn handles_and_buffers() {
         assert_eq!(snapshot.size(store), 4);
 
         // The cell was mutably borrowed and the mutex locked while the snapshot was taken.
-        assert!(snapshot.targets(node, "borrowed").is_empty());
-        assert!(snapshot.targets(node, "locked").is_empty());
+        assert_eq!(snapshot.targets(node, "borrowed"), [] as [usize; 0]);
+        assert_eq!(snapshot.targets(node, "locked"), [] as [usize; 0]);
     });
 }
 
@@ -959,8 +968,8 @@ fn handle_and_resource_of_another_isolate_are_not_reported() {
         holder = Some(held);
         let snapshot = Snapshot::take(lock);
         let node = snapshot.find("Holder");
-        assert!(snapshot.targets(node, "handle").is_empty());
-        assert!(snapshot.targets(node, "resource").is_empty());
+        assert_eq!(snapshot.targets(node, "handle"), [] as [usize; 0]);
+        assert_eq!(snapshot.targets(node, "resource"), [] as [usize; 0]);
         Ok(())
     });
 
@@ -1031,7 +1040,7 @@ fn promises_and_frames_are_edges_into_the_v8_heap() {
         }
         snapshot.target(node, "frame");
         // The root frame has no wrapper.
-        assert!(snapshot.targets(node, "root_frame").is_empty());
+        assert_eq!(snapshot.targets(node, "root_frame"), [] as [usize; 0]);
 
         let arguments = snapshot.target(node, "arguments");
         assert_eq!(snapshot.name(arguments), "workerd / Vec");
@@ -1080,7 +1089,10 @@ fn shared_pointers_count_their_allocations() {
         let number = snapshot.target(node, "number");
         assert_eq!(snapshot.name(number), "workerd / Arc");
         assert_eq!(snapshot.size(number), size_of::<u64>());
-        assert!(snapshot.nodes[number].edges.is_empty());
+        assert_eq!(
+            snapshot.nodes[number].edges,
+            [] as [(std::string::String, usize); 0]
+        );
 
         // Anything else is a node of the bytes it leaves uncounted, which it reports to.
         let string = snapshot.target(node, "string");
@@ -1089,7 +1101,7 @@ fn shared_pointers_count_their_allocations() {
         assert_eq!(snapshot.target_names(string), ["workerd / String"]);
 
         // A std cell reports nothing, as plain data does.
-        assert!(snapshot.targets(node, "copied").is_empty());
+        assert_eq!(snapshot.targets(node, "copied"), [] as [usize; 0]);
         Ok(())
     });
 }
@@ -1415,7 +1427,7 @@ fn custom_memory_info_reports_what_its_impl_reports() {
         let node = snapshot.find("Custom");
         let entries = snapshot.target(node, "cached_entries");
         assert_eq!(snapshot.target_names(entries), ["workerd / String"]);
-        assert!(snapshot.targets(node, "entries").is_empty());
+        assert_eq!(snapshot.targets(node, "entries"), [] as [usize; 0]);
         Ok(())
     });
 }

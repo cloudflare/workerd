@@ -52,7 +52,9 @@ build/pgo/upload.sh /tmp/pgo-profile/workerd.profdata.zst
 1. Builds `--config=pgo-instrument`, the release build with `-fprofile-generate` for C++ and
    `-Cprofile-generate` for Rust. The Rust code's counters go to the profile runtime that clang
    links, which stable rustc only allows with `RUSTC_BOOTSTRAP=1` (for `-Zno-profiler-runtime`),
-   set for rustc actions alone through rules_rust's `extra_rustc_env`.
+   set for rustc actions alone through rules_rust's `extra_rustc_env`. That runtime must read the
+   counters that rustc writes, whose format changes with LLVM's version; on Linux x86_64 hosts
+   rustc comes from the LLVM revision of clang (`build/rust/chromium_toolchain.bzl`).
 2. Runs every test that runs the workerd binary, in every variant but `@gc-stress`, under
    `build/pgo/profile-env.sh`. The wrapper sets `KJ_CLEAN_SHUTDOWN=1`, without which workerd exits
    through `_exit()`, skipping the profile runtime's exit handler that writes the profile, and it

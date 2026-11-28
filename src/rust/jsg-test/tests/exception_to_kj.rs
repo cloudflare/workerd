@@ -201,7 +201,7 @@ fn details() {
         let function = assert_same(lock, ctx, "() => {}");
         assert_eq!(ids(&function).len(), 1);
         let symbol = assert_same(lock, ctx, "Symbol('s')");
-        assert!(ids(&symbol).is_empty());
+        assert_eq!(ids(&symbol), [] as [u64; 0]);
         Ok(())
     });
 }

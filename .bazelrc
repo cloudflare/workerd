@@ -273,7 +273,8 @@ build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 # Cross-language LTO, thin-lto extended to Rust: Rust crates emit LLVM bitcode instead of machine
 # code, so lld's ThinLTO optimizes Rust and C++ together. Linux only, as it needs lld to link and
 # to read rustc's bitcode: rustc's LLVM (`rustc -vV`) must share lld's major version and not be
-# newer. macOS and Windows link with the host's linker, which does not track rustc's LLVM.
+# newer. On Linux x86_64 hosts both come from one LLVM revision (build/rust/chromium_toolchain.bzl).
+# macOS and Windows link with the host's linker, which does not track rustc's LLVM.
 build:cross-lto --config=thin-lto
 build:cross-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
@@ -439,9 +440,10 @@ build:macos-cross-x86_64 --cpu=darwin_x86_64 --host_cpu=darwin_arm64 --platforms
 # Test performance is still very much satisfactory considering that emulation is being used here.
 build:macos-cross-x86_64 --test_timeout=1,30,60,60
 
-# On Linux, the toolchain is LLVM's own, over a pinned sysroot (build/deps/llvm.MODULE.bazel), and
-# nothing is taken from the host. It links libc++, libc++abi and libunwind statically, so binaries
-# depend only on glibc; macOS links with dynamic libc++, which has good backwards compatibility.
+# On Linux, the toolchain is Chromium's clang, over a pinned sysroot (build/deps/llvm.MODULE.bazel),
+# and nothing is taken from the host. It links libc++, libc++abi and libunwind, built from source,
+# statically, so binaries depend only on glibc; macOS links with dynamic libc++, which has good
+# backwards compatibility.
 build:linux --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 # rules_python's default launcher runs on the host's python3; this one runs on the hermetic
 # interpreter.
@@ -584,9 +586,10 @@ build:pgo-use --@rules_rust//:extra_rustc_flag=-Cllvm-args=-no-pgo-warn-mismatch
 
 # Compile the Rust code to bitcode only (-Clinker-plugin-lto), so the ThinLTO link optimizes the
 # Rust and C++ code together, inlining across the cxx bridge. rustc and lld must share an LLVM
-# major version (build/deps/rust.MODULE.bazel). rules_rust's lto setting isn't used: it also passes
-# -Clto to binaries, which then don't emit the object file that rules_rust's cc_common link
-# expects.
+# major version: one revision on Linux x86_64 hosts (build/rust/chromium_toolchain.bzl), and on
+# others the versions in build/deps/rust.MODULE.bazel. rules_rust's lto setting isn't used: it
+# also passes -Clto to binaries, which then don't emit the object file that rules_rust's cc_common
+# link expects.
 build:rust-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
 build:release_macos --config=release_unix

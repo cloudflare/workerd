@@ -1,0 +1,134 @@
+# Chromium's clang (//build/toolchain:chromium_clang.bzl), as a toolchain root for toolchains_llvm.
+# The filegroups are those that toolchains_llvm takes from a root, with the files the packages have.
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(glob([
+    "bin/*",
+    "include/**",
+    "lib/**",
+]))
+
+filegroup(
+    name = "clang",
+    srcs = [
+        "bin/clang",
+        "bin/clang++",
+        "bin/clang-cpp",
+    ],
+)
+
+filegroup(
+    name = "ld",
+    srcs = [
+        "bin/ld.lld",
+        "bin/ld64.lld",
+        "bin/lld",
+        "bin/wasm-ld",
+    ],
+)
+
+filegroup(
+    name = "ar",
+    srcs = ["bin/llvm-ar"],
+)
+
+# There is no llvm-as: clang assembles.
+filegroup(
+    name = "as",
+    srcs = ["bin/clang"],
+)
+
+filegroup(
+    name = "dwp",
+    srcs = ["bin/llvm-dwp"],
+)
+
+filegroup(
+    name = "nm",
+    srcs = ["bin/llvm-nm"],
+)
+
+filegroup(
+    name = "objcopy",
+    srcs = ["bin/llvm-objcopy"],
+)
+
+filegroup(
+    name = "strip",
+    srcs = [
+        "bin/llvm-objcopy",
+        "bin/llvm-strip",
+    ],
+)
+
+filegroup(
+    name = "symbolizer",
+    srcs = ["bin/llvm-symbolizer"],
+)
+
+filegroup(
+    name = "cov",
+    srcs = ["bin/llvm-cov"],
+)
+
+filegroup(
+    name = "profdata",
+    srcs = ["bin/llvm-profdata"],
+)
+
+filegroup(
+    name = "bin",
+    srcs = glob(["bin/**"]),
+)
+
+# The packages have no shared libraries.
+filegroup(
+    name = "runtime_shared_libraries",
+    srcs = [],
+)
+
+filegroup(
+    name = "include",
+    srcs = glob([
+        "include/**",
+        "lib/clang/*/include/**",
+        "lib/clang/*/share/**",
+    ]),
+)
+
+# As directories, which Bazel tracks as a whole.
+filegroup(
+    name = "cxx_builtin_include",
+    srcs = [
+        "include/c++",
+        "lib/clang/{LLVM_VERSION}/include",
+        "lib/clang/{LLVM_VERSION}/share",
+    ],
+)
+
+filegroup(
+    name = "extra_config_site",
+    srcs = glob(["include/*/c++/v1/__*"]),
+)
+
+filegroup(
+    name = "lib",
+    srcs = ["lib/clang/{LLVM_VERSION}/lib"],
+)
+
+filegroup(
+    name = "lib_legacy",
+    srcs = glob(["lib/clang/{LLVM_VERSION}/lib/**"]),
+)
+
+# What //build/toolchain:libcxx compiles with: clang, its resource directory's headers and libc++'s
+# headers.
+filegroup(
+    name = "libcxx_compiler_files",
+    srcs = [
+        "bin/clang",
+        ":cxx_builtin_include",
+        ":extra_config_site",
+    ],
+)

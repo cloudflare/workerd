@@ -77,7 +77,10 @@ fn peers_are_the_live_registrations() {
         // a's lease ran out at 10s; b's holds until 15s.
         assert_eq!(names(a.peers(12_000).await.unwrap()), ["b"]);
         b.deregister().await.unwrap();
-        assert!(a.peers(12_000).await.unwrap().is_empty());
+        assert_eq!(
+            a.peers(12_000).await.unwrap(),
+            [] as [crate::registry::NodeRecord; 0]
+        );
     });
 }
 
@@ -455,7 +458,10 @@ fn a_draining_node_sends_an_object_nobody_owns_to_a_peer() {
             assert!(routes.contains(&route), "no object went to {name}");
         }
         // Nothing was claimed here; the peer a request goes to claims it.
-        assert!(store.at("cluster").list("do/").await.unwrap().is_empty());
+        assert_eq!(
+            store.at("cluster").list("do/").await.unwrap(),
+            [] as [Entry; 0]
+        );
         let Claim::Route { node: peer, .. } = &routes[0] else {
             panic!("x0 should route to a peer")
         };

@@ -4,7 +4,7 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
-# Builds a sanitizer-instrumented Rust standard library for rules_rust.
+# Builds a Rust standard library from source for rules_rust, instrumented by a sanitizer or not.
 #
 # Arguments:
 #   RUST_TOOLCHAIN_ROOT  Toolchain containing rustc and Cargo.
@@ -13,15 +13,16 @@
 #   OUTPUT_DIR           Directory for stable-named rlibs declared to Bazel.
 #   WORK_DIR             Scratch directory for the generated Cargo package.
 #   TARGET_TRIPLE        Rust target triple.
-#   SANITIZER            rustc -Zsanitizer value.
+#   HOST_TRIPLE          Triple of the platform the build scripts run on (may equal TARGET_TRIPLE).
+#   SANITIZER            rustc -Zsanitizer value (may be empty).
 #   EXTRA_RUSTFLAGS      Space-separated additional rustc flags (may be empty).
 #   LINKER               Linker for the build scripts, run from the execution root.
 #   CRATE...             Standard-library crates declared as Bazel outputs.
 
 set -euo pipefail
 
-if [[ $# -lt 10 ]]; then
-  echo "usage: $0 RUST_TOOLCHAIN_ROOT RUST_LIBRARY TARGET_DIR OUTPUT_DIR WORK_DIR TARGET_TRIPLE SANITIZER EXTRA_RUSTFLAGS LINKER CRATE..." >&2
+if [[ $# -lt 11 ]]; then
+  echo "usage: $0 RUST_TOOLCHAIN_ROOT RUST_LIBRARY TARGET_DIR OUTPUT_DIR WORK_DIR TARGET_TRIPLE HOST_TRIPLE SANITIZER EXTRA_RUSTFLAGS LINKER CRATE..." >&2
   exit 2
 fi
 
@@ -36,10 +37,11 @@ target_dir=$(abs_path "$3")
 output_dir=$(abs_path "$4")
 work=$(abs_path "$5")
 target_triple=$6
-sanitizer=$7
-extra_rustflags=$8
-linker=$(abs_path "$9")
-shift 9
+host_triple=$7
+sanitizer=$8
+extra_rustflags=$9
+linker=$(abs_path "${10}")
+shift 10
 crates=("$@")
 
 rm -rf "$target_dir" "$output_dir" "$work"
@@ -68,6 +70,9 @@ EOF
 
 export PATH="$rust_root/bin:$PATH"
 export RUSTC="$rust_root/bin/rustc"
+# -Zbuild-std and -Zsanitizer are unstable. A nightly toolchain accepts them anyway, and a toolchain
+# that is built from a nightly commit but marked stable, as Chromium's is, accepts them with this.
+export RUSTC_BOOTSTRAP=1
 export CARGO_HOME="$work/cargo-home"
 # Cargo also reads config.toml from every ancestor of the working directory, and Bazel's
 # sandbox lives under the developer's home (~/Library/Caches/bazel on macOS, ~/.cache/bazel on
@@ -85,10 +90,13 @@ export __CARGO_TESTS_ONLY_SRC_ROOT="$rust_library"
 # Cargo applies target-specific flags to the generated package and every build-std dependency. The
 # action only builds rlibs; sanitizer runtime selection is deferred to the final Bazel link, where
 # Rust and C++ share Clang's runtime.
-target_env="CARGO_TARGET_$(printf '%s' "$target_triple" | tr '[:lower:]-' '[:upper:]_')"
-export "${target_env}_RUSTFLAGS=-Zsanitizer=$sanitizer${extra_rustflags:+ $extra_rustflags}"
-# The build scripts run here, so the target is also the host, and Cargo links them with this.
-export "${target_env}_LINKER=$linker"
+cargo_target_env() { printf 'CARGO_TARGET_%s' "$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')"; }
+target_env=$(cargo_target_env "$target_triple")
+rustflags=${sanitizer:+-Zsanitizer=$sanitizer}
+rustflags=${rustflags}${rustflags:+${extra_rustflags:+ }}${extra_rustflags}
+export "${target_env}_RUSTFLAGS=$rustflags"
+# The build scripts run here, on the host, and Cargo links them with this.
+export "$(cargo_target_env "$host_triple")_LINKER=$linker"
 BUILD_STD_EXECROOT=$(pwd -P)
 export BUILD_STD_EXECROOT
 
@@ -99,22 +107,36 @@ export BUILD_STD_EXECROOT
   -Zbuild-std=std,panic_unwind,test \
   -Zbuild-std-features=backtrace,panic-unwind
 
-deps="$target_dir/$target_triple/release/deps"
-copy_unique_rlib() {
-  local crate=$1
+# Older Cargo writes the artifacts to deps/, newer Cargo to build/<package>/<hash>/out/.
+release="$target_dir/$target_triple/release"
+copy_unique_artifact() {
+  local pattern=$1
   local destination=$2
   local sources=()
-  while IFS= read -r source; do
-    sources+=("$source")
-  done < <(find "$deps" -maxdepth 1 -name "lib$crate-*.rlib" -print)
+  if [[ -d "$release/build" ]]; then
+    while IFS= read -r source; do
+      sources+=("$source")
+    done < <(find "$release/build" -mindepth 4 -maxdepth 4 -path "*/out/$pattern" -print)
+  fi
+  if [[ ${#sources[@]} -eq 0 && -d "$release/deps" ]]; then
+    while IFS= read -r source; do
+      sources+=("$source")
+    done < <(find "$release/deps" -maxdepth 1 -name "$pattern" -print)
+  fi
   if [[ ${#sources[@]} -ne 1 ]]; then
-    echo "Cargo produced ${#sources[@]} rlibs for $crate; expected exactly one" >&2
-    printf '  %s\n' "${sources[@]}" >&2
+    echo "Cargo produced ${#sources[@]} files matching $pattern; expected exactly one" >&2
+    if [[ ${#sources[@]} -gt 0 ]]; then
+      printf '  %s\n' "${sources[@]}" >&2
+    fi
     exit 1
   fi
   cp "${sources[0]}" "$destination"
 }
 
+# Newer Cargo builds the standard library with -Zembed-metadata=no, which leaves only a stub of the
+# crate's metadata in its rlib; rustc reads the rest from the .rmeta of the same name.
 for crate in "${crates[@]}"; do
-  copy_unique_rlib "$crate" "$output_dir/lib${crate}_${crate}.rlib"
+  for extension in rlib rmeta; do
+    copy_unique_artifact "lib$crate-*.$extension" "$output_dir/lib${crate}_${crate}.$extension"
+  done
 done

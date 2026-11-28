@@ -128,11 +128,11 @@ mod ffi {
         /// `kj::NEVER_DONE` as a bridged promise.
         #[cxx_name = "kjNeverPromise"]
         async fn kj_never_promise();
-        /// Re-enters `promise.wait()` on the test's WaitScope from wherever it is called. Throws
+        /// Re-enters `promise.wait()` on the test's `WaitScope` from wherever it is called. Throws
         /// (-> `Err`) when called from inside a spawned task.
         #[cxx_name = "nestedWait"]
         fn nested_wait() -> Result<()>;
-        /// Fulfills the kj::PromiseFulfiller the C++ test installed with `setTestFulfiller`.
+        /// Fulfills the `kj::PromiseFulfiller` the C++ test installed with `setTestFulfiller`.
         #[cxx_name = "fulfillTestFulfiller"]
         fn fulfill_test_fulfiller(value: i32) -> Result<()>;
         /// `context.getTimer().afterDelay(ms).wait(context.getWaitScope())`.

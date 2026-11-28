@@ -123,7 +123,10 @@ fn arming_waits_only_for_new_or_earlier_alarms() {
         // Cleared.
         index.arm("ns", "a", None, None).await.unwrap();
         index.tidy().await;
-        assert!(alarms.list("n1").await.unwrap().is_empty());
+        assert_eq!(
+            alarms.list("n1").await.unwrap(),
+            [] as [crate::alarms::Entry; 0]
+        );
         assert!(index.armed.borrow().is_empty());
     });
 }
@@ -184,7 +187,10 @@ fn survivors_split_a_dead_nodes_alarms() {
         let (mut by_a, mut by_b) = (Vec::new(), Vec::new());
         a.adopt(&live, &dead_nodes, |x| by_a.push(x)).await;
         b.adopt(&live, &dead_nodes, |x| by_b.push(x)).await;
-        assert!(alarms.list("d").await.unwrap().is_empty());
+        assert_eq!(
+            alarms.list("d").await.unwrap(),
+            [] as [crate::alarms::Entry; 0]
+        );
         let (in_a, in_b) = (
             alarms.list("a").await.unwrap(),
             alarms.list("b").await.unwrap(),
@@ -269,7 +275,10 @@ fn a_failed_adoption_still_schedules_and_retries() {
         fail.set(false);
         // Again, which only schedules what is scheduled already.
         assert_eq!(adopt(&a, &live, &dead_nodes).await, 8);
-        assert!(Alarms::new(bucket).list("d").await.unwrap().is_empty());
+        assert_eq!(
+            Alarms::new(bucket).list("d").await.unwrap(),
+            [] as [crate::alarms::Entry; 0]
+        );
     });
 }
 

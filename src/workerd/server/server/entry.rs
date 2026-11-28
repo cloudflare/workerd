@@ -114,8 +114,10 @@ pub fn without_config(
     let mut message = capnp::message::Builder::new_default();
     message.init_root::<workerd_capnp::config::Builder>();
     let config = capnp::serialize::write_message_to_words(&message)
-        .chunks_exact(8)
-        .map(|chunk| u64::from_ne_bytes(chunk.try_into().unwrap_or_default()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| u64::from_ne_bytes(*chunk))
         .collect();
     let command = Box::new(PendingCommand(Box::new(move |_, _| command())));
     Ok(ffi::with_process_context(verbose, config, command)?)

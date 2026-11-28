@@ -41,7 +41,7 @@ impl Symbol {
         for segment in it {
             segment.write(&mut symbol);
         }
-        assert!(!symbol.0.is_empty());
+        assert_ne!(symbol.0, "");
         symbol
     }
 }
@@ -111,6 +111,6 @@ pub fn join(segments: &[&dyn Segment]) -> Symbol {
     for segment in segments {
         segment.write(&mut symbol);
     }
-    assert!(!symbol.0.is_empty());
+    assert_ne!(symbol.0, "");
     symbol
 }

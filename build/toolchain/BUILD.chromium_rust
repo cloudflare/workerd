@@ -1,0 +1,64 @@
+# Chromium's Rust toolchain (//build/toolchain:chromium_rust.bzl), with the targets that //build/rust
+# makes rules_rust toolchains of. The names are those of rules_rust's own toolchain repositories.
+
+load("@rules_rust//rust:toolchain.bzl", "rust_stdlib_filegroup")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "rustc",
+    srcs = ["bin/rustc"],
+)
+
+# The libraries rustc, rustdoc and clippy-driver load.
+filegroup(
+    name = "rustc_lib",
+    srcs = glob(["lib/*.so*"]),
+)
+
+filegroup(
+    name = "rustdoc",
+    srcs = ["bin/rustdoc"],
+)
+
+filegroup(
+    name = "cargo",
+    srcs = ["bin/cargo"],
+)
+
+filegroup(
+    name = "cargo_clippy_bin",
+    srcs = ["bin/cargo-clippy"],
+)
+
+filegroup(
+    name = "clippy_driver_bin",
+    srcs = ["bin/clippy-driver"],
+)
+
+filegroup(
+    name = "rustfmt_bin",
+    srcs = ["bin/rustfmt"],
+)
+
+filegroup(
+    name = "rust-objcopy",
+    srcs = ["lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-objcopy"],
+)
+
+rust_stdlib_filegroup(
+    name = "rust_std-x86_64-unknown-linux-gnu",
+    srcs = glob([
+        "lib/rustlib/x86_64-unknown-linux-gnu/lib/*.rlib",
+        "lib/rustlib/x86_64-unknown-linux-gnu/lib/*.rmeta",
+        "lib/rustlib/x86_64-unknown-linux-gnu/lib/*.so",
+    ]),
+)
+
+# The standard library's sources, with the crates they depend on vendored.
+filegroup(
+    name = "rust_src",
+    srcs = glob(["lib/rustlib/src/rust/library/**"]),
+)
+
+exports_files(["lib/rustlib/src/rust/library/Cargo.toml"])

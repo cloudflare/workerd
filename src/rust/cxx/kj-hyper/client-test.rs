@@ -173,7 +173,7 @@ fn an_idle_connection_is_closed_after_the_idle_timeout() {
             .await
             .expect("the idle connection was never closed")
             .unwrap();
-        assert!(rest.is_empty());
+        assert_eq!(rest, [] as [u8; 0]);
         assert!(idle_since.elapsed() >= idle_timeout);
     });
 }

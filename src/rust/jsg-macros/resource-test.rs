@@ -767,8 +767,20 @@ fn nested_types_error(attr: proc_macro2::TokenStream) -> String {
 
 #[test]
 fn parse_nested_types_empty() {
-    assert!(nested_type_names(quote! {}).is_empty());
-    assert!(nested_type_names(quote! { nested_types() }).is_empty());
+    assert_eq!(
+        nested_type_names(quote! {}),
+        [] as [(
+            std::option::Option<std::string::String>,
+            std::string::String
+        ); 0]
+    );
+    assert_eq!(
+        nested_type_names(quote! { nested_types() }),
+        [] as [(
+            std::option::Option<std::string::String>,
+            std::string::String
+        ); 0]
+    );
 }
 
 #[test]

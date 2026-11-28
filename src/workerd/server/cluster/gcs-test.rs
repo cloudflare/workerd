@@ -247,7 +247,10 @@ fn a_replacement_refused_in_the_same_call_is_not_sent_again() {
             message.contains("the bucket refused two tokens"),
             "{message}"
         );
-        assert!(sent(&server).is_empty());
+        assert_eq!(
+            sent(&server),
+            [] as [(std::string::String, std::string::String); 0]
+        );
     });
 }
 

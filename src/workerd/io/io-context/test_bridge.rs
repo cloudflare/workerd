@@ -189,7 +189,7 @@ mod ffi {
         Fail,
         /// Calls the JavaScript function, terminates execution, then calls it again.
         Terminate,
-        /// Calls the JavaScript function, aborts the IoContext with a `RangeError`, which
+        /// Calls the JavaScript function, aborts the `IoContext` with a `RangeError`, which
         /// terminates execution, then calls the function again.
         Abort,
         /// Calls the JavaScript function, then panics.

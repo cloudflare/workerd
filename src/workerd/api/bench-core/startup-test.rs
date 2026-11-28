@@ -2,11 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#![expect(
-    clippy::float_cmp,
-    reason = "the expected values are exactly what the report holds"
-)]
-
 use std::cell::Cell;
 use std::future::ready;
 
@@ -23,8 +18,10 @@ fn params(case_filter: &str, samples: u32, quick: bool, min_time_ns: u64) -> Vec
     defaults.set_samples(samples);
     defaults.set_min_time_ns(min_time_ns);
     capnp::serialize::write_message_to_words(message.borrow_inner())
-        .chunks_exact(8)
-        .map(|chunk| u64::from_ne_bytes(chunk.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| u64::from_ne_bytes(*chunk))
         .collect()
 }
 

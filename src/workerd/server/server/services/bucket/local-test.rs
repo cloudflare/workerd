@@ -104,7 +104,10 @@ fn an_upload_id_begin_could_not_have_made_is_no_upload() {
                 "{id}: {refused:?}"
             );
         }
-        assert!(bucket.parts("k", &upload).await.unwrap().is_empty());
+        assert_eq!(
+            bucket.parts("k", &upload).await.unwrap(),
+            [] as [(u32, std::string::String, u64); 0]
+        );
     });
 }
 
@@ -186,6 +189,9 @@ fn an_abandoned_upload_is_swept_when_a_store_opens() {
         let count = |d: &str| std::fs::read_dir(dir.join(d)).unwrap().count();
         assert_eq!((count("uploads"), count("blobs")), (1, 0));
         assert!(bucket.parts("k", &old).await.is_err());
-        assert!(bucket.parts("k", &live).await.unwrap().is_empty());
+        assert_eq!(
+            bucket.parts("k", &live).await.unwrap(),
+            [] as [(u32, std::string::String, u64); 0]
+        );
     });
 }

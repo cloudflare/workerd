@@ -56,7 +56,10 @@ fn recorded_entries_load_in_the_next_session() {
 #[test]
 fn a_missing_file_holds_nothing() {
     let path = fresh_path();
-    assert!(HistoryFile::new(path.clone()).load(10).unwrap().is_empty());
+    assert_eq!(
+        HistoryFile::new(path.clone()).load(10).unwrap(),
+        [] as [String; 0]
+    );
     assert!(!path.exists());
 }
 

@@ -77,6 +77,7 @@ pub mod ffi {
     }
 
     /// Mirrors `v8::MaybeLocal<T>`: a single pointer-sized word where `ptr == 0` means empty.
+    ///
     /// This matches V8's internal layout exactly — `v8::MaybeLocal<T>` holds one `Local<T>`
     /// field which is itself one `internal::Address*` (one pointer word).
     ///
@@ -137,11 +138,12 @@ pub mod ffi {
         Uninitialized = 1,
     }
 
-    /// A JavaScript error class or a `DOMException` name. A `jsg::Error` holds a
-    /// `jsg::ErrorName`, which can also be a `DOMException` with a name that is not here, so a
-    /// variant is only worth adding for a name Rust code throws often. One must also be added to
-    /// `ExceptionType::as_str()` and, if it is a `DOMException` name, to
-    /// `ExceptionType::is_dom_exception()` and `DOM_EXCEPTION_TYPES` in
+    /// A JavaScript error class or a `DOMException` name.
+    ///
+    /// A `jsg::Error` holds a `jsg::ErrorName`, which can also be a `DOMException` with a name
+    /// that is not here, so a variant is only worth adding for a name Rust code throws often.
+    /// One must also be added to `ExceptionType::as_str()` and, if it is a `DOMException` name,
+    /// to `ExceptionType::is_dom_exception()` and `DOM_EXCEPTION_TYPES` in
     /// `jsg-test/tests/dom_exception.rs`: a cxx shared enum needs a `_` arm, so a missing one is
     /// not a compile error.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -415,9 +417,11 @@ pub mod ffi {
 
         #[nothrow]
         pub unsafe fn local_eq(lhs: &Local, rhs: &Local) -> bool;
-        /// Whether `value` can be used in `isolate`: Smis in any isolate, values in read-only or
-        /// writable shared space in any isolate of their isolate group, and other values only in
-        /// the isolate whose heap holds them. Reads only the value's page header.
+        /// Whether `value` can be used in `isolate`.
+        ///
+        /// Smis can be used in any isolate, values in read-only or writable shared space in any
+        /// isolate of their isolate group, and other values only in the isolate whose heap holds
+        /// them. Reads only the value's page header.
         pub unsafe fn local_is_compatible_with_isolate(
             isolate: *mut Isolate,
             value: &Local,
@@ -826,9 +830,10 @@ pub mod ffi {
             ref_strong: *mut bool,
             visitor: *mut GcVisitor,
         );
-        /// Visit a `v8::Global` field during GC tracing, implementing the same
-        /// strong↔traced dual-mode switching that `jsg::Data` / `jsg::V8Ref<T>`
-        /// use in C++.
+        /// Visit a `v8::Global` field during GC tracing.
+        ///
+        /// This implements the same strong↔traced dual-mode switching that
+        /// `jsg::Data` / `jsg::V8Ref<T>` use in C++.
         ///
         /// `global` points to the `ptr` field of `ffi::Global` (the strong handle).
         /// `traced` points to the `traced_ptr` field (the weak traced handle).
@@ -838,10 +843,11 @@ pub mod ffi {
             global: *mut usize,
             traced: &mut TracedReference,
         );
-        /// The isolate of the object that `visitor` is visiting: the one its wrapper was
-        /// attached in, or that of the object whose trace reached it. Null if neither has
-        /// happened yet, or the isolate is gone; a visit made by a garbage collection always
-        /// has one.
+        /// The isolate of the object that `visitor` is visiting.
+        ///
+        /// That is the one its wrapper was attached in, or that of the object whose trace
+        /// reached it. Null if neither has happened yet, or the isolate is gone; a visit made by
+        /// a garbage collection always has one.
         pub unsafe fn gc_visitor_v8_isolate(visitor: *mut GcVisitor) -> *mut Isolate;
         /// Makes a weak `v8::Global` strong again (`ClearWeak`), if it is not empty. `global`
         /// points to the `ptr` field of the `ffi::Global`.
@@ -1105,7 +1111,7 @@ pub mod ffi {
         // to be entered. Runs no JavaScript.
         pub unsafe fn isolate_current_context_global(isolate: *mut Isolate) -> Local;
 
-        /// Tells LeakSanitizer, if enabled, that the heap allocation at `ptr` is leaked on
+        /// Tells `LeakSanitizer`, if enabled, that the heap allocation at `ptr` is leaked on
         /// purpose, along with everything reachable from it.
         pub unsafe fn ignore_leak(ptr: usize);
 
@@ -1137,7 +1143,7 @@ pub mod ffi {
 
     impl KjOwn<ExternalMemoryAdjustment> {}
 
-    /// Fat pointer to a `dyn GarbageCollected` trait object plus its TypeId.
+    /// Fat pointer to a `dyn GarbageCollected` trait object plus its `TypeId`.
     ///
     /// Stored inside the C++ `Wrappable` struct. Contains everything needed to
     /// reconstruct the Rust trait object and verify its type.
@@ -1338,10 +1344,10 @@ pub mod ffi {
         pub unsafe fn utf8_value_data(value: &Utf8Value) -> *const u8;
     }
 
-    /// Module visibility level, mirroring workerd::jsg::ModuleType from modules.capnp.
+    /// Module visibility level, mirroring `workerd::jsg::ModuleType` from modules.capnp.
     ///
     /// CXX shared enums cannot reference existing C++ enums, so we define matching values here.
-    /// The conversion to workerd::jsg::ModuleType happens in jsg.h's RustModuleRegistry.
+    /// The conversion to `workerd::jsg::ModuleType` happens in jsg.h's `RustModuleRegistry`.
     enum ModuleType {
         Bundle = 0,
         Builtin = 1,
@@ -1361,9 +1367,11 @@ pub mod ffi {
     unsafe extern "C++" {
         type ModuleRegistry;
 
-        /// Registers a builtin module. The registry calls `callback` to instantiate the
-        /// module, while a metadata registry (the RTTI encoder) calls `describe` instead, to
-        /// describe the module's exports without instantiating it.
+        /// Registers a builtin module.
+        ///
+        /// The registry calls `callback` to instantiate the module, while a metadata registry
+        /// (the RTTI encoder) calls `describe` instead, to describe the module's exports without
+        /// instantiating it.
         pub unsafe fn register_add_builtin_module(
             registry: Pin<&mut ModuleRegistry>,
             specifier: &str,

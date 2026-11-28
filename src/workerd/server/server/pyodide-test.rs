@@ -302,7 +302,7 @@ fn a_status_other_than_200_fails() {
         );
         assert_eq!(seen.borrow().len(), 1);
     });
-    assert!(files(&dir).is_empty());
+    assert_eq!(files(&dir), [] as [String; 0]);
 }
 
 #[test]
@@ -319,7 +319,7 @@ fn a_downloaded_bundle_that_fails_the_check_is_not_cached() {
             "{error:?}"
         );
     });
-    assert!(files(&dir).is_empty());
+    assert_eq!(files(&dir), [] as [String; 0]);
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn dev_is_never_downloaded() {
         );
         assert!(seen.borrow().is_empty());
     });
-    assert!(files(&dir).is_empty());
+    assert_eq!(files(&dir), [] as [String; 0]);
 }
 
 #[test]
@@ -387,11 +387,10 @@ fn the_bridge_returns_no_bytes_for_an_uncached_dev_bundle() {
         "",
     ))
     .unwrap();
-    assert!(bytes.is_empty());
-    assert!(
-        run(pyodide_bundle_fetch(KjMaybe::None, DEV, ""))
-            .unwrap()
-            .is_empty()
+    assert_eq!(bytes, [] as [u8; 0]);
+    assert_eq!(
+        run(pyodide_bundle_fetch(KjMaybe::None, DEV, "")).unwrap(),
+        [] as [u8; 0]
     );
 }
 
@@ -523,7 +522,7 @@ fn an_untrusted_certificate_fails_the_request() {
         );
         assert!(seen.borrow().is_empty());
     });
-    assert!(files(&dir).is_empty());
+    assert_eq!(files(&dir), [] as [String; 0]);
 }
 
 #[test]

@@ -338,5 +338,5 @@ fn timestamps_can_be_omitted() {
     let record = &request.resource_logs[0].scope_logs[0].log_records[0];
     assert_eq!(record.time_unix_nano, 0);
     assert_eq!(record.observed_time_unix_nano, 0);
-    assert!(record.span_id.is_empty());
+    assert_eq!(record.span_id, [] as [u8; 0]);
 }

@@ -46,10 +46,7 @@ cc_library(
         "//conditions:default": [""],
     }),
     visibility = ["//visibility:public"],
-    deps = [":linkopts_common"] + select({
-        "//build/platforms:sanitizer_thread_linux": ["@llvm_runtimes//:runtimes"],
-        "//conditions:default": [],
-    }),
+    deps = [":linkopts_common"],
 )
 
 # link options to use with tools where we don't want to compromise performance, e.g. workerd. At
@@ -58,10 +55,7 @@ cc_library(
 cc_library(
     name = "linkopts_tool",
     visibility = ["//visibility:public"],
-    deps = [":linkopts_common"] + select({
-        "//build/platforms:sanitizer_thread_linux": ["@llvm_runtimes//:runtimes"],
-        "//conditions:default": [],
-    }),
+    deps = [":linkopts_common"],
 )
 
 # ci/v8_update.py imports this as the top-level module `jsonc`.

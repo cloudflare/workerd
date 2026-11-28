@@ -513,7 +513,9 @@ macro_rules! chars {
     ($($ch:ident)*) => {
         $(
             #[doc(hidden)]
-            pub enum $ch {}
+            pub struct $ch {
+                _uninhabited: ::core::convert::Infallible,
+            }
         )*
     };
 }

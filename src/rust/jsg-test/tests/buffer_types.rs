@@ -724,8 +724,8 @@ fn array_buffer_detach_zeroes_slices() {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
         assert_eq!(buf.as_slice(lock), &[1, 2, 3]);
         buf.detach(lock)?;
-        assert!(buf.as_slice(lock).is_empty());
-        assert!(buf.to_vec().is_empty());
+        assert_eq!(buf.as_slice(lock), [] as [u8; 0]);
+        assert_eq!(buf.to_vec(), [] as [u8; 0]);
         Ok(())
     });
 }
@@ -850,12 +850,12 @@ fn slices_follow_resized_and_detached_buffers() {
         ctx.eval_raw(lock, "sliceBuffer.resize(4)").unwrap();
         assert_eq!(buffer.as_slice(lock), &[0, 1, 2, 3]);
         assert_eq!(buffer.to_vec(), [0, 1, 2, 3]);
-        assert!(typed.as_slice(lock).is_empty());
+        assert_eq!(typed.as_slice(lock), [] as [u16; 0]);
         for view in &mut fixed {
-            assert!(view.as_slice(lock).is_empty());
-            assert!(view.to_vec().is_empty());
+            assert_eq!(view.as_slice(lock), [] as [u8; 0]);
+            assert_eq!(view.to_vec(), [] as [u8; 0]);
             // SAFETY: no Rust references into the buffer are live while this slice is held.
-            assert!(unsafe { view.as_mut_slice(lock) }.is_empty());
+            assert_eq!(unsafe { view.as_mut_slice(lock) }, [] as [u8; 0]);
         }
         for view in &tracking {
             assert_eq!(view.as_slice(lock), &[2, 3]);
@@ -870,12 +870,12 @@ fn slices_follow_resized_and_detached_buffers() {
             assert_eq!(view.as_slice(lock), &[2, 3, 0, 0, 0, 0, 0, 0]);
         }
         buffer.detach(lock)?;
-        assert!(buffer.as_slice(lock).is_empty());
-        assert!(buffer.to_vec().is_empty());
-        assert!(typed.as_slice(lock).is_empty());
+        assert_eq!(buffer.as_slice(lock), [] as [u8; 0]);
+        assert_eq!(buffer.to_vec(), [] as [u8; 0]);
+        assert_eq!(typed.as_slice(lock), [] as [u16; 0]);
         for view in fixed.iter().chain(&tracking) {
-            assert!(view.as_slice(lock).is_empty());
-            assert!(view.to_vec().is_empty());
+            assert_eq!(view.as_slice(lock), [] as [u8; 0]);
+            assert_eq!(view.to_vec(), [] as [u8; 0]);
         }
         Ok(())
     });
@@ -891,10 +891,10 @@ fn empty_view_at_end_of_buffer_has_empty_slices() {
         ] {
             let mut view: v8::Local<v8::ArrayBufferView> =
                 ctx.eval_raw(lock, source).unwrap().try_into().unwrap();
-            assert!(view.as_slice(lock).is_empty());
-            assert!(view.to_vec().is_empty());
+            assert_eq!(view.as_slice(lock), [] as [u8; 0]);
+            assert_eq!(view.to_vec(), [] as [u8; 0]);
             // SAFETY: no Rust references into this buffer are live during this call.
-            assert!(unsafe { view.as_mut_slice(lock) }.is_empty());
+            assert_eq!(unsafe { view.as_mut_slice(lock) }, [] as [u8; 0]);
         }
         Ok(())
     });

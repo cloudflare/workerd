@@ -853,7 +853,7 @@ fn r_take_ref_vector(v: &CxxVector<u8>) {
 }
 
 fn r_take_ref_empty_vector(v: &CxxVector<u64>) {
-    assert!(v.as_slice().is_empty());
+    assert_eq!(v.as_slice(), [] as [u64; 0]);
     assert!(v.is_empty());
 }
 

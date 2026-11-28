@@ -163,12 +163,16 @@ pub mod kind {
     ///
     /// When passed across an FFI boundary, an opaque C++ type must be behind an
     /// indirection such as a reference or UniquePtr.
-    pub enum Opaque {}
+    pub struct Opaque {
+        _uninhabited: core::convert::Infallible,
+    }
 
     /// A type with trivial move constructor and no destructor, which can
     /// therefore be owned and moved around in Rust code without requiring
     /// indirection.
-    pub enum Trivial {}
+    pub struct Trivial {
+        _uninhabited: core::convert::Infallible,
+    }
 
     /// Marker trait for the supported C++ ownership kinds.
     pub trait Kind: private::Sealed {}

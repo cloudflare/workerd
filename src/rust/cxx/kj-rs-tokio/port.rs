@@ -37,7 +37,7 @@ thread_local! {
     /// The `LocalSet` onto which [`spawn`] enqueues tasks, and which `wait_*`/`poll` drive. Held
     /// behind an `Rc` so `spawn` (which has no `&TokioPort`) can reach it while the port keeps
     /// driving it. The `LocalSet` is `!Send`/`!Sync` and lives entirely on the loop thread, so it
-    /// cannot be stored in the `Sync` TokioPort shared with cross-thread `wake()` callers;
+    /// cannot be stored in the `Sync` `TokioPort` shared with cross-thread `wake()` callers;
     /// ownership lives here. It is dropped -- cancelling every still-pending spawned
     /// task -- by [`TokioPort::cancel_spawned_tasks`], which the C++ `TokioEventPort` destructor
     /// calls while the KJ event loop and timer are still alive (spawned tasks may own KJ

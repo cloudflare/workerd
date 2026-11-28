@@ -187,7 +187,7 @@ pub mod ffi {
         total: StartupPhaseTiming,
     }
 
-    /// A config error, or else a warning, as the in-process server (in_process.rs) reports it.
+    /// A config error, or else a warning, as the in-process server (`in_process.rs`) reports it.
     struct ConfigReport {
         error: bool,
         message: String,
@@ -827,7 +827,7 @@ pub mod ffi {
         /// The `ConnectResponse` of a raw TCP socket's `connect()`: accepting does nothing,
         /// rejecting discards the body.
         fn new_null_connect_response() -> KjOwn<ConnectResponse>;
-        /// An in-process server's host (in_process/host.rs) keys its headers by
+        /// An in-process server's host (`in_process/host.rs`) keys its headers by
         /// `WorkerFactory::Options::hostHeaderTable`: a copy of the host's request `headers`
         /// keyed by the factory's table; and responses, which borrow the host's `inner` for
         /// their life, whose headers are copied into the host's table on the way out.
