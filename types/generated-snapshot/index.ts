@@ -16717,7 +16717,7 @@ export interface RealtimeKitSummarizationConfig {
     | "code_review";
 }
 // Namespace for RPC utility types. Unfortunately, we can't use a `module` here as these types need
-// to referenced by `Fetcher`. This is included in the "importable" version of the types which
+// to be referenced by `Fetcher`. This is included in the "importable" version of the types which
 // strips all `module` blocks.
 export declare namespace Rpc {
   // Branded types for identifying `WorkerEntrypoint`/`DurableObject`/`Target`s.
