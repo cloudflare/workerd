@@ -22,6 +22,9 @@ interface ActorStorage @0xd7759d7fc87c08e4 {
   getStage @0 (stableId :Text) -> (stage :Stage);
   # Get the storage capability for the given stage of the pipeline, identified by its stable ID.
 
+  updateCohort @1 (cohort :Text);
+  # Persist the actor's resolved cohort. If `cohort` is omitted, clear the stored value.
+
   interface Operations @0xb512f2ce1f544439 {
     get @0 (key :Data) -> (value :Data);
     list @3 (start :Data, end :Data, limit :Int32, reverse :Bool, stream :ListStream, prefix :Data);
