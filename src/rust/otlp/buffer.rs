@@ -53,7 +53,6 @@ struct OpenSpan {
     sequence_number: i64,
     status: Option<proto::Status>,
     events: Vec<proto::Event>,
-    last_exception_message: Option<String>,
 }
 
 /// One invocation's spans on their way to an OTLP collector.
@@ -120,7 +119,6 @@ impl SpanBuffer {
                 sequence_number: self.last_sequence_number,
                 status: None,
                 events: Vec::new(),
-                last_exception_message: None,
             },
         );
         true
@@ -166,7 +164,7 @@ impl SpanBuffer {
         };
         let mut attributes = vec![
             key_value("exception.type", name),
-            key_value("exception.message", message.clone()),
+            key_value("exception.message", message),
         ];
         if let Some(stack) = stack {
             attributes.push(key_value("exception.stacktrace", stack));
@@ -176,7 +174,6 @@ impl SpanBuffer {
             name: "exception".to_owned(),
             attributes,
         });
-        span.last_exception_message = Some(message);
     }
 
     /// Closes a span with the attributes it ended up with. Returns a batch when one is due.
@@ -217,12 +214,7 @@ impl SpanBuffer {
         );
 
         let kind = rules::span_kind(&span.name, &attributes, is_root);
-        let (status, error_type) = resolve_status(
-            span.status,
-            span.last_exception_message,
-            &attributes,
-            is_root,
-        );
+        let (status, error_type) = resolve_status(span.status, &attributes, is_root);
         let mut attributes = attributes.into_proto();
         if let Some(error_type) = error_type {
             attributes.push(key_value("error.type", error_type));
@@ -298,36 +290,24 @@ impl SpanBuffer {
 
 /// The status a span is exported with, and the `error.type` attribute that goes with it.
 ///
-/// A status the worker set to OK or ERROR stands. Otherwise an exception makes the span an error
-/// with the last exception's message, and failing that the span's attributes may (see
-/// [`rules::derived_error_type`]), which is the only case that adds `error.type`.
+/// A status the worker set to OK or ERROR stands. Otherwise the span's attributes may make it an
+/// error (see [`rules::derived_error_type`]), which is the only case that adds `error.type`.
 fn resolve_status(
     status: Option<proto::Status>,
-    last_exception_message: Option<String>,
     attributes: &Attributes,
     is_root: bool,
 ) -> (Option<proto::Status>, Option<String>) {
-    let error = i32::from(proto::StatusCode::Error);
     if status
         .as_ref()
         .is_some_and(|status| status.code != i32::from(proto::StatusCode::Unset))
     {
         return (status, None);
     }
-    let error_type = rules::derived_error_type(attributes, is_root);
-    if let Some(message) = last_exception_message {
-        // The exception describes the error; error.type, when derivable, still classifies it.
-        let status = proto::Status {
-            message,
-            code: error,
-        };
-        return (Some(status), error_type);
-    }
-    let Some(error_type) = error_type else {
+    let Some(error_type) = rules::derived_error_type(attributes, is_root) else {
         return (status, None);
     };
     let status = proto::Status {
-        code: error,
+        code: proto::StatusCode::Error.into(),
         ..status.unwrap_or_default()
     };
     (Some(status), Some(error_type))
