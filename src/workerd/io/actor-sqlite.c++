@@ -151,6 +151,9 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
       {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_savepoint_", depth));
 }
 ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
+  // Declared first so that it runs last, once `currentTxn` no longer refers to this transaction.
+  KJ_DEFER(if (parent == kj::none) { actorSqlite.commitIfScheduledInRolledBackTxn(); });
+
   KJ_DEFER([&]() noexcept {
     // We'd better crash if any of this state update fails, otherwise dangling pointers.
 
@@ -238,6 +241,11 @@ void ActorSqlite::ExplicitTxn::commitImpl() {
   } else {
     if (alarmDirty) {
       actorSqlite.haveDeferredDelete = false;
+    }
+    if (actorSqlite.commitScheduledInExplicitTxn) {
+      // This is the commit that scheduleCommit() asked for.
+      actorSqlite.commitScheduledInExplicitTxn = false;
+      someWriteConfirmed = true;
     }
 
     // We committed the root transaction, so it's time to signal any replication layer and lock
@@ -331,6 +339,28 @@ void ActorSqlite::blockTransaction(kj::Promise<void> promise) {
     // go ahead and break the output gate! (Also, `taskFailed()` expects us to have done this.)
     return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr);
   }));
+}
+
+kj::Promise<void> ActorSqlite::scheduleCommit() {
+  if (currentTxn.is<ExplicitTxn*>()) {
+    requireNotBroken();
+    commitScheduledInExplicitTxn = true;
+    return kj::READY_NOW;
+  }
+  onWrite(/*allowUnconfirmed=*/false);
+  return lastCommit.addBranch();
+}
+
+void ActorSqlite::commitIfScheduledInRolledBackTxn() {
+  if (!commitScheduledInExplicitTxn) return;
+  commitScheduledInExplicitTxn = false;
+  if (broken != kj::none) return;
+
+  // This runs in a destructor, so a failure to start the transaction breaks the output gate
+  // instead of propagating.
+  KJ_IF_SOME(e, kj::runCatchingExceptions([this]() { onWrite(/*allowUnconfirmed=*/false); })) {
+    commitTasks.add(outputGate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr));
+  }
 }
 
 void ActorSqlite::startImplicitTxn() {

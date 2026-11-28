@@ -68,6 +68,19 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     return !currentTxn.is<NoTxn>() || deleteAllCommitScheduled;
   }
 
+  // Schedules a commit without writing to the database, treating the call as a write that requires
+  // confirmation: `commitCallback` is invoked even if nothing else was written, and the output
+  // gate waits for it as it does for such a write. If no transaction is open, an implicit
+  // transaction is started. This is for an embedder whose `commitCallback` also makes durable some
+  // state that it keeps outside the database. The embedder calls this after changing that state.
+  //
+  // The returned promise resolves when the commit completes. In an explicit transaction, it
+  // resolves immediately instead, because the application may be waiting for this promise before
+  // it ends the transaction. The commit then happens when the outermost transaction ends. If that
+  // transaction commits, its commit is the one. If it rolls back, a commit is scheduled anyway:
+  // rolling back the database doesn't undo the embedder's change.
+  kj::Promise<void> scheduleCommit();
+
   // Prevents the current transaction from being committed until `promise` resolves. This is used
   // when storing an external capability that requires performing some async RPC to obtain the
   // token -- the transaction must be held open until the token is obtained and stored.
@@ -261,6 +274,15 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   // If true, then a commit is scheduled as a result of deleteAll() having been called.
   bool deleteAllCommitScheduled = false;
+
+  // True if scheduleCommit() was called in an explicit transaction and the outermost transaction
+  // has not ended yet. It is kept here rather than in ExplicitTxn because it must outlive a nested
+  // transaction that rolls back.
+  bool commitScheduledInExplicitTxn = false;
+
+  // Called when the outermost explicit transaction is destroyed. If scheduleCommit() was called
+  // during it and no commit followed, because it was rolled back, schedules that commit now.
+  void commitIfScheduledInRolledBackTxn();
 
   // State for tracking completion of all commits (both confirmed and unconfirmed) for implementing
   // sync() in onNoPendingFlush.
