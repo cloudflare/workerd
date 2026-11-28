@@ -107,22 +107,36 @@ export BUILD_STD_EXECROOT
   -Zbuild-std=std,panic_unwind,test \
   -Zbuild-std-features=backtrace,panic-unwind
 
-deps="$target_dir/$target_triple/release/deps"
-copy_unique_rlib() {
-  local crate=$1
+# Older Cargo writes the artifacts to deps/, newer Cargo to build/<package>/<hash>/out/.
+release="$target_dir/$target_triple/release"
+copy_unique_artifact() {
+  local pattern=$1
   local destination=$2
   local sources=()
-  while IFS= read -r source; do
-    sources+=("$source")
-  done < <(find "$deps" -maxdepth 1 -name "lib$crate-*.rlib" -print)
+  if [[ -d "$release/build" ]]; then
+    while IFS= read -r source; do
+      sources+=("$source")
+    done < <(find "$release/build" -mindepth 4 -maxdepth 4 -path "*/out/$pattern" -print)
+  fi
+  if [[ ${#sources[@]} -eq 0 && -d "$release/deps" ]]; then
+    while IFS= read -r source; do
+      sources+=("$source")
+    done < <(find "$release/deps" -maxdepth 1 -name "$pattern" -print)
+  fi
   if [[ ${#sources[@]} -ne 1 ]]; then
-    echo "Cargo produced ${#sources[@]} rlibs for $crate; expected exactly one" >&2
-    printf '  %s\n' "${sources[@]}" >&2
+    echo "Cargo produced ${#sources[@]} files matching $pattern; expected exactly one" >&2
+    if [[ ${#sources[@]} -gt 0 ]]; then
+      printf '  %s\n' "${sources[@]}" >&2
+    fi
     exit 1
   fi
   cp "${sources[0]}" "$destination"
 }
 
+# Newer Cargo builds the standard library with -Zembed-metadata=no, which leaves only a stub of the
+# crate's metadata in its rlib; rustc reads the rest from the .rmeta of the same name.
 for crate in "${crates[@]}"; do
-  copy_unique_rlib "$crate" "$output_dir/lib${crate}_${crate}.rlib"
+  for extension in rlib rmeta; do
+    copy_unique_artifact "lib$crate-*.$extension" "$output_dir/lib${crate}_${crate}.$extension"
+  done
 done

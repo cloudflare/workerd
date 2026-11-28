@@ -6,6 +6,10 @@ cross-language LTO, and clang's profile runtime reads the counters rustc writes 
 PGO-instrumented builds. The package has rustc, Cargo, Clippy, rustdoc and rustfmt, the standard
 library for x86_64 Linux, and the standard library's sources, from which //build/rust builds the
 sanitizer-instrumented ones.
+
+The package's Cargo loads the system's libcurl, which a remote executor may not have, so this rule
+replaces it with rust-lang.org's nightly Cargo of the day after the package's rustc, which links
+only the C library.
 """
 
 # Components that no build uses, which make up most of the package's unpacked size: rustc-dev
@@ -56,6 +60,16 @@ def _chromium_rust_impl(rctx):
         if library.basename.startswith("libclang."):
             rctx.delete(library)
 
+    rctx.download_and_extract(
+        url = rctx.attr.cargo["url"],
+        sha256 = rctx.attr.cargo["sha256"],
+        stripPrefix = rctx.attr.cargo["strip_prefix"],
+        output = "nightly-cargo",
+    )
+    rctx.delete("bin/cargo")
+    rctx.rename("nightly-cargo/bin/cargo", "bin/cargo")
+    rctx.delete("nightly-cargo")
+
     # VERSION starts with `rustc 1.101.0 <commit> (...)`.
     version = rctx.read("VERSION").split(" ")[1]
     rctx.file("version.bzl", "CHROMIUM_RUST_VERSION = %r\n" % version)
@@ -67,6 +81,10 @@ def _chromium_rust_impl(rctx):
 chromium_rust = repository_rule(
     implementation = _chromium_rust_impl,
     attrs = {
+        "cargo": attr.string_dict(
+            mandatory = True,
+            doc = "The url, sha256 and strip_prefix of the Cargo package that replaces the package's.",
+        ),
         "sha256": attr.string(mandatory = True),
         "url": attr.string(mandatory = True),
         "_build_file": attr.label(default = "//build/toolchain:BUILD.chromium_rust"),

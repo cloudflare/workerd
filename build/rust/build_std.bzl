@@ -119,8 +119,9 @@ def _rust_build_std_impl(ctx):
         cc_toolchain = ctx.attr._exec_cc_toolchain[cc_common.CcToolchainInfo]
     linker, linker_env = _linker_wrapper(ctx, cc_toolchain)
     outputs = [
-        ctx.actions.declare_file("{}/lib{}_{}.rlib".format(ctx.label.name, crate, crate))
+        ctx.actions.declare_file("{}/lib{}_{}.{}".format(ctx.label.name, crate, crate, extension))
         for crate in _STDLIB_CRATES
+        for extension in ["rlib", "rmeta"]
     ]
 
     output_dir = outputs[0].dirname

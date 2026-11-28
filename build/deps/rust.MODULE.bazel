@@ -47,6 +47,12 @@ chromium_rust = use_repo_rule("//build/toolchain:chromium_rust.bzl", "chromium_r
 
 chromium_rust(
     name = "chromium_rust",
+    # Cargo from the day after the package's rustc (rust-lang/rust@96a18bf5, 2026-10-29).
+    cargo = {
+        "sha256": "c2dc271dddfe5477b930540f889e7c83fbabee4df710822b29d2f99c35f121b1",
+        "strip_prefix": "cargo-nightly-x86_64-unknown-linux-gnu/cargo",
+        "url": "https://static.rust-lang.org/dist/2026-10-30/cargo-nightly-x86_64-unknown-linux-gnu.tar.xz",
+    },
     sha256 = "93a64626620085b45dd8da96dea87cd8699ac78188bd2968eb0164a917d86820",
     url = "https://commondatastorage.googleapis.com/chromium-browser-clang/Linux_x64/rust-toolchain-96a18bf5ffa2b24f9cf3d1c731a9eb121c1acad9-4-llvmorg-24-init-17044-gc3223914.tar.xz",
 )
