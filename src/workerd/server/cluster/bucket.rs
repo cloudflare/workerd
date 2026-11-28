@@ -213,8 +213,9 @@ pub trait Store {
     }
     /// Idempotent: deleting an absent key succeeds.
     async fn delete(&self, key: &str) -> Result<()>;
-    /// See `Client::clock_skew_ms`.
-    fn clock_skew_ms(&self) -> Option<i64> {
+    /// See `Client::clock_skew_ms`: `None` for a store that cannot say, on
+    /// which no node joins.
+    fn clock_skew_ms(&self) -> Option<u64> {
         None
     }
 
@@ -332,7 +333,7 @@ impl Bucket {
         Self::new(memory::Memory::default(), prefix)
     }
 
-    pub fn clock_skew_ms(&self) -> Option<i64> {
+    pub fn clock_skew_ms(&self) -> Option<u64> {
         self.store.clock_skew_ms()
     }
 
@@ -633,6 +634,11 @@ pub mod memory {
 
     #[async_trait::async_trait(?Send)]
     impl Store for Memory {
+        /// It shares this machine's clock.
+        fn clock_skew_ms(&self) -> Option<u64> {
+            Some(0)
+        }
+
         async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>> {
             let got = self
                 .objects

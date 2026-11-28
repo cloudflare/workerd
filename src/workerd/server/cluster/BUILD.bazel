@@ -35,6 +35,7 @@ wd_rust_crate(
         "@crates_vendor//httpdate",
         "@crates_vendor//hyper",
         "@crates_vendor//hyper-util",
+        "@crates_vendor//libc",
         "@crates_vendor//nix",
         "@crates_vendor//ring",
         "@crates_vendor//rustls",

@@ -32,6 +32,7 @@ fn timing(lease_ms: u64) -> Timing {
         renew_attempt_ms: lease_ms / 4,
         list_attempt_ms: lease_ms / 4,
         contended_pause_ms: 5,
+        safety_ms: lease_ms / 10,
         max_skew_ms: lease_ms / 20,
         stall_ms: 2 * lease_ms,
     }
@@ -68,6 +69,10 @@ impl Store for Flaky {
 
     async fn delete(&self, key: &str) -> Result<()> {
         self.store.delete(key).await
+    }
+
+    fn clock_skew_ms(&self) -> Option<u64> {
+        self.store.clock_skew_ms()
     }
 }
 
@@ -169,6 +174,7 @@ fn a_node_that_left_renews_no_more() {
     let timing = Timing {
         renew_timeout_ms: 20,
         renew_attempt_ms: 10,
+        safety_ms: 10,
         max_skew_ms: 5,
         ..timing(300)
     };
@@ -420,4 +426,106 @@ fn the_rounds_watch_the_loop_only_from_watch_on() {
 /// for the stall from one that does not.
 const fn slack(timing: &Timing) -> u64 {
     timing.stall_ms / 4
+}
+
+/// A bucket whose dates bound this node's clock to `skews[n]` once it has
+/// answered `n` reads, the last of them for good. Its reads fail while
+/// `down`.
+struct Dated {
+    store: Memory,
+    skews: Vec<Option<u64>>,
+    reads: Cell<usize>,
+    down: bool,
+}
+
+#[async_trait::async_trait(?Send)]
+impl Store for Dated {
+    async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>> {
+        if self.down {
+            return Err(Error::Http("the bucket is down".into()));
+        }
+        self.reads.set(self.reads.get() + 1);
+        self.store.get(key, to).await
+    }
+
+    async fn put(
+        &self,
+        key: &str,
+        body: Payload,
+        guard: Option<Guard>,
+        metadata: &[(&str, String)],
+    ) -> Result<Option<Version>> {
+        self.store.put(key, body, guard, metadata).await
+    }
+
+    async fn list(&self, prefix: &str) -> Result<Vec<Entry>> {
+        self.store.list(prefix).await
+    }
+
+    async fn delete(&self, key: &str) -> Result<()> {
+        self.store.delete(key).await
+    }
+
+    fn clock_skew_ms(&self) -> Option<u64> {
+        self.skews[self.reads.get().min(self.skews.len() - 1)]
+    }
+}
+
+/// A keeper for node `a` over a `Dated` bucket, with `timing(400)`: a
+/// 20 ms bound on its clock, less 2 ms it may drift in a round, and 4 ms
+/// more to join. Its runtime, to run it on.
+fn dated(skews: Vec<Option<u64>>, down: bool) -> (Keeper, tokio::runtime::Runtime) {
+    let timing = timing(400);
+    let store = Dated {
+        store: Memory::default(),
+        skews,
+        reads: Cell::new(0),
+        down,
+    };
+    let bucket = Bucket::new(store, "");
+    let registry = Registry::new(bucket.clone(), "a", "a:1", timing.lease_ms);
+    let keeper = Keeper::new(bucket, Rc::new(registry), timing);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    (keeper, runtime)
+}
+
+fn take_dated(skews: Vec<Option<u64>>, down: bool) -> Result<()> {
+    let (keeper, runtime) = dated(skews, down);
+    runtime.block_on(keeper.take_lease())
+}
+
+/// What `Keeper::maintain` fences with within a lease, if it does, for a
+/// node that holds its lease and whose clock reads as `skews` say.
+fn maintain_dated(skews: Vec<Option<u64>>) -> Option<String> {
+    let (keeper, runtime) = dated(skews, false);
+    keeper.renewed_at(now_ms(), Ok(now_ms() + 400));
+    let maintain = async { timeout(ms(400), keeper.maintain()).await };
+    runtime.block_on(maintain).ok()
+}
+
+#[test]
+fn a_node_joins_once_its_clock_is_known() {
+    // No date, then a clock too far off to join, then one that is not.
+    take_dated(vec![None, Some(16), Some(5)], false).unwrap();
+}
+
+#[test]
+fn a_node_whose_clock_is_not_known_within_a_lease_does_not_join() {
+    // Within the bound, but not with the drift a lease may add.
+    let e = take_dated(vec![Some(16)], false).unwrap_err();
+    assert!(e.to_string().contains("clock may be off"), "{e}");
+    // A bucket it cannot read is the bucket's fault, not the clock's.
+    let e = take_dated(vec![None], true).unwrap_err();
+    assert!(e.to_string().contains("the bucket is down"), "{e}");
+}
+
+#[test]
+fn a_running_node_whose_clock_fails_reads_again_before_it_fences() {
+    // As after its window started over: the next read narrows it.
+    assert_eq!(maintain_dated(vec![Some(19), Some(5)]), None);
+    let reason = maintain_dated(vec![Some(19)]).unwrap();
+    assert!(reason.contains("clock may be off"), "{reason}");
 }

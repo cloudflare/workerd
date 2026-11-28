@@ -34,6 +34,7 @@ fn the_lease_holds_however_long_startup_takes_after_join() {
         renew_attempt_ms: 10,
         list_attempt_ms: 10,
         contended_pause_ms: 5,
+        safety_ms: 10,
         max_skew_ms: 5,
         stall_ms: 50,
     };

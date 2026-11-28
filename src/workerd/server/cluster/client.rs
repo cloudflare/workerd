@@ -19,6 +19,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use bytes::Bytes;
+use cluster_logic::lease::Skew;
 use futures::StreamExt;
 
 use crate::Error;
@@ -92,8 +93,9 @@ pub struct Client<D> {
     /// `<scheme>://<host>[:<port>]`.
     endpoint: String,
     bucket: String,
-    /// This node's wall clock less the bucket's, at the last response.
-    skew_ms: Cell<Option<i64>>,
+    /// This node's monotonic clock less the bucket's, from the responses so
+    /// far (`mono_ms`).
+    skew: Cell<Option<Skew>>,
     /// The first pause of the 429/503 backoff (`BACKOFF`).
     backoff: Duration,
 }
@@ -105,7 +107,7 @@ impl<D> Client<D> {
             http,
             endpoint: endpoint.trim_end_matches('/').to_owned(),
             bucket: bucket.to_owned(),
-            skew_ms: Cell::new(None),
+            skew: Cell::new(None),
             backoff: BACKOFF,
         }
     }
@@ -184,10 +186,16 @@ impl<D: Dialect> Store for Client<D> {
         Ok(self.listing(prefix, true).await?.1)
     }
 
-    /// How far this node's wall clock is outside the bucket's, from the last
-    /// response's `Date` header: 0 when the header fits the request's window.
-    fn clock_skew_ms(&self) -> Option<i64> {
-        self.skew_ms.get()
+    /// How far this node's wall clock may be off from the bucket's, from the
+    /// responses' `Date` headers.
+    fn clock_skew_ms(&self) -> Option<u64> {
+        // A pause between the reads widens the window by its length.
+        let before = mono_ms();
+        let wall = unix_ms(SystemTime::now());
+        let after = mono_ms();
+        self.skew
+            .get()
+            .map(|skew| skew.most_ms(before, after, wall))
     }
 
     // R2's calls. A read is a `Repeat::Read`: `http::prompt` may send it
@@ -582,7 +590,7 @@ impl<D: Dialect> Client<D> {
             Payload::File(path) => std::fs::metadata(path).map_or(0, |m| m.len()),
         };
         let head = REQUEST_TIMEOUT + Duration::from_secs(size >> 20);
-        let sent = SystemTime::now();
+        let sent = mono_ms();
         let (url, bounds) = (url.to_owned(), (head, REQUEST_TIMEOUT));
         let response = if call.stream {
             self.http
@@ -595,8 +603,11 @@ impl<D: Dialect> Client<D> {
                 .await
         };
         let response = response?;
-        if let Some(skew) = skew_ms(sent, SystemTime::now(), &response.date) {
-            self.skew_ms.set(Some(skew));
+        // Measured from the send alone, a write R2 held 8 s at its 5-minute
+        // mark read as a clock 8 s slow: the window takes the whole request.
+        if let Some(date) = http_date_ms(&response.date) {
+            let skew = Skew::answered(self.skew.get(), sent, mono_ms(), date);
+            self.skew.set(Some(skew));
         }
         Ok(response)
     }
@@ -784,22 +795,28 @@ fn listing_page(
     }
 }
 
-/// How far this clock is outside the bucket's, from a response's `Date`
-/// header, for a request sent at `sent` and answered at `received`.
-fn skew_ms(sent: SystemTime, received: SystemTime, date: &str) -> Option<i64> {
-    let date = http_date_ms(date)?;
-    // The bucket stamped the header, in whole seconds, between the send and
-    // the answer: this clock is off only by what lies outside that window.
-    // Measured from the send alone, a write R2 held 8 s at its 5-minute mark
-    // read as a clock 8 s slow.
-    let (sent, received) = (unix_ms(sent), unix_ms(received));
-    Some(if received < date {
-        received - date
-    } else if sent > date + 1000 {
-        sent - date - 1000
-    } else {
-        0
-    })
+/// Milliseconds by a monotonic clock that NTP neither steps nor slews:
+/// chrony slews `Instant`'s on Linux, `CLOCK_MONOTONIC`, by up to 8.3%, past
+/// the drift `Skew` allows.
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "clock_gettime is a C call")]
+fn mono_ms() -> i64 {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `t` is a timespec to write to.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC_RAW, &raw mut t) };
+    assert_eq!(r, 0, "CLOCK_MONOTONIC_RAW");
+    t.tv_sec * 1000 + t.tv_nsec / 1_000_000
+}
+
+/// Windows' `Instant` is not slewed.
+#[cfg(not(unix))]
+fn mono_ms() -> i64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let start = START.get_or_init(std::time::Instant::now);
+    i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX)
 }
 
 /// The text of each `<name>…</name>` element, in order. S3's listing XML has

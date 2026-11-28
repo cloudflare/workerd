@@ -9,11 +9,12 @@
 //! dropped. The checker holds the history to the module's safety rule.
 //!
 //! Each clock is off the bucket's by a skew, about which it wobbles. Nodes
-//! judge records by their own clocks and fence as `Lease` does, on an
-//! estimate of the skew made as `client.rs`'s `skew_ms` makes it. The
-//! skews are within `max_skew_ms`, as `Lease` assumes; with
-//! `CACHE_DST_BLIND`, as far off as that estimate can miss, and with
-//! `CACHE_DST_BLIND=edge`, at one end or the other of that.
+//! judge records by their own clocks, and join and fence as `Lease` does,
+//! on the `Skew` of their answers' dates. Each skew is one that `Skew`
+//! reads as within `max_skew_ms`. With `CACHE_DST_BLIND`, half are past it,
+//! as far as one answer at the node's phase cannot tell from within it:
+//! `Skew` must keep those out. With `CACHE_DST_BLIND=edge`, each is at one
+//! end or the other of its range.
 //! `CACHE_DST_STALLS` leaves only stalled writes and lost messages, so
 //! that homes live long enough for the lease's margin to decide.
 
@@ -26,7 +27,7 @@ const L: lease::Timing = lease::Timing::DEFAULT;
 const LEASE: u64 = L.lease_ms;
 /// `Timing::safety_ms`: a node fences this long before its lease expires.
 /// `CACHE_DST_SAFETY` overrides it.
-const SAFETY: u64 = 2 * L.max_skew_ms;
+const SAFETY: u64 = L.safety_ms;
 const RENEW: u64 = L.interval_ms;
 const LIST: u64 = L.interval_ms;
 /// The bucket's clock at the simulation's start.
@@ -71,23 +72,6 @@ struct Record {
     expires: u64,
 }
 
-/// `skew_ms` in `client.rs`: the clock less the bucket's, from a response
-/// stamped at the bucket's whole second `date`.
-fn skew_ms(sent: u64, received: u64, date: u64) -> i64 {
-    let (sent, received, date) = (
-        sent.cast_signed(),
-        received.cast_signed(),
-        date.cast_signed(),
-    );
-    if received < date {
-        received - date
-    } else if sent > date + 1000 {
-        sent - date - 1000
-    } else {
-        0
-    }
-}
-
 struct Node {
     id: String,
     cache: Cache<u64>,
@@ -98,16 +82,16 @@ struct Node {
     /// The clock less the bucket's, give or take `WOBBLE`.
     skew: i64,
     /// Where in the bucket's second the node's requests are stamped: one
-    /// place, as for rounds that recur at whole seconds, `skew_ms`'s worst.
+    /// place, as for rounds that recur at whole seconds, `Skew`'s worst.
     phase: u64,
-    /// `skew_ms` of the last response.
-    estimate: i64,
+    /// The `Skew` of the answers so far.
+    estimate: Option<lease::Skew>,
     registering: Option<u64>,
     registered: Option<u64>,
     /// `Lease::until_ms`.
     until: Option<u64>,
     listed: Option<u64>,
-    listing: Option<(u64, u64, u64, Vec<String>)>,
+    listing: Option<(u64, u64, Option<u64>, Vec<String>)>,
     view: Vec<String>,
     /// Draining, it serves nothing, and leaves at this time by its clock.
     leave: Option<u64>,
@@ -118,14 +102,29 @@ struct Node {
 
 impl Node {
     fn new(id: &str, rng: &mut Rng, t: u64) -> Self {
-        let rate = 990 + rng.below(21);
+        // Within 1% of its own time, as `Skew` allows.
+        let rate = 991 + rng.below(19);
         let phase = rng.below(1000);
-        // A skew `skew_ms` reads as within `max_skew_ms` at this phase.
+        // A skew `Lease::clock` passes at this phase: an answer at once puts
+        // it in `skew + phase - 1000..=skew + phase`. Wobbling, and widened
+        // by drift until the next renewal, it stays so. `Keeper::know_clock`
+        // passes it too, with a lease's drift more, once answers at other
+        // phases have narrowed it.
         let (max, p) = (L.max_skew_ms.cast_signed(), phase.cast_signed());
+        let slack = WOBBLE + (RENEW / 100).cast_signed() + 10;
+        let most = max - (L.round_ms() / 100).cast_signed() - slack;
+        let join = most - (LEASE / 100).cast_signed();
         let blind = std::env::var("CACHE_DST_BLIND").ok();
-        let (lo, hi) = match blind {
-            Some(_) => (-max - p + WOBBLE + 1, max + 1000 - p - WOBBLE - 1),
-            None => (-max + WOBBLE + 1, max - WOBBLE - 1),
+        let (lo, hi) = if blind.is_some() && rng.chance(500) {
+            // Past `max_skew_ms`, as far as an answer at this phase can
+            // leave it in doubt: ahead early in the second, behind late.
+            if p < 500 {
+                (max + WOBBLE + 1, max + 1000 - p - WOBBLE - 1)
+            } else {
+                (-max - p + WOBBLE + 1, -max - WOBBLE - 1)
+            }
+        } else {
+            ((-most + 1000 - p).max(-join), (most - p).min(join))
         };
         let skew = match blind.as_deref() {
             Some("edge") if rng.chance(500) => lo,
@@ -140,7 +139,7 @@ impl Node {
             at: (t, (BASE + t).checked_add_signed(skew).unwrap()),
             skew,
             phase,
-            estimate: 0,
+            estimate: None,
             registering: None,
             registered: None,
             until: None,
@@ -170,10 +169,12 @@ impl Node {
         }
     }
 
-    /// A response sent and received at those local times, stamped at real
-    /// time `stamp`, in the second that began `phase` ms before.
-    fn answered(&mut self, sent: u64, stamp: u64, received: u64) {
-        self.estimate = skew_ms(sent, received, BASE + stamp - self.phase);
+    /// A response to a request sent and answered at those local times,
+    /// dated `date` by the bucket. The clock, never stepped, is its own
+    /// monotonic clock.
+    fn answered(&mut self, sent: u64, date: u64, received: u64) {
+        let [sent, date, received] = [sent, date, received].map(u64::cast_signed);
+        self.estimate = Some(lease::Skew::answered(self.estimate, sent, received, date));
     }
 }
 
@@ -206,6 +207,9 @@ struct Sim {
     losses: Vec<(u64, String, u64)>,
     safety: u64,
     stalls: bool,
+    /// No message takes over 100 ms: the near copies of a test that counts
+    /// fetches then outlive the fetches' answers.
+    prompt: bool,
     history: Vec<Op>,
     values: u64,
     remote_hits: u64,
@@ -239,6 +243,7 @@ impl Sim {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(SAFETY),
             stalls: std::env::var_os("CACHE_DST_STALLS").is_some(),
+            prompt: false,
             history: Vec::new(),
             values: 0,
             remote_hits: 0,
@@ -289,13 +294,30 @@ impl Sim {
                 node.registered = Some(now);
             }
         }
-        if now >= node.next_renew && node.registering.is_none() {
+        // `Lease::clock`, which `Keeper::know_clock` passes with a lease's
+        // drift to spare before the node joins.
+        let local = now.cast_signed();
+        let ahead = if node.until.is_none() { LEASE / 100 } else { 0 };
+        let skew_ms = node
+            .estimate
+            .map(|s| s.most_ms(local, local, local) + ahead);
+        let known = lease::Lease::new(L).clock(skew_ms).is_ok();
+        // `know_clock` gives up after a lease: the process exits, and comes
+        // back, as another node, once its clock is fixed. Until the node
+        // joins, `next_renew` is when it started.
+        if node.until.is_none() && !known && now >= node.next_renew + LEASE {
+            node.alive = false;
+            return;
+        }
+        if now >= node.next_renew && node.registering.is_none() && (known || node.until.is_some()) {
             node.next_renew = now + RENEW;
-            // `Lease::before_renew`: a clock off by too much, or a lease
-            // about to lapse, ends the process, which restarts as another
-            // node. The record it leaves expires in its time.
+            // `Lease::before_renew`: a clock not known well enough, or a
+            // lease about to lapse, ends the process, which restarts as
+            // another node. The record it leaves expires in its time. No
+            // window here starts over, so none reads again first
+            // (`Step::Measure`).
             let lapsing = |u| now + L.renew_timeout_ms + self.safety >= u;
-            if node.until.is_some_and(lapsing) || node.estimate.unsigned_abs() > L.max_skew_ms {
+            if node.until.is_some_and(lapsing) || !known {
                 self.restart(i);
                 return;
             }
@@ -306,7 +328,7 @@ impl Sim {
                 (true, Some(record)) => {
                     record.expires = now + LEASE;
                     node.until = Some(now + LEASE);
-                    node.answered(now, t, now);
+                    node.answered(now, BASE + t - node.phase, now);
                     // A registration whose answer was lost: later is safe.
                     node.registered.get_or_insert(now);
                 }
@@ -329,7 +351,12 @@ impl Sim {
             }
         }
         if now >= node.next_list && node.listing.is_none() && ok {
-            node.next_list = now + LIST;
+            // `Keeper::know_clock` reads more often, so not at whole seconds,
+            // and its reads answer in their usual time (32 ms at the median).
+            // Only its reads and the renewals measure the clock: the loop's
+            // listings go through a client of their own.
+            let joining = node.until.is_none() && !known;
+            node.next_list = now + if joining { L.retry_ms / 4 } else { LIST };
             let mut view: Vec<String> = self
                 .records
                 .iter()
@@ -337,16 +364,19 @@ impl Sim {
                 .map(|(id, _)| id.clone())
                 .collect();
             view.sort();
-            let back = t + 5 + self.rng.below(1_500);
+            let back = t + 5 + self.rng.below(if joining { 50 } else { 1_500 });
             let stamp = t + self.rng.below(back - t + 1);
-            node.listing = Some((back, now, stamp, view));
+            let date = joining.then(|| BASE + stamp - self.rng.below(1000));
+            node.listing = Some((back, now, date, view));
         }
         if let Some((back, ..)) = &node.listing
             && *back <= t
         {
-            let (_, start, stamp, view) = node.listing.take().unwrap();
+            let (_, start, date, view) = node.listing.take().unwrap();
             if ok {
-                node.answered(start, stamp, now);
+                if let Some(date) = date {
+                    node.answered(start, date, now);
+                }
                 node.listed = Some(start);
                 node.view = view;
             }
@@ -388,7 +418,7 @@ impl Sim {
             }
             let delay = if send.to == from {
                 0
-            } else if self.rng.chance(50) {
+            } else if !self.prompt && self.rng.chance(50) {
                 100 + self.rng.below(3_000)
             } else {
                 1 + self.rng.below(100)
@@ -467,6 +497,10 @@ impl Sim {
         let alive: Vec<usize> = (0..self.nodes.len())
             .filter(|&i| self.nodes[i].alive)
             .collect();
+        // Every clock may be too far off to join.
+        if alive.is_empty() {
+            return;
+        }
         let i = alive[self.rng.below(alive.len() as u64) as usize];
         let key = KEYS[self.rng.below(KEYS.len() as u64) as usize];
         let roll = self.rng.below(10);
@@ -694,6 +728,7 @@ fn a_write_invalidates_every_near_copy() {
     let mut sim = Sim::new(1, 3);
     // Past `QUIET`, where no message is lost.
     sim.quiet(QUIET);
+    sim.prompt = true;
     let home = sim.nodes[0].cache.home_of("a").unwrap().to_owned();
     let w = sim.nodes.iter().position(|n| n.id != home).unwrap();
     assert_eq!(sim.op(w, Kind::Put(7), "a"), Done::Put(Some(true)));
@@ -840,7 +875,7 @@ fn replay_seed() {
     sim.run(at);
     for n in &sim.nodes {
         eprintln!(
-            "{} alive={} skew={} estimate={} now={} registered={:?} \
+            "{} alive={} skew={} estimate={:?} now={} registered={:?} \
              until={:?} listed={:?} view={:?} record={:?} cut={:?}",
             n.id,
             n.alive,

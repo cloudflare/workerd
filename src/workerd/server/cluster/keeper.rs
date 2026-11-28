@@ -134,10 +134,18 @@ impl Keeper {
         self.lease.try_borrow().is_ok_and(|lease| lease.left)
     }
 
-    /// How far this node's wall clock is outside the bucket's, in ms; 0
-    /// before any response.
-    fn clock_skew_ms(&self) -> i64 {
-        self.bucket.clock_skew_ms().unwrap_or(0)
+    /// How far this node's wall clock may be off from the bucket's
+    /// (`Client::clock_skew_ms`); `None` before an answer with a date.
+    fn clock_skew_ms(&self) -> Option<u64> {
+        self.bucket.clock_skew_ms()
+    }
+
+    fn before_renew(&self) -> Step {
+        let observed = lease::Observed {
+            now_ms: now_ms(),
+            skew_ms: self.clock_skew_ms(),
+        };
+        self.lease.borrow().before_renew(&observed)
     }
 
     /// Reports a renewal's outcome to the lease, and a new expiry to
@@ -167,11 +175,13 @@ impl Keeper {
             if self.lease.borrow().left {
                 std::future::pending::<()>().await;
             }
-            let observed = lease::Observed {
-                now_ms: now_ms(),
-                skew_ms: self.clock_skew_ms(),
-            };
-            let mut step = self.lease.borrow().before_renew(&observed);
+            let mut step = self.before_renew();
+            if step == Step::Measure {
+                step = match self.know_clock(timing.lease_ms / 10, 0).await {
+                    Ok(()) => self.before_renew(),
+                    Err(e) => Step::Fence(e.to_string()),
+                };
+            }
             if step == Step::Renew {
                 let renew = timeout(ms(timing.renew_timeout_ms), self.renew_round());
                 let result = match renew.await {
@@ -193,6 +203,8 @@ impl Keeper {
                     timing.retry_ms
                 }
                 Step::Renew => timing.interval_ms,
+                // The clock failed again as soon as it passed.
+                Step::Measure => timing.retry_ms,
             };
             // After the lease: a round that a stop of the whole process
             // delayed finds the lease lapsed, and says so.
@@ -221,11 +233,47 @@ impl Keeper {
     }
 
     /// Renews the lease outside the maintenance rounds, whether or not it
-    /// lapsed: as the node joins, before the rounds start.
+    /// lapsed: as the node joins, before the rounds start, once it knows
+    /// its clock.
     pub async fn take_lease(&self) -> Result<()> {
+        // With a lease's drift to spare: a node that joined just within the
+        // bound would fail at its first round.
+        let timing = self.held.timing;
+        self.know_clock(timing.lease_ms, timing.lease_ms / 100)
+            .await?;
         let until = self.registry.renew(now_ms()).await?;
         self.renewed(Ok(until));
         Ok(())
+    }
+
+    /// Reads this node's record until the bucket's dates bound its clock to
+    /// within `max_skew_ms` of the bucket's (`Lease::clock`) with `spare_ms`
+    /// to spare, as peers judge its lease by their own: each answer comes at
+    /// another point of the bucket's second. Fails after `for_ms`.
+    async fn know_clock(&self, for_ms: u64, spare_ms: u64) -> Result<()> {
+        let timing = self.held.timing;
+        let deadline = tokio::time::Instant::now() + ms(for_ms);
+        let mut next = tokio::time::Instant::now();
+        let mut failed = None;
+        loop {
+            let skew_ms = self.clock_skew_ms().map(|ms| ms + spare_ms);
+            let known = self.lease.borrow().clock(skew_ms);
+            match known {
+                Ok(()) => return Ok(()),
+                // The bucket's fault, if its last read failed.
+                Err(e) if tokio::time::Instant::now() >= deadline => {
+                    return Err(failed.unwrap_or(Error::Clock(e)));
+                }
+                Err(_) => {}
+            }
+            tokio::time::sleep_until(next).await;
+            next = tokio::time::Instant::now() + ms(timing.retry_ms / 4);
+            let read = self.registry.recorded(self.registry.node());
+            failed = match timeout(ms(timing.renew_attempt_ms), read).await {
+                Ok(read) => read.err(),
+                Err(_) => Some(Error::Http("reading this node's record timed out".into())),
+            };
+        }
     }
 
     /// The record says that this instance drains from its next renewal.

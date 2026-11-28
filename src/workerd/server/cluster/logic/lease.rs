@@ -11,7 +11,8 @@
 //! waits on the bucket alone, never on the server's event loop.
 
 /// A lease's times, in ms. Each is sized against the others, so a test
-/// that waits out leases divides them all by one number (`divided`).
+/// that waits out leases divides them, all but `max_skew_ms`, by one number
+/// (`divided`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Timing {
     /// A node's lease. A peer whose record has not been renewed for a full
@@ -61,8 +62,14 @@ pub struct Timing {
     /// version that is still current: a write of ours to it is in
     /// progress. R2 refuses more than about one write a second to one key.
     pub contended_pause_ms: u64,
-    /// Peers judge this node's lease by their own clocks; one off from the
-    /// bucket's clock by more than this exits.
+    /// The owner stops serving this long before its lease expires: peers
+    /// judge it by their own clocks, each within `max_skew_ms` of the
+    /// bucket's, so twice that. A test's nodes share one clock.
+    pub safety_ms: u64,
+    /// A node whose clock may be off from the bucket's by more than this
+    /// (`Skew`) does not join, or reads the bucket's dates again and exits
+    /// if they do not narrow it (`Step::Measure`). Clocks run at their own
+    /// pace in tests too: `divided` keeps it.
     pub max_skew_ms: u64,
     /// A node whose event loop makes no progress for this long fences
     /// (`watchdog`). The lease is kept on a thread of its own, so a turn of
@@ -84,14 +91,15 @@ impl Timing {
         renew_attempt_ms: 1_500,
         list_attempt_ms: 1_000,
         contended_pause_ms: 1_000,
+        safety_ms: 4_000,
         max_skew_ms: 2_000,
         stall_ms: 60_000,
     };
 
-    /// `DEFAULT` with every time divided by `divisor`: for tests, which
-    /// would otherwise wait out a full lease. `None` if `divisor` is 0 or
-    /// rounds a time down to 0. A bucket that stalls for longer than the
-    /// shortened bounds fences every node.
+    /// `DEFAULT` with every time but `max_skew_ms` divided by `divisor`: for
+    /// tests, which would otherwise wait out a full lease. `None` if
+    /// `divisor` is 0 or rounds a time down to 0. A bucket that stalls for
+    /// longer than the shortened bounds fences every node.
     #[must_use]
     pub fn divided(divisor: u64) -> Option<Self> {
         let t = Self::DEFAULT;
@@ -104,10 +112,17 @@ impl Timing {
             renew_attempt_ms: t.renew_attempt_ms / divisor,
             list_attempt_ms: t.list_attempt_ms / divisor,
             contended_pause_ms: t.contended_pause_ms / divisor,
-            max_skew_ms: t.max_skew_ms / divisor,
+            safety_ms: t.safety_ms / divisor,
+            max_skew_ms: t.max_skew_ms,
             stall_ms: t.stall_ms / divisor,
         };
         (!divided.times().contains(&0)).then_some(divided)
+    }
+
+    /// The longest from one round's start to the next's.
+    #[must_use]
+    pub const fn round_ms(self) -> u64 {
+        self.renew_timeout_ms + self.interval_ms
     }
 
     const fn times(self) -> [u64; 10] {
@@ -120,37 +135,30 @@ impl Timing {
             self.renew_attempt_ms,
             self.list_attempt_ms,
             self.contended_pause_ms,
-            self.max_skew_ms,
+            self.safety_ms,
             self.stall_ms,
         ]
-    }
-
-    /// Peers judge a lease by their own clocks, each within `max_skew_ms`
-    /// of the bucket's, so the owner stops serving this long before it
-    /// expires.
-    const fn safety_ms(&self) -> u64 {
-        2 * self.max_skew_ms
     }
 
     /// Whether a lease that expires at `until_ms` holds at `now_ms`, with
     /// peers' clocks allowed for.
     #[must_use]
     pub const fn holds(&self, until_ms: u64, now_ms: u64) -> bool {
-        now_ms + self.safety_ms() < until_ms
+        now_ms + self.safety_ms < until_ms
     }
 
     /// How much longer than `now_ms` a lease that expires at `until_ms`
     /// holds (`holds`), in ms: 0 once it does not.
     #[must_use]
     pub const fn remaining_ms(&self, until_ms: u64, now_ms: u64) -> u64 {
-        until_ms.saturating_sub(now_ms + self.safety_ms())
+        until_ms.saturating_sub(now_ms + self.safety_ms)
     }
 
     /// When peers, by clocks up to `safety_ms` ahead, may judge a lease that
     /// expires at `until_ms` expired: it `holds` before.
     #[must_use]
     pub const fn holds_until(&self, until_ms: u64) -> u64 {
-        until_ms.saturating_sub(self.safety_ms())
+        until_ms.saturating_sub(self.safety_ms)
     }
 }
 
@@ -163,8 +171,78 @@ impl Default for Timing {
 /// What the executor observed before a round's renewal.
 pub struct Observed {
     pub now_ms: u64,
-    /// This node's clock less the bucket's.
-    pub skew_ms: i64,
+    /// How far this node's clock may be off from the bucket's
+    /// (`Skew::most_ms`); `None` before an answer with a date.
+    pub skew_ms: Option<u64>,
+}
+
+/// What this node's clock less the bucket's may be, from the `Date` of the
+/// bucket's answers.
+///
+/// Each answer bounds it to a window over a second wide. The windows are
+/// kept on a monotonic clock that NTP neither steps nor slews, so a step or
+/// slew of the wall clock shows at once; each is widened by how far the
+/// clocks may have drifted apart since, so answers at different points of
+/// the bucket's second narrow it. An answer that fits none of them starts
+/// over.
+///
+/// The windows assume one steady bucket clock. A step of the bucket's that
+/// leaves its answers overlapping the window, or front ends whose clocks
+/// differ by more than its width, can leave the far end short by up to
+/// that width, about a second, until an answer falls outside it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Skew {
+    /// The monotonic clock less the bucket's.
+    lo: i64,
+    hi: i64,
+    /// When, by the monotonic clock.
+    at: i64,
+}
+
+impl Skew {
+    /// `known`, with an answer dated `date`, the start of one of the
+    /// bucket's whole seconds, to a request sent at `sent` and answered at
+    /// `received` by the monotonic clock.
+    #[must_use]
+    pub fn answered(known: Option<Self>, sent: i64, received: i64, date: i64) -> Self {
+        // The bucket stamped the header between the send and the answer.
+        let new = Self {
+            lo: sent - date - 1000,
+            hi: received - date,
+            at: sent,
+        }
+        .widened(received);
+        match known.map(|k| k.widened(received)) {
+            Some(k) if k.lo.max(new.lo) <= k.hi.min(new.hi) => Self {
+                lo: k.lo.max(new.lo),
+                hi: k.hi.min(new.hi),
+                at: received,
+            },
+            _ => new,
+        }
+    }
+
+    /// How far the clock may be off when it reads `wall`, between `before`
+    /// and `after` by the monotonic clock.
+    #[must_use]
+    pub fn most_ms(self, before: i64, after: i64, wall: i64) -> u64 {
+        let k = self.widened(after);
+        (k.lo + wall - after)
+            .unsigned_abs()
+            .max((k.hi + wall - before).unsigned_abs())
+    }
+
+    /// The monotonic clock, unslewed, gains or loses on the bucket's at its
+    /// oscillator's rate, within 1% of its own time, 10 ms a second.
+    fn widened(self, at: i64) -> Self {
+        // In whole ms, rounded up.
+        let drift = (at - self.at + 99).max(0) / 100;
+        Self {
+            lo: self.lo - drift,
+            hi: self.hi + drift,
+            at,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -175,6 +253,9 @@ pub enum Step {
     Fence(String),
     /// Try again after `retry_ms`; the lease still holds.
     Retry(String),
+    /// Read the bucket until its dates narrow the clock's window enough,
+    /// for up to a tenth of a lease, then ask again; fence if they do not.
+    Measure,
 }
 
 #[derive(Default)]
@@ -195,9 +276,31 @@ impl Lease {
         }
     }
 
+    /// Whether this node knows its clock to within `max_skew_ms` of the
+    /// bucket's, as it must to hold a lease: `skew_ms` as `Observed` has it.
+    /// It checks again within a round, its clock drifting 1% of that
+    /// (`Skew`).
+    pub fn clock(&self, skew_ms: Option<u64>) -> Result<(), String> {
+        match skew_ms {
+            Some(ms) if ms + self.timing.round_ms() / 100 <= self.timing.max_skew_ms => Ok(()),
+            Some(ms) => Err(format!("clock may be off from the bucket's by {ms} ms")),
+            None => Err("the bucket has answered with no date".into()),
+        }
+    }
+
     pub fn before_renew(&self, o: &Observed) -> Step {
-        if o.skew_ms.unsigned_abs() > self.timing.max_skew_ms {
-            return Step::Fence(format!("clock off from the bucket's by {} ms", o.skew_ms));
+        if let Err(e) = self.clock(o.skew_ms) {
+            // A window that started over is one answer's, a second wide
+            // (`Skew`): a clock well within the bound may fail until reads at
+            // other points of the bucket's second narrow it. Read them while
+            // the lease holds a round past the far end, so that a clock
+            // behind by that much still fences before peers take over.
+            let past = |ms| self.holds(o.now_ms + self.timing.round_ms() + ms);
+            return if o.skew_ms.is_some_and(past) {
+                Step::Measure
+            } else {
+                Step::Fence(e)
+            };
         }
         // A node stalled past its lease (a paused process, a lease thread
         // that got no time) may have been taken over: it must not renew
