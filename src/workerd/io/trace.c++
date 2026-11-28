@@ -2171,13 +2171,24 @@ SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
     : spanId(reader.getSpanId()),
       parentSpanId(reader.getParentSpanId()),
       operationName(kj::str(reader.getOperationName())),
-      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {}
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
+      traceId(reader.getTraceIdLow(), reader.getTraceIdHigh()) {
+  auto flags = reader.getTraceFlags();
+  if (flags.isSet()) {
+    traceFlags = TraceFlags(flags.getSet());
+  }
+}
 
 void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
   builder.setOperationName(operationName.asPtr());
   builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSpanId(spanId);
   builder.setParentSpanId(parentSpanId);
+  builder.setTraceIdLow(traceId.getLow());
+  builder.setTraceIdHigh(traceId.getHigh());
+  KJ_IF_SOME(flags, traceFlags) {
+    builder.getTraceFlags().setSet(flags);
+  }
 }
 
 SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)

@@ -320,6 +320,40 @@ fn a_full_batch_is_handed_out() {
 }
 
 #[test]
+fn a_record_can_be_in_another_trace() {
+    let mut buffer = buffer();
+    let in_other_trace = || ActiveSpan {
+        id: SPAN,
+        trace: Some(Trace {
+            id: vec![9; 16],
+            flags: 0,
+        }),
+    };
+    assert!(
+        buffer
+            .add_log(in_other_trace(), T0, Level::Log, "[]", false, Vec::new())
+            .is_none()
+    );
+    buffer.add_exception(
+        in_other_trace(),
+        T0,
+        "Error".to_owned(),
+        "boom".to_owned(),
+        None,
+    );
+    buffer.add_log(SPAN, T0, Level::Log, "[]", false, Vec::new());
+    let records = decode(&buffer.flush().unwrap());
+    assert_eq!(records.len(), 3);
+    for record in &records[..2] {
+        assert_eq!(record.trace_id, vec![9; 16]);
+        assert_eq!(record.flags, 0);
+        assert_eq!(record.span_id, SPAN.to_be_bytes().to_vec());
+    }
+    assert_eq!(records[2].trace_id, (1..=16).collect::<Vec<u8>>());
+    assert_eq!(records[2].flags, 1);
+}
+
+#[test]
 fn timestamps_can_be_omitted() {
     let mut buffer = LogBuffer::new(
         Options {

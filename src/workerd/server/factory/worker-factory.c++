@@ -457,7 +457,9 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
     });
   }
 
-  bool submitSpanOpen(tracing::SpanId spanId,
+  bool submitSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override {
@@ -466,7 +468,8 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
       if (isPredictableModeForTest()) {
         startTime = kj::UNIX_EPOCH;
       }
-      tracer.addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+      tracer.addSpanOpen(
+          kj::mv(traceId), traceFlags, spanId, parentSpanId, kj::mv(operationName), startTime);
       submitted = true;
     });
     return submitted;
@@ -477,6 +480,10 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
       return tracing::SpanId(nextSpanId++);
     }
     return tracing::SpanId::fromEntropy(entropySource);
+  }
+
+  tracing::TraceId makeRootTraceId() override {
+    return tracing::TraceId::fromEntropy(entropySource);
   }
 
  private:
@@ -1026,13 +1033,8 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     })));
   }
   auto& threadContext = worker.factory.getImpl().threadContext;
-  tracer->setMakeUserRequestSpanFunc(
-      [&tracerRef = *tracer, &entropySource = threadContext.getEntropySource()](
-          tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
-    return SpanParent(kj::rc<UserSpanObserver>(
-        kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource),
-        kj::mv(traceId), traceFlags));
-  });
+  tracer->setUserSpanSubmitter(kj::refcounted<SequentialSpanSubmitter>(
+      tracer->getWeakRef(), threadContext.getEntropySource()));
 
   // The invocation's span, under which its user spans are exported, takes the invocation's ids.
   KJ_IF_SOME(exporter, otlpExporter) {

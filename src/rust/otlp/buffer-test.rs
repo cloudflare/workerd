@@ -80,11 +80,11 @@ fn spans_are_batched_until_the_root_closes() {
     defaults.push("faas.trigger", "not-applied");
     let mut buffer = buffer_with(false, defaults);
 
-    assert!(buffer.open(ROOT, 0x20, "GET".to_owned(), T0));
-    assert!(buffer.open(1, ROOT, "fetch".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0x20, "GET".to_owned(), T0, None));
+    assert!(buffer.open(1, ROOT, "fetch".to_owned(), T0, None));
     // An id that is already open is refused rather than clobbering the open span.
-    assert!(!buffer.open(1, ROOT, "other".to_owned(), T0));
-    assert!(buffer.open(3, ROOT, "my-span".to_owned(), T0));
+    assert!(!buffer.open(1, ROOT, "other".to_owned(), T0, None));
+    assert!(buffer.open(3, ROOT, "my-span".to_owned(), T0, None));
     buffer.set_name(3, "renamed".to_owned());
     buffer.set_status(3, StatusCode::Error, "boom".to_owned());
     buffer.add_exception(3, T0 + 5, "TypeError".to_owned(), "boom".to_owned(), None);
@@ -170,7 +170,7 @@ fn spans_are_batched_until_the_root_closes() {
     );
 
     // A span closing after the root is handed out as soon as it closes.
-    assert!(buffer.open(4, ROOT, "late".to_owned(), T0));
+    assert!(buffer.open(4, ROOT, "late".to_owned(), T0, None));
     let batch = buffer.close(4, T0, Attributes::default()).unwrap();
     assert_eq!(spans(&decode(&batch))[0].name, "late");
     assert!(buffer.finish(T0).is_none());
@@ -180,17 +180,17 @@ fn spans_are_batched_until_the_root_closes() {
 fn a_full_batch_is_handed_out_and_open_spans_are_capped() {
     let mut buffer = buffer();
     for id in 1..MAX_BATCH_SPANS as u64 {
-        assert!(buffer.open(id, ROOT, "s".to_owned(), T0));
+        assert!(buffer.open(id, ROOT, "s".to_owned(), T0, None));
         assert!(buffer.close(id, T0, Attributes::default()).is_none());
     }
-    assert!(buffer.open(1, ROOT, "s".to_owned(), T0));
+    assert!(buffer.open(1, ROOT, "s".to_owned(), T0, None));
     let batch = buffer.close(1, T0, Attributes::default()).unwrap();
     assert_eq!(batch.span_count, MAX_BATCH_SPANS);
 
     for id in 1..=MAX_OPEN_SPANS as u64 {
-        assert!(buffer.open(id, ROOT, "s".to_owned(), T0));
+        assert!(buffer.open(id, ROOT, "s".to_owned(), T0, None));
     }
-    assert!(!buffer.open(MAX_OPEN_SPANS as u64 + 1, ROOT, "s".to_owned(), T0));
+    assert!(!buffer.open(MAX_OPEN_SPANS as u64 + 1, ROOT, "s".to_owned(), T0, None));
 
     // Spans still open at the end are closed then, flagged, in the order they were opened.
     let batch = buffer.finish(T0 - 1).unwrap();
@@ -209,16 +209,37 @@ fn a_full_batch_is_handed_out_and_open_spans_are_capped() {
 }
 
 #[test]
+fn a_span_can_be_in_another_trace() {
+    let mut buffer = buffer();
+    let other = Trace {
+        id: vec![9; 16],
+        flags: 0,
+    };
+    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0, None));
+    assert!(buffer.open(1, 0x77, "remote-child".to_owned(), T0, Some(other)));
+    assert!(buffer.close(1, T0, Attributes::default()).is_none());
+    let request = decode(&buffer.close(ROOT, T0, Attributes::default()).unwrap());
+
+    let remote = named(&request, "remote-child");
+    assert_eq!(remote.trace_id, vec![9; 16]);
+    assert_eq!(remote.flags, 0);
+    assert_eq!(remote.parent_span_id, 0x77_u64.to_be_bytes().to_vec());
+    let root = named(&request, "GET");
+    assert_eq!(root.trace_id, (1..=16).collect::<Vec<u8>>());
+    assert_eq!(root.flags, 1);
+}
+
+#[test]
 fn a_batch_is_handed_out_once_it_is_large() {
     let mut buffer = buffer();
     let big = "x".repeat(MAX_BATCH_BYTES / 2);
-    assert!(buffer.open(1, ROOT, "s".to_owned(), T0));
+    assert!(buffer.open(1, ROOT, "s".to_owned(), T0, None));
     assert!(
         buffer
             .close(1, T0, attributes(&[("big", string(&big))]))
             .is_none()
     );
-    assert!(buffer.open(2, ROOT, "s".to_owned(), T0));
+    assert!(buffer.open(2, ROOT, "s".to_owned(), T0, None));
     let batch = buffer
         .close(2, T0, attributes(&[("big", string(&big))]))
         .unwrap();
@@ -228,9 +249,9 @@ fn a_batch_is_handed_out_once_it_is_large() {
 #[test]
 fn kind_status_and_url_rules_apply_at_close() {
     let mut buffer = buffer();
-    assert!(buffer.open(ROOT, 0, "scheduled".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "scheduled".to_owned(), T0, None));
     for (id, name) in [(1, "fetch"), (3, "queue_send"), (6, "fetch")] {
-        assert!(buffer.open(id, ROOT, name.to_owned(), T0));
+        assert!(buffer.open(id, ROOT, name.to_owned(), T0, None));
     }
 
     // A 4xx child becomes an error with error.type; its URL is split into parts.
@@ -315,7 +336,7 @@ fn kind_status_and_url_rules_apply_at_close() {
 #[test]
 fn unset_does_not_clear_an_explicit_error() {
     let mut buffer = buffer();
-    assert!(buffer.open(ROOT, 0, "mine".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "mine".to_owned(), T0, None));
     buffer.set_status(ROOT, StatusCode::Error, "first error".to_owned());
     buffer.set_status(ROOT, StatusCode::Error, "second error".to_owned());
     buffer.set_status(ROOT, StatusCode::Unset, String::new());
@@ -330,9 +351,9 @@ fn unset_does_not_clear_an_explicit_error() {
 #[test]
 fn ok_is_final_for_explicit_status_updates() {
     let mut buffer = buffer();
-    assert!(buffer.open(ROOT, 0, "root".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "root".to_owned(), T0, None));
     for (id, code) in [(1, StatusCode::Error), (2, StatusCode::Unset)] {
-        assert!(buffer.open(id, ROOT, format!("after-ok-{id}"), T0));
+        assert!(buffer.open(id, ROOT, format!("after-ok-{id}"), T0, None));
         buffer.set_status(id, StatusCode::Error, "temporary error".to_owned());
         buffer.set_status(id, StatusCode::Ok, String::new());
         buffer.set_status(id, code, "ignored".to_owned());
@@ -351,9 +372,9 @@ fn ok_is_final_for_explicit_status_updates() {
 #[test]
 fn explicit_error_messages_take_precedence_over_recorded_exceptions() {
     let mut buffer = buffer();
-    assert!(buffer.open(ROOT, 0, "root".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "root".to_owned(), T0, None));
     for (id, exception_first) in [(1, false), (2, true)] {
-        assert!(buffer.open(id, ROOT, format!("explicit-error-{id}"), T0));
+        assert!(buffer.open(id, ROOT, format!("explicit-error-{id}"), T0, None));
         if !exception_first {
             buffer.set_status(id, StatusCode::Error, "user description".to_owned());
         }
@@ -390,9 +411,9 @@ fn explicit_error_messages_take_precedence_over_recorded_exceptions() {
 #[test]
 fn a_status_the_worker_set_and_exceptions_come_before_derived_errors() {
     let mut buffer = buffer_with(true, Attributes::default());
-    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
-    assert!(buffer.open(1, ROOT, "mine".to_owned(), T0));
-    assert!(buffer.open(2, ROOT, "unset".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0, None));
+    assert!(buffer.open(1, ROOT, "mine".to_owned(), T0, None));
+    assert!(buffer.open(2, ROOT, "unset".to_owned(), T0, None));
     buffer.set_status(1, StatusCode::Ok, String::new());
     buffer.set_status(2, StatusCode::Unset, String::new());
     let failed = attributes(&[("http.response.status_code", Value::Int(503))]);
@@ -463,7 +484,7 @@ fn a_buffer_that_exports_no_spans_still_keeps_its_root() {
         resource,
         Attributes::default(),
     );
-    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0, None));
     let closed = attributes(&[
         ("url.full", string("https://example.com/a?b=1")),
         ("cloudflare.outcome", string("exception")),
@@ -501,7 +522,7 @@ fn timestamps_can_be_omitted() {
         Attributes::default(),
         Attributes::default(),
     );
-    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0, None));
     buffer.add_exception(ROOT, T0, "Error".to_owned(), "boom".to_owned(), None);
     let batch = buffer.close(ROOT, T0 + 1, Attributes::default()).unwrap();
     let request = decode(&batch);

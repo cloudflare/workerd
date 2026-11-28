@@ -17,13 +17,22 @@ const MAX_BATCH_BYTES: usize = 1 << 20;
 /// Spans awaiting their close; further opens are refused once this many are buffered.
 const MAX_OPEN_SPANS: usize = 1024;
 
+/// The trace of a span or log record outside the invocation's trace.
+#[derive(Clone)]
+pub struct Trace {
+    /// The 16-byte trace id.
+    pub id: Vec<u8>,
+    /// The W3C trace flags, zero when the trace carries none.
+    pub flags: u32,
+}
+
 /// What is fixed for one invocation's spans.
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent per-invocation switches, not states of one thing"
 )]
 pub struct Options {
-    /// The 16-byte trace id every span shares.
+    /// The 16-byte id of the invocation's trace, which spans are in unless they say otherwise.
     pub trace_id: Vec<u8>,
     /// The W3C trace flags, zero when the trace carries none.
     pub trace_flags: u32,
@@ -47,6 +56,8 @@ pub struct Batch {
 }
 
 struct OpenSpan {
+    /// None for a span in the invocation's trace.
+    trace: Option<Trace>,
     parent_span_id: u64,
     name: String,
     start: i64,
@@ -56,7 +67,8 @@ struct OpenSpan {
     last_exception_message: Option<String>,
 }
 
-/// One invocation's spans on their way to an OTLP collector.
+/// One invocation's spans on their way to an OTLP collector. Most are in the invocation's trace,
+/// but a span can be in another, such as a child of a span created elsewhere.
 ///
 /// A span is buffered from its open until its close, which is when its attributes arrive and its
 /// OTLP form is decided (see [`rules`]). Closed spans collect into a batch that is handed out as an
@@ -104,9 +116,16 @@ impl SpanBuffer {
         self.root.take()
     }
 
-    /// Starts buffering a span. Returns false, leaving the buffer unchanged, when the id is already
-    /// open or too many spans are.
-    pub fn open(&mut self, span_id: u64, parent_span_id: u64, name: String, start: i64) -> bool {
+    /// Starts buffering a span, in `trace` or else in the invocation's trace. Returns false,
+    /// leaving the buffer unchanged, when the id is already open or too many spans are.
+    pub fn open(
+        &mut self,
+        span_id: u64,
+        parent_span_id: u64,
+        name: String,
+        start: i64,
+        trace: Option<Trace>,
+    ) -> bool {
         if self.open.len() >= MAX_OPEN_SPANS || self.open.contains_key(&span_id) {
             return false;
         }
@@ -114,6 +133,7 @@ impl SpanBuffer {
         self.open.insert(
             span_id,
             OpenSpan {
+                trace,
                 parent_span_id,
                 name,
                 start,
@@ -232,8 +252,12 @@ impl SpanBuffer {
             0 => Vec::new(),
             id => id.to_be_bytes().to_vec(),
         };
+        let (trace_id, flags) = match span.trace {
+            Some(trace) => (trace.id, trace.flags),
+            None => (self.options.trace_id.clone(), self.options.trace_flags),
+        };
         let out = proto::Span {
-            trace_id: self.options.trace_id.clone(),
+            trace_id,
             span_id: span_id.to_be_bytes().to_vec(),
             parent_span_id,
             name: span.name,
@@ -244,7 +268,7 @@ impl SpanBuffer {
             attributes,
             events: span.events,
             status,
-            flags: self.options.trace_flags,
+            flags,
         };
         let keep = is_root && self.options.keep_root;
         if is_root {
