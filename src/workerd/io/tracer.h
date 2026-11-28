@@ -16,6 +16,7 @@ namespace tracing {
 class TailStreamWriter;
 }  // namespace tracing
 
+class SpanSubmitter;
 class WorkerTracer;
 
 // Takes the logs and exceptions of an invocation whose span is exported, along with its spans (see
@@ -69,9 +70,8 @@ struct StartedInvocationSpan {
 // there will be plenty of cleanup potential.
 class BaseTracer: public kj::Refcounted {
  public:
-  virtual ~BaseTracer() noexcept(false) {
-    selfRef->invalidate();
-  };
+  BaseTracer();
+  virtual ~BaseTracer() noexcept(false);
 
   kj::Rc<BaseTracer> clone() {
     return addRefToThis();
@@ -147,15 +147,20 @@ class BaseTracer: public kj::Refcounted {
   // be available afterwards.
   virtual void recordTimestamp(kj::Date timestamp) = 0;
 
-  SpanParent makeUserRequestSpan(
-      tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags);
+  // Returns the invocation's root user span, adopting the invocation's onset span identified by
+  // `context`.
+  SpanParent makeUserRequestSpan(const tracing::InvocationSpanContext& context);
 
-  using MakeUserRequestSpanFunc =
-      kj::Function<SpanParent(tracing::TraceId, kj::Maybe<tracing::TraceFlags>)>;
+  // Installs the submitter for user spans reported under this tracer. May only be called once.
+  // Submitter implementations should hold a BaseTracer::WeakRef rather than a strong reference so
+  // they do not form a reference cycle with this tracer.
+  void setUserSpanSubmitter(kj::Own<SpanSubmitter> submitter);
 
-  // Allow setting the user request span after the tracer has been created so its observer can
-  // reference the tracer. This can only be set once.
-  void setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func);
+  // Whether this tracer records user spans, either via an exported invocation span or a user span
+  // submitter.
+  bool observesUserSpans() const {
+    return (invocationSpan.isObserved() && invocationExportsSpans) || userSpanSubmitter != kj::none;
+  }
 
   // Has the tracer record the invocation's own span, opened by `func` when the event is set, and
   // makes it the root that makeUserRequestSpan() returns. `func` is given the invocation's span
@@ -186,8 +191,7 @@ class BaseTracer: public kj::Refcounted {
   // helper method for addSpanEnd() implementations
   void adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> maybeStartTime);
 
-  // Function to create the root span for the new tracing format.
-  kj::Maybe<MakeUserRequestSpanFunc> makeUserRequestSpanFunc;
+  kj::Maybe<kj::Own<SpanSubmitter>> userSpanSubmitter;
 
   // For implementations: record on invocationSpan, when the tracer records it, what the invocation
   // reports about itself. startInvocationSpan() opens it from setEventInfo() and names it after
@@ -394,25 +398,31 @@ class SpanSubmitter: public kj::Refcounted {
 // The user tracing observer
 class UserSpanObserver final: public SpanObserver {
  public:
-  // constructor for top-level observer
-  UserSpanObserver(kj::Own<SpanSubmitter> submitter)
-      : submitter(kj::mv(submitter)),
-        spanId(tracing::SpanId::nullId),
-        parentSpanId(tracing::SpanId::nullId),
-        traceId(nullptr) {}
-  // constructor for top-level observer with trace ID and optional trace flags. `spanId` is set
-  // when the top-level span is itself recorded by the submitter, as an exported invocation span is
-  // (see startExportedUserSpan()); `parentSpanId` is then its caller's span, if any.
-  UserSpanObserver(kj::Own<SpanSubmitter> submitter,
-      tracing::TraceId traceId,
-      kj::Maybe<tracing::TraceFlags> traceFlags = kj::none,
-      tracing::SpanId spanId = tracing::SpanId::nullId,
-      tracing::SpanId parentSpanId = tracing::SpanId::nullId)
+  // Returns an observer for a root span the submitter records itself (see
+  // startExportedUserSpan()), with its own `spanId` and `parentContext`'s trace and optional
+  // parent span.
+  static kj::Rc<UserSpanObserver> forOpenedRoot(kj::Own<SpanSubmitter> submitter,
+      const tracing::SpanContext& parentContext,
+      tracing::SpanId spanId);
+  // constructor for forOpenedRoot()
+  UserSpanObserver(kj::Badge<UserSpanObserver>,
+      kj::Own<SpanSubmitter> submitter,
+      const tracing::SpanContext& parentContext,
+      tracing::SpanId spanId)
       : submitter(kj::mv(submitter)),
         spanId(spanId),
-        parentSpanId(parentSpanId),
-        traceId(kj::mv(traceId)),
-        traceFlags(traceFlags) {}
+        parentSpanId(parentContext.getSpanId().orDefault(tracing::SpanId::nullId)),
+        traceId(parentContext.getTraceId()),
+        traceFlags(parentContext.getTraceFlags()) {}
+  // constructor for a top-level observer standing in for the span `context` identifies, such as
+  // the invocation's onset span. It is never opened; its children are that span's children, in its
+  // trace.
+  UserSpanObserver(kj::Own<SpanSubmitter> submitter, const tracing::SpanContext& context)
+      : submitter(kj::mv(submitter)),
+        spanId(context.getSpanId().orDefault(tracing::SpanId::nullId)),
+        parentSpanId(tracing::SpanId::nullId),
+        traceId(context.getTraceId()),
+        traceFlags(context.getTraceFlags()) {}
   // constructor for subsequent observers attached to a span. `fromUserCode` is true for
   // spans created directly via `ctx.tracing.enterSpan`; this routes onOpen() through
   // submitUserSpanOpen() so submitters can apply different policies than for runtime spans.
